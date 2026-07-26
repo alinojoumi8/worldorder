@@ -169,6 +169,34 @@ AGENT_MOVED = register_kind(
     persistence=Persistence.PERSISTED,
     schema=_schema("agent_id", "from_place", "to_place"),
 )
+JOURNEY_STARTED = register_kind(
+    3002,
+    "JOURNEY_STARTED",
+    owner="polis.world",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "from_place", "to_place", "travel_ticks"),
+)
+MOVE_BLOCKED = register_kind(
+    3005,
+    "MOVE_BLOCKED",
+    owner="polis.world",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "place_id", "reason"),
+)
+WORLD_GENERATED = register_kind(
+    3100,
+    "WORLD_GENERATED",
+    owner="polis.world",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("world_hash", "width", "height", "districts", "places"),
+)
+PATHS_PRECOMPUTED = register_kind(
+    3101,
+    "PATHS_PRECOMPUTED",
+    owner="polis.world",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("world_hash", "pairs"),
+)
 PERCEPTION_BUILT = register_kind(
     4001,
     "PERCEPTION_BUILT",
@@ -252,6 +280,13 @@ SKILL_ACCRUED = register_kind(
     owner="polis.agents",
     persistence=Persistence.PERSISTED,
     schema=_schema("agent_id", "skill", "delta"),
+)
+METRIC_RECORDED = register_kind(
+    99071,
+    "METRIC_RECORDED",
+    owner="polis.research",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("metric", "value", "definition_hash"),
 )
 LIVE_TICK = register_kind(
     90050,

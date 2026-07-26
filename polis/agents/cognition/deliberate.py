@@ -68,7 +68,8 @@ def render_prompt(
         f"{recollections}\n"
         "## What you can do\n"
         f"{legal}\n"
-        "Choose one action and return the required JSON."
+        "## Decision\n"
+        "Choose one action and return the required structured response."
     )
 
 
