@@ -1,2 +1,1 @@
 """Persistence and projection repositories."""
-

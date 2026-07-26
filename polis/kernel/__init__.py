@@ -1,2 +1,1 @@
 """Deterministic tick kernel."""
-

@@ -1,2 +1,1 @@
 """Institutional economy (M2+)."""
-

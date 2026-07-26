@@ -37,6 +37,7 @@ dev = [
   "pytest-asyncio>=0.25",
   "pytest-cov>=6.0",
   "ruff>=0.9",
+  "types-jsonschema>=4.23",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -72,4 +73,3 @@ exclude = ["web/"]
 [[tool.mypy.overrides]]
 module = ["yaml", "redis.*"]
 ignore_missing_imports = true
-

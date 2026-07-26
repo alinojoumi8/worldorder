@@ -1,2 +1,1 @@
 """Read-only research Observatory."""
-
