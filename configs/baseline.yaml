@@ -29,7 +29,14 @@ llm:
       max_concurrency: 8
       structured_output: none
       billing: token
-    volume:
+    volume_text:
+      kind: ollama
+      base_url: https://ollama.com/v1
+      api_key_env: OLLAMA_API_KEY
+      max_concurrency: 8
+      structured_output: json_mode
+      billing: token
+    volume_embed:
       kind: ollama
       base_url: https://ollama.com/v1
       api_key_env: OLLAMA_API_KEY
@@ -52,8 +59,8 @@ llm:
   routing:
     DELIBERATE: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.8, template: deliberate/user.v1.jinja}
     REFLECT: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.9, template: reflect/questions.v1.jinja}
-    IMPORTANCE: {lane: volume, model: qwen3.5:cloud, temperature: 0.0, template: importance/user.v1.jinja}
-    EMBED: {lane: volume, model: embeddinggemma:cloud, temperature: 0.0, template: embedding/user.v1.jinja}
+    IMPORTANCE: {lane: volume_text, model: qwen3.5:cloud, temperature: 0.0, template: importance/user.v1.jinja}
+    EMBED: {lane: volume_embed, model: embeddinggemma:cloud, temperature: 0.0, template: embedding/user.v1.jinja}
   fallback_policy: permissive
   cache:
     mode: hybrid
@@ -91,4 +98,3 @@ observatory:
   enabled: true
   bind: 127.0.0.1:8080
   static_dir: web/dist
-

@@ -211,19 +211,26 @@ REFLECTION_PRODUCED = register_kind(
     persistence=Persistence.SAMPLED,
     schema=_schema("memory_id", "agent_id", "parent_memory_ids"),
 )
-LLM_CALL_COMPLETED = register_kind(
-    4101,
-    "LLM_CALL_COMPLETED",
+LANE_HEALTH_CHECKED = register_kind(
+    4100,
+    "LANE_HEALTH_CHECKED",
     owner="polis.llm",
     persistence=Persistence.PERSISTED,
-    schema=_schema("call_id", "purpose", "cache_hit"),
+    schema=_schema("lane", "model", "ok", "latency_ms"),
 )
 LLM_CALL_FAILED = register_kind(
-    4102,
+    4101,
     "LLM_CALL_FAILED",
     owner="polis.llm",
     persistence=Persistence.PERSISTED,
-    schema=_schema("call_id", "purpose", "reason"),
+    schema=_schema("purpose", "lane", "model", "error_class"),
+)
+BUDGET_EXHAUSTED = register_kind(
+    4102,
+    "BUDGET_EXHAUSTED",
+    owner="polis.llm",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("line", "cap", "tick"),
 )
 ACTION_VALIDATED = register_kind(
     4201,

@@ -1,0 +1,13 @@
+{# version: 1 #}
+Agent: {{ agent_id }}
+Tick: {{ tick }}
+Observation: {{ observation }}
+
+## What you can do
+{% for action in legal_actions %}- {{ action }}
+{% endfor %}
+
+Relevant memories:
+{% for memory in memories %}- {{ memory }}
+{% endfor %}
+
