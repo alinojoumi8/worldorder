@@ -1,7 +1,7 @@
 {
   ".codebase-memory/artifact.json": {
-    "mtime": 1785103969.5326374,
-    "ast_hash": "d1b23c884264f03ab5e58eaf3a615feb",
+    "mtime": 1785108716.975609,
+    "ast_hash": "0554d39299ee80b2f5973057153652e8",
     "semantic_hash": ""
   },
   ".impeccable/composition-options.json": {
@@ -235,8 +235,8 @@
     "semantic_hash": ""
   },
   "polis/config/mechanisms.py": {
-    "mtime": 1785093482.5587056,
-    "ast_hash": "015febef7919ffd82a2457bcf087254e",
+    "mtime": 1785106987.2854764,
+    "ast_hash": "23362e6c1ede6789469ac6657a3ab7af",
     "semantic_hash": ""
   },
   "polis/config/metric_catalogue.py": {
@@ -260,8 +260,8 @@
     "semantic_hash": ""
   },
   "polis/config/settings.py": {
-    "mtime": 1785102960.8973355,
-    "ast_hash": "d22c8ea47a548bbaa9a7ebf4288bda36",
+    "mtime": 1785106987.286477,
+    "ast_hash": "614c42095894bbc84f9c9f3885b249b0",
     "semantic_hash": ""
   },
   "polis/economy/__init__.py": {
@@ -880,7 +880,7 @@
     "semantic_hash": ""
   },
   "polis/economy/policy.py": {
-    "mtime": 1785103526.9632182,
+    "mtime": 1785104180.081745,
     "ast_hash": "687de8c4a288076e8fb57c7889405560",
     "semantic_hash": ""
   },
@@ -1280,7 +1280,7 @@
     "semantic_hash": ""
   },
   "polis/economy/exchange/engine.py": {
-    "mtime": 1785103526.9667373,
+    "mtime": 1785104180.0807467,
     "ast_hash": "6315813b8937dc3d90bf31be23241bb1",
     "semantic_hash": ""
   },
@@ -1290,18 +1290,18 @@
     "semantic_hash": ""
   },
   "polis/economy/venture_state.py": {
-    "mtime": 1785103526.9632182,
-    "ast_hash": "f1745fb39df11eb92a14fa0e5f2c4bf8",
+    "mtime": 1785105715.5433593,
+    "ast_hash": "a1963f7b14a866cba4bc2fefef67b659",
     "semantic_hash": ""
   },
   "polis/economy/ventures.py": {
-    "mtime": 1785103765.075541,
-    "ast_hash": "bf24ade382e3cebde698566212d32c52",
+    "mtime": 1785106987.288477,
+    "ast_hash": "abe9af23e2cb3d7c08b396cd7c038fb4",
     "semantic_hash": ""
   },
   "tests/integration/living_city/test_m3_capital.py": {
-    "mtime": 1785103850.0355363,
-    "ast_hash": "e11f9e1b04b8c0e1c3ca52fb1aa0c673",
+    "mtime": 1785106987.2894735,
+    "ast_hash": "d4fea6caf64f5bc38db7fc8ba3bed982",
     "semantic_hash": ""
   },
   "tests/integration/store/test_m3_resume.py": {
@@ -1320,23 +1320,73 @@
     "semantic_hash": ""
   },
   "tests/unit/economy/test_ventures.py": {
-    "mtime": 1785103784.957257,
-    "ast_hash": "4632e62edf893fc72728f75c757f7964",
+    "mtime": 1785106987.2910664,
+    "ast_hash": "7ae16974f3c3306e3dff2cdb3e6f7a88",
     "semantic_hash": ""
   },
   "configs/m3-smoke.yaml": {
-    "mtime": 1785102960.8704095,
-    "ast_hash": "f5fa965731bd64762cca7d2e9ced8ec1",
+    "mtime": 1785106987.2854764,
+    "ast_hash": "58e2e675d06124cf5610d6d978990228",
     "semantic_hash": ""
   },
   "artifacts/acceptance/m3-acceptance.json": {
-    "mtime": 1785103950.5285015,
-    "ast_hash": "94c3204a1a5f811ec2dcb9f07bf411b7",
+    "mtime": 1785108684.1003754,
+    "ast_hash": "583bb0406812db0c7a021f7c9ce87438",
     "semantic_hash": ""
   },
   "docs/acceptance/M3-ACCEPTANCE.md": {
-    "mtime": 1785103950.5275018,
-    "ast_hash": "f5f6a2f1fe8b7fdc4d1c01b40fefcc9c",
+    "mtime": 1785108684.1068926,
+    "ast_hash": "eb3eef8453fab7ae31b0adb320c86f66",
+    "semantic_hash": ""
+  },
+  "artifacts/validation/m3-stage3-multiseed.json": {
+    "mtime": 1785108684.1013753,
+    "ast_hash": "8a15b4390c922d2fbca0dea4d015f454",
+    "semantic_hash": ""
+  },
+  "artifacts/validation/m3-stage3-runs/seed-2026072701.json": {
+    "mtime": 1785108684.1023753,
+    "ast_hash": "40c50bee45f3f236affbebb176b14cbd",
+    "semantic_hash": ""
+  },
+  "artifacts/validation/m3-stage3-runs/seed-2026072702.json": {
+    "mtime": 1785108684.1033754,
+    "ast_hash": "cfe7e6689a3fcdddb47d8fe2a04637ca",
+    "semantic_hash": ""
+  },
+  "artifacts/validation/m3-stage3-runs/seed-2026072703.json": {
+    "mtime": 1785108684.1048808,
+    "ast_hash": "cffe01d51cbc78ab731f630aeafc87e8",
+    "semantic_hash": ""
+  },
+  "artifacts/validation/m3-stage3-runs/seed-2026072704.json": {
+    "mtime": 1785108684.1048808,
+    "ast_hash": "434e68a8abb3d16ec9ba28fefb33f4bf",
+    "semantic_hash": ""
+  },
+  "artifacts/validation/m3-stage3-runs/seed-2026072705.json": {
+    "mtime": 1785108684.1058865,
+    "ast_hash": "b55a5dd64304fd459f06a2d669aea637",
+    "semantic_hash": ""
+  },
+  "polis/research/gates.py": {
+    "mtime": 1785108684.1078925,
+    "ast_hash": "29b78c56bf52d9af1cba5107586f5cfb",
+    "semantic_hash": ""
+  },
+  "scripts/validate_m3_multiseed.py": {
+    "mtime": 1785108684.1078925,
+    "ast_hash": "0b4632d23eab023c593195efd7d34458",
+    "semantic_hash": ""
+  },
+  "tests/property/test_venture_properties.py": {
+    "mtime": 1785106987.2894735,
+    "ast_hash": "5453983c173c9ec7988ca160cab806df",
+    "semantic_hash": ""
+  },
+  "tests/unit/research/test_gates.py": {
+    "mtime": 1785108684.1088922,
+    "ast_hash": "745867b60457b25d121895f9461a362e",
     "semantic_hash": ""
   }
 }
