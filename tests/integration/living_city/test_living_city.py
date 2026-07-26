@@ -8,7 +8,7 @@ from polis.config.settings import load_settings
 from polis.events.verify import verify_batch
 from polis.living_city import run_living_city
 
-GOLDEN_100_HASH = "aa72d5f6c2e8eed6a696c15b8d5c10c21e5f53c3b144012f13fc2d669da20f79"
+GOLDEN_100_HASH = "fb583b89c6d0a34155c3ac422a2c0ed6c0216025fab03c82a40e02113aac9844"
 
 
 @pytest.mark.determinism

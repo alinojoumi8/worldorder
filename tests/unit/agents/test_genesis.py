@@ -24,6 +24,7 @@ def test_agent_genesis_is_deterministic_bounded_and_located() -> None:
     assert set(first.agents) == set(first_world.locations)
     for agent in first:
         assert all(0 <= value <= 1 for value in agent.traits.as_dict().values())
+        assert all(value == round(value, 12) for value in agent.traits.as_dict().values())
         assert all(0 <= value <= 1 for value in agent.skills.values())
         assert agent.home_place_id == first_world.locations[agent.agent_id].place_id
 
