@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
@@ -64,10 +65,6 @@ def embed_text(text: str, dimensions: int = 32) -> tuple[float, ...]:
     if norm:
         vector /= norm
     return tuple(float(value) for value in vector)
-
-
-def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
-    return max(-1.0, min(1.0, float(np.dot(left, right))))
 
 
 def _normalise(values: Sequence[float]) -> list[float]:
@@ -171,20 +168,33 @@ class MemoryStore:
         tick: int,
         k: int | None = None,
     ) -> tuple[Retrieval, ...]:
-        candidates = sorted(
-            self.for_agent(agent_id),
-            key=lambda row: row.memory_id,
-        )
+        candidates = self.for_agent(agent_id)
         if not candidates:
             return ()
         query_embedding = embed_text(query)
-        relevant = sorted(
-            candidates,
-            key=lambda row: (-_cosine(query_embedding, row.embedding), row.memory_id),
-        )[:100]
-        raw_recency = [0.995 ** ((tick - row.last_accessed_tick) / 24) for row in relevant]
-        raw_importance = [row.importance for row in relevant]
-        raw_relevance = [(_cosine(query_embedding, row.embedding) + 1) / 2 for row in relevant]
+        embedding_matrix = np.asarray(
+            [row.embedding for row in candidates],
+            dtype=np.float64,
+        )
+        similarities = np.clip(
+            embedding_matrix @ np.asarray(query_embedding, dtype=np.float64),
+            -1.0,
+            1.0,
+        )
+        relevant = heapq.nsmallest(
+            100,
+            (
+                (float(similarity), row)
+                for similarity, row in zip(similarities, candidates, strict=True)
+            ),
+            key=lambda item: (-item[0], item[1].memory_id),
+        )
+        raw_recency = [
+            0.995 ** ((tick - row.last_accessed_tick) / 24)
+            for _similarity, row in relevant
+        ]
+        raw_importance = [row.importance for _similarity, row in relevant]
+        raw_relevance = [(similarity + 1) / 2 for similarity, _row in relevant]
         recencies = _normalise(raw_recency)
         importances = _normalise(raw_importance)
         relevances = _normalise(raw_relevance)
@@ -198,7 +208,7 @@ class MemoryStore:
                 recencies[index],
                 relevances[index],
             )
-            for index, row in enumerate(relevant)
+            for index, (_similarity, row) in enumerate(relevant)
         ]
         scored.sort(key=lambda item: (-item[0], item[1].memory_id))
         limit = k if k is not None else self.settings.retrieval_k

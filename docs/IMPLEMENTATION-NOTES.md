@@ -34,3 +34,12 @@ tables but does not name a materialized inspector table. M1 adds `cognition_trac
 strictly derived read model so C23a can answer the end-to-end inspector route without
 reconstructing every phase on each request. It is not simulation truth and may be deleted
 and rebuilt from deterministic replay.
+
+### Bounded reflection backlog
+
+C09 says reflection force-routes may exceed the cognition call budget. In the M1 one-call
+reflection implementation, synchronized threshold crossings caused hundreds of agents to
+enter REFLECT together and suppressed the intended 7% DELIBERATE lane for long intervals.
+M1 deterministically queues due reflections by accumulated importance and agent id, using
+only the call reserve above the deliberate target. The importance/life-event trigger and
+cooldown are unchanged; overflow remains armed for the next tick.

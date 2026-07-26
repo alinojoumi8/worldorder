@@ -78,6 +78,31 @@ def test_weighted_routing_hits_the_intended_deliberate_share() -> None:
     assert sorted(score.rank for score in result.scores.values()) == list(range(1, 101))
 
 
+def test_reflection_backlog_preserves_deliberate_reserve() -> None:
+    rng, world, population = _population(50)
+    settings = load_settings(Path("configs/smoke.yaml"))
+    for agent in population.alive():
+        agent.importance_since_reflection = 5.0
+    observations = build_observations(
+        population,
+        world,
+        tick=25,
+        sim_time=datetime(2100, 1, 26),
+    )
+
+    result = route_cognition(
+        population,
+        observations,
+        MemoryStore(MemorySettings()),
+        settings=settings,
+        rng=rng,
+    )
+
+    assert result.n_deliberate == 4
+    assert result.n_reflect == 6
+    assert result.n_reflex == 40
+
+
 def test_reflex_decision_is_repeatable_for_agent_tick() -> None:
     _rng, world, population = _population(2)
     observations = build_observations(

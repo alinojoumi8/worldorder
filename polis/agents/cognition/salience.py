@@ -86,13 +86,22 @@ def route_cognition(
         for agent_id, observation in sorted(observations.items())
     }
     ranked = sorted(raw.values(), key=lambda item: (-item.score, item.agent_id))
-    reflect_ids = {
-        agent.agent_id
-        for agent in population.alive()
-        if memory.reflection_due(agent, tick=observations[agent.agent_id].tick)
-    }
     cognition_line = settings.llm.budget.lines["cognition"]
     intended = round(len(ranked) * settings.salience.deliberate_share)
+    reflection_candidates = sorted(
+        (
+            agent
+            for agent in population.alive()
+            if memory.reflection_due(agent, tick=observations[agent.agent_id].tick)
+        ),
+        key=lambda agent: (-agent.importance_since_reflection, agent.agent_id),
+    )
+    # M1 reflection consumes one call. Keep synchronized trigger bursts inside
+    # the reserve so they cannot erase the calibrated deliberate lane.
+    reflection_capacity = max(0, cognition_line.calls_per_tick - intended)
+    reflect_ids = {
+        agent.agent_id for agent in reflection_candidates[:reflection_capacity]
+    }
     available = max(0, cognition_line.calls_per_tick - len(reflect_ids))
     target = min(intended, available)
     candidates = [score for score in ranked if score.agent_id not in reflect_ids]
