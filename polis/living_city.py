@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from polis.agents.actions.resolve import Resolution, resolve_actions
 from polis.agents.actions.types import Action
@@ -48,6 +48,7 @@ from polis.kernel.invariants import InvariantRunner
 from polis.kernel.rng import RngRegistry
 from polis.kernel.scheduler import Scheduler
 from polis.kernel.tick import Phase, PhaseHandler, RunReport, TickContext, TickLoop
+from polis.llm.cache import CompletionCache
 from polis.llm.router import LLMRouter
 from polis.research.metrics import METRICS, MetricCollector
 from polis.simulation import run_id_for
@@ -155,10 +156,11 @@ class LivingCityEngine:
         )
 
     def _trace_kept(self, agent_id: str, tick: int, mode: str) -> bool:
-        if mode in {"deliberate", "reflect"}:
-            return True
         seed = self.rng.seed_for("cognition.sample", agent_id, tick)
-        return seed / (2**64 - 1) < self.settings.salience.cognition_sample_rate
+        sampled = seed / (2**64 - 1) < self.settings.salience.cognition_sample_rate
+        if self.settings.run.retention == "metrics_only":
+            return sampled
+        return mode in {"deliberate", "reflect"} or sampled
 
     async def perceive(self, ctx: TickContext) -> None:
         self.population.reset_action_counts()
@@ -561,6 +563,7 @@ async def run_living_city(
     sink: EventSink | None = None,
     ephemeral_sink: EphemeralSink | None = None,
     collect_events: bool = True,
+    cache_mode: Literal["live", "replay", "hybrid"] | None = None,
 ) -> LivingCityResult:
     run_id = run_id_for(settings)
     rng = RngRegistry(settings.run.seed)
@@ -587,7 +590,25 @@ async def run_living_city(
     )
     clock = Clock(profile_from_settings(settings.clock))
     scheduler = Scheduler(clock)
-    router = LLMRouter(settings=settings, run_id=run_id)
+    runtime_cache = (
+        CompletionCache(
+            mode=cache_mode,
+            l0_entries=settings.llm.cache.l0_entries,
+            verify_render=settings.llm.cache.verify_render,
+            path=settings.llm.cache.path,
+            namespace=str(run_id),
+            schema_version=settings.llm.cache.schema_version,
+            strict_version=settings.llm.cache.strict_version,
+        )
+        if cache_mode is not None
+        else None
+    )
+    router = LLMRouter(
+        settings=settings,
+        run_id=run_id,
+        lanes={} if cache_mode == "replay" else None,
+        cache=runtime_cache,
+    )
     engine = LivingCityEngine(
         settings=settings,
         world=world,

@@ -73,7 +73,7 @@ async def replay_stored_run(settings: Settings, run_id: UUID) -> ReplayReport:
         stored_events = int(rows[0]["event_count"])
     finally:
         await reader.close()
-    replay = await run_living_city(settings)
+    replay = await run_living_city(settings, cache_mode="replay")
     return ReplayReport(
         run_id,
         stored_events,
@@ -85,7 +85,7 @@ async def replay_stored_run(settings: Settings, run_id: UUID) -> ReplayReport:
 
 
 async def rebuild_stored_run(settings: Settings, run_id: UUID) -> ReplayReport:
-    replay = await run_living_city(settings)
+    replay = await run_living_city(settings, cache_mode="replay")
     db = await Database.open(settings.store, role="engine")
     try:
         rows = await db.fetch(
@@ -122,7 +122,7 @@ async def rebuild_stored_run(settings: Settings, run_id: UUID) -> ReplayReport:
 
 
 async def resume_stored_run(settings: Settings, run_id: UUID) -> ResumeReport:
-    replay = await run_living_city(settings)
+    replay = await run_living_city(settings, cache_mode="replay")
     db = await Database.open(settings.store, role="engine")
     repository = EventRepository(db, run_id)
     try:

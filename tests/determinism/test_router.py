@@ -1,3 +1,4 @@
+import socket
 from pathlib import Path
 from uuid import UUID
 
@@ -88,3 +89,38 @@ async def test_router_replays_from_file_cache_without_a_provider(tmp_path) -> No
     assert not actual.cache_hit
     assert replay.cache.hits == 1
     await replay.close()
+
+
+@pytest.mark.determinism
+@pytest.mark.asyncio
+async def test_stub_router_succeeds_with_network_blocked(monkeypatch, tmp_path) -> None:
+    def reject_network(*_args, **_kwargs):
+        raise AssertionError("StubProvider attempted network access")
+
+    monkeypatch.setattr(socket.socket, "connect", reject_network)
+    base = load_settings(Path("configs/smoke.yaml"))
+    settings = base.model_copy(
+        update={
+            "llm": base.llm.model_copy(
+                update={
+                    "cache": CacheSettings(
+                        mode="live",
+                        path=f"file://{tmp_path.as_posix()}",
+                    )
+                }
+            )
+        }
+    )
+    router = LLMRouter(
+        settings=settings,
+        run_id=UUID("20000000-0000-0000-0000-000000000007"),
+    )
+    result = await router.call(
+        Purpose.DELIBERATE,
+        "ag_0001",
+        1,
+        {"prompt": "Choose carefully without a network."},
+        SCHEMA,
+    )
+    assert result.text
+    await router.close()
