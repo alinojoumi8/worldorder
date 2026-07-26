@@ -48,6 +48,7 @@ import {
   type MetricId,
   type ViewId
 } from "./mockData";
+import LiveApp from "./LiveApp";
 
 const navItems: Array<{
   id: ViewId;
@@ -1747,7 +1748,7 @@ function TraceBreadcrumb({
   );
 }
 
-export default function App() {
+function PrototypeApp() {
   const initialRoute = routeFromUrl();
   const [activeView, setActiveView] = useState<ViewId>(initialRoute.view);
   const [selectedAgent, setSelectedAgent] = useState<Agent>(initialRoute.agent);
@@ -1790,6 +1791,9 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <div className="demo-banner" role="status">
+        Development demo · fixture data · <a href="/">return to live Observatory</a>
+      </div>
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <TopBar />
       <AtlasNav activeView={activeView} onChange={(view) => navigate(view)} />
@@ -1823,4 +1827,9 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+export default function App() {
+  const demo = new URLSearchParams(window.location.search).get("demo") === "1";
+  return demo ? <PrototypeApp /> : <LiveApp />;
 }
