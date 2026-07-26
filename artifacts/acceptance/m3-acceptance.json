@@ -1,34 +1,27 @@
 {
-  "accepted_implementation_git_sha": "f5438fd7ccfb541034db34fa8f035b894a68abf8",
+  "accepted_engineering_implementation_git_sha": "ad7a1751add70ef8ce478dc3a3f5eb9b805b11a4",
   "accepted_on": "2026-07-26",
-  "branch": "codex/build/m3-capital",
-  "status": "engineering_passed_research_pending",
+  "branch": "codex/build/m3-calibration",
+  "status": "engineering_passed_research_failed",
+  "validation_harness_git_sha": "c6a1aaa46a87b1954c09a0c5e31847284e35e3b1",
+  "completed_gates": [
+    "C15 acquisition integration, redundancies, severance, loan transfer, and asset-sale shell paths",
+    "M3 mechanism declarations and runtime ablations",
+    "C15 priority, monotonicity, stay, negative-net-worth, and bank-cascade properties",
+    "Stage 3 executable V1-V3 evaluator and five-seed offline diagnostic"
+  ],
   "frozen_run": {
     "agents": 50,
     "event_counts": {
-      "goods_purchased": 4256,
+      "goods_purchased": 4235,
       "loan_originated": 4,
       "loan_payment_made": 12,
       "trade_executed": 1,
-      "wage_paid": 20
+      "wage_paid": 21
     },
-    "events": 28382,
-    "hash": "6e374b1f1731a7fc98b8d1d77f6d44cc23355177799a4b16d985308269fd4c53",
+    "events": 28332,
+    "hash": "79137a7b7d481d0ff56efd0a0ac61a6f68567121e56c27fdb36b802237af0659",
     "ticks": 100
-  },
-  "integration_run": {
-    "agents": 50,
-    "events": 125363,
-    "hash": "a615919ea6a53788cc4d07b38f024aa5c2538bea9fd0d68d7925b34c09ee2b3b",
-    "status": "completed",
-    "ticks": 500
-  },
-  "long_run": {
-    "agents": 50,
-    "events": 966539,
-    "hash": "982883938043edb71f014e4f50d04f46569f53d6b77190fc71438ae5de4ba129",
-    "status": "completed",
-    "ticks": 5000
   },
   "persistent_run": {
     "exact_projection_rebuild": true,
@@ -43,9 +36,9 @@
     "frontend_build": "passed",
     "frontend_modules": 1580,
     "import_linter_contracts": 4,
-    "mypy_source_files": 111,
+    "mypy_source_files": 112,
     "prompt_lint": "passed",
-    "pytest_passed": 155,
+    "pytest_passed": 175,
     "ruff": "passed"
   },
   "read_only_observatory": {
@@ -61,19 +54,35 @@
       "bankruptcies"
     ]
   },
+  "stage3_diagnostic": {
+    "all_runs_research_eligible": false,
+    "all_v1_v2_v3_pass": false,
+    "artifact": "artifacts/validation/m3-stage3-multiseed.json",
+    "events_total": 2134714,
+    "gate_matrix": {
+      "2026072701": {"V1": "fail", "V2": "pass", "V3": "fail"},
+      "2026072702": {"V1": "fail", "V2": "pass", "V3": "fail"},
+      "2026072703": {"V1": "fail", "V2": "pass", "V3": "fail"},
+      "2026072704": {"V1": "fail", "V2": "pass", "V3": "fail"},
+      "2026072705": {"V1": "fail", "V2": "pass", "V3": "fail"}
+    },
+    "research_accepted": false,
+    "research_ineligibility_reasons": [
+      "development_acceptance_fixture",
+      "population_below_1000",
+      "reflex_only_ablation",
+      "stub_only_provider"
+    ],
+    "seeds": [2026072701, 2026072702, 2026072703, 2026072704, 2026072705],
+    "status": "engineering_diagnostic_failed",
+    "ticks_checked_per_seed": 1801,
+    "ticks_per_seed": 1800,
+    "years_per_seed": 5
+  },
   "remaining_gates": [
-    "C15 acquisition redundancy, severance, loan transfer, and asset-sale shell paths",
-    "M3 mechanism declarations and ablations",
-    "C15 full property and bankruptcy-cascade matrix",
-    "C20 death-bankruptcy integration in M5",
+    "Stage 3 non-fixture 1000-agent V1-V3 calibration",
+    "bounded real-provider run and offline cache replay after cost approval",
     "C18 antitrust decision integration in M4",
-    "Stage 3 five-seed five-year V1-V3 calibration"
-  ],
-  "liquidation_conformance": {
-    "inventory_and_capital_require_solvent_buyers": true,
-    "listed_market_order_slicing": true,
-    "private_stakes_offered_to_existing_holders": true,
-    "realised_book_impact": true,
-    "unsold_nonlisted_assets_written_off_without_money": true
-  }
+    "C20 death-bankruptcy integration in M5"
+  ]
 }

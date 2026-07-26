@@ -1,0 +1,1100 @@
+{
+  "all_runs_research_eligible": false,
+  "all_v1_v2_v3_pass": false,
+  "config": "configs\\m3-smoke.yaml",
+  "gate_matrix": {
+    "2026072701": {
+      "V1": "fail",
+      "V2": "pass",
+      "V3": "fail"
+    },
+    "2026072702": {
+      "V1": "fail",
+      "V2": "pass",
+      "V3": "fail"
+    },
+    "2026072703": {
+      "V1": "fail",
+      "V2": "pass",
+      "V3": "fail"
+    },
+    "2026072704": {
+      "V1": "fail",
+      "V2": "pass",
+      "V3": "fail"
+    },
+    "2026072705": {
+      "V1": "fail",
+      "V2": "pass",
+      "V3": "fail"
+    }
+  },
+  "research_accepted": false,
+  "research_ineligibility_reasons": [
+    "development_acceptance_fixture",
+    "population_below_1000",
+    "reflex_only_ablation",
+    "stub_only_provider"
+  ],
+  "runs": [
+    {
+      "code_git_sha": "c6a1aaa46a87b1954c09a0c5e31847284e35e3b1",
+      "config": "configs\\m3-smoke.yaml",
+      "config_class": "engineering_diagnostic",
+      "elapsed_seconds": 142.852,
+      "events": 420172,
+      "gate_verdict": "fail",
+      "gates": {
+        "V1": {
+          "gate_id": "V1",
+          "notes": "",
+          "statistic": {
+            "cpi": {
+              "annual_difference_sign_changes": 11,
+              "checks": {
+                "coverage": true,
+                "ratio": true,
+                "sign_changes": true,
+                "slope": true
+              },
+              "covered": true,
+              "log_slope_per_year": -0.03616299,
+              "newey_west_se_lag_one_year": 0.03105833,
+              "observations": 1800,
+              "terminal_initial_ratio": 1.4969
+            },
+            "gdp_real": {
+              "annual_changes": [
+                0.04717726,
+                0.23597928,
+                0.03642846,
+                -0.16145486
+              ],
+              "annual_terminal_cents": [
+                4137057.0,
+                4332232.0,
+                5354549.0,
+                5549607.0,
+                4653596.0
+              ],
+              "checks": {
+                "five_annual_levels": true,
+                "no_three_year_absorbing_run": true,
+                "positive_levels": true,
+                "slope": true
+              },
+              "largest_same_sign_change_run_over_20_percent": 1,
+              "log_slope_per_year": 0.03919391,
+              "observations": 20
+            },
+            "market_index": {
+              "annual_difference_sign_changes": 0,
+              "checks": {
+                "coverage": false,
+                "ratio": false,
+                "sign_changes": false,
+                "slope": false
+              },
+              "covered": false,
+              "log_slope_per_year": 0.68790332,
+              "newey_west_se_lag_one_year": 0.23021648,
+              "observations": 5,
+              "terminal_initial_ratio": null
+            },
+            "unemployment_rate": {
+              "annual_changes_bp": [
+                -11.90833333,
+                11.90277778,
+                33.06944444,
+                2.64444444
+              ],
+              "annual_means_bp": [
+                66.13333333,
+                54.225,
+                66.12777778,
+                99.19722222,
+                101.84166667
+              ],
+              "checks": {
+                "annual_changes_bounded": true,
+                "annual_means_bounded": false,
+                "five_annual_means": true
+              },
+              "observations": 1800
+            }
+          },
+          "threshold": {
+            "annual_difference_sign_changes_min": 4,
+            "gdp_large_same_sign_consecutive_years_max": 2,
+            "gdp_log_slope_abs_max": 0.2,
+            "level_log_slope_abs_max": 0.15,
+            "level_ratio_max": 2.71828183,
+            "level_ratio_min": 0.36787944,
+            "unemployment_annual_change_abs_max_bp": 1500,
+            "unemployment_annual_mean_max_bp": 3000,
+            "unemployment_annual_mean_min_bp": 200
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        },
+        "V2": {
+          "gate_id": "V2",
+          "notes": "",
+          "statistic": {
+            "checks": {
+              "checked_every_tick": true,
+              "final_ledger_exact": true,
+              "zero_posthoc_violations": true,
+              "zero_runtime_violations": true
+            },
+            "expected_ticks_checked": 1801,
+            "final_ledger_checks_cents": {
+              "base_money": 0,
+              "deposits": 0,
+              "global": 0,
+              "materialisation": 0
+            },
+            "posthoc_violating_ticks": [],
+            "runtime_violations": {
+              "INV-LEDGER": 0,
+              "INV-MONEY": 0
+            },
+            "ticks_checked": 1801
+          },
+          "threshold": {
+            "final_ledger_imbalance_cents": 0,
+            "posthoc_violating_ticks_max": 0,
+            "runtime_violations_max": 0,
+            "ticks_checked": 1801
+          },
+          "verdict": "pass",
+          "window": {
+            "from_tick": 0,
+            "to_tick": 1800
+          }
+        },
+        "V3": {
+          "gate_id": "V3",
+          "notes": "",
+          "statistic": {
+            "active_firms": {
+              "evaluations": 1800,
+              "failure_share": 0.99666667,
+              "failures": 1794,
+              "pass": false
+            },
+            "agents.zero_transactions_30d_share": {
+              "evaluations": 257,
+              "failure_share": 0.59533074,
+              "failures": 153,
+              "pass": false
+            },
+            "exchange.zero_trade_streak": {
+              "evaluations": 1800,
+              "failure_share": 0.99611111,
+              "failures": 1793,
+              "pass": false
+            },
+            "unemployment_rate": {
+              "evaluations": 1800,
+              "failure_share": 0.98722222,
+              "failures": 1777,
+              "pass": false
+            },
+            "wealth_share.top1": {
+              "evaluations": 1800,
+              "failure_share": 0.0,
+              "failures": 0,
+              "pass": true
+            }
+          },
+          "threshold": {
+            "active_firms_min": 5,
+            "agents_zero_transactions_30d_share_max_bp_exclusive": 5000,
+            "exchange_zero_trade_streak_max": 3,
+            "failure_share_max": 0.05,
+            "unemployment_rate_bp_exclusive": [
+              50,
+              6000
+            ],
+            "wealth_share.top1_max_bp_exclusive": 9000
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        }
+      },
+      "halt_reason": null,
+      "last_tick": 1800,
+      "population": 50,
+      "research_ineligibility_reasons": [
+        "population_below_1000",
+        "development_acceptance_fixture",
+        "reflex_only_ablation",
+        "stub_only_provider"
+      ],
+      "run_id": "6a0d7dff-63d8-563b-836c-c1a9cb426ace",
+      "seed": 2026072701,
+      "status": "completed",
+      "terminal_hash": "8de561f438c255a5210e997ed91557c547d2fba5a7b4e1178faa835e6da64b92",
+      "ticks": 1800,
+      "ticks_per_second": 12.6,
+      "years": 5
+    },
+    {
+      "code_git_sha": "c6a1aaa46a87b1954c09a0c5e31847284e35e3b1",
+      "config": "configs\\m3-smoke.yaml",
+      "config_class": "engineering_diagnostic",
+      "elapsed_seconds": 146.135,
+      "events": 428111,
+      "gate_verdict": "fail",
+      "gates": {
+        "V1": {
+          "gate_id": "V1",
+          "notes": "",
+          "statistic": {
+            "cpi": {
+              "annual_difference_sign_changes": 9,
+              "checks": {
+                "coverage": true,
+                "ratio": true,
+                "sign_changes": true,
+                "slope": true
+              },
+              "covered": true,
+              "log_slope_per_year": -0.04974056,
+              "newey_west_se_lag_one_year": 0.02357867,
+              "observations": 1800,
+              "terminal_initial_ratio": 1.3331
+            },
+            "gdp_real": {
+              "annual_changes": [
+                0.0624407,
+                -0.07039913,
+                -0.06367958,
+                -0.04184221
+              ],
+              "annual_terminal_cents": [
+                5851856.0,
+                6217250.0,
+                5779561.0,
+                5411521.0,
+                5185091.0
+              ],
+              "checks": {
+                "five_annual_levels": true,
+                "no_three_year_absorbing_run": true,
+                "positive_levels": true,
+                "slope": true
+              },
+              "largest_same_sign_change_run_over_20_percent": 0,
+              "log_slope_per_year": -0.0377631,
+              "observations": 20
+            },
+            "market_index": {
+              "annual_difference_sign_changes": 0,
+              "checks": {
+                "coverage": false,
+                "ratio": false,
+                "sign_changes": false,
+                "slope": false
+              },
+              "covered": false,
+              "log_slope_per_year": 0.68790332,
+              "newey_west_se_lag_one_year": 0.23021648,
+              "observations": 5,
+              "terminal_initial_ratio": null
+            },
+            "unemployment_rate": {
+              "annual_changes_bp": [
+                -12.72777778,
+                -4.63055556,
+                2.31666667,
+                1.15555556
+              ],
+              "annual_means_bp": [
+                68.28055556,
+                55.55277778,
+                50.92222222,
+                53.23888889,
+                54.39444444
+              ],
+              "checks": {
+                "annual_changes_bounded": true,
+                "annual_means_bounded": false,
+                "five_annual_means": true
+              },
+              "observations": 1800
+            }
+          },
+          "threshold": {
+            "annual_difference_sign_changes_min": 4,
+            "gdp_large_same_sign_consecutive_years_max": 2,
+            "gdp_log_slope_abs_max": 0.2,
+            "level_log_slope_abs_max": 0.15,
+            "level_ratio_max": 2.71828183,
+            "level_ratio_min": 0.36787944,
+            "unemployment_annual_change_abs_max_bp": 1500,
+            "unemployment_annual_mean_max_bp": 3000,
+            "unemployment_annual_mean_min_bp": 200
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        },
+        "V2": {
+          "gate_id": "V2",
+          "notes": "",
+          "statistic": {
+            "checks": {
+              "checked_every_tick": true,
+              "final_ledger_exact": true,
+              "zero_posthoc_violations": true,
+              "zero_runtime_violations": true
+            },
+            "expected_ticks_checked": 1801,
+            "final_ledger_checks_cents": {
+              "base_money": 0,
+              "deposits": 0,
+              "global": 0,
+              "materialisation": 0
+            },
+            "posthoc_violating_ticks": [],
+            "runtime_violations": {
+              "INV-LEDGER": 0,
+              "INV-MONEY": 0
+            },
+            "ticks_checked": 1801
+          },
+          "threshold": {
+            "final_ledger_imbalance_cents": 0,
+            "posthoc_violating_ticks_max": 0,
+            "runtime_violations_max": 0,
+            "ticks_checked": 1801
+          },
+          "verdict": "pass",
+          "window": {
+            "from_tick": 0,
+            "to_tick": 1800
+          }
+        },
+        "V3": {
+          "gate_id": "V3",
+          "notes": "",
+          "statistic": {
+            "active_firms": {
+              "evaluations": 1800,
+              "failure_share": 0.99666667,
+              "failures": 1794,
+              "pass": false
+            },
+            "agents.zero_transactions_30d_share": {
+              "evaluations": 257,
+              "failure_share": 0.56809339,
+              "failures": 146,
+              "pass": false
+            },
+            "exchange.zero_trade_streak": {
+              "evaluations": 1800,
+              "failure_share": 0.99611111,
+              "failures": 1793,
+              "pass": false
+            },
+            "unemployment_rate": {
+              "evaluations": 1800,
+              "failure_share": 0.99444444,
+              "failures": 1790,
+              "pass": false
+            },
+            "wealth_share.top1": {
+              "evaluations": 1800,
+              "failure_share": 0.0,
+              "failures": 0,
+              "pass": true
+            }
+          },
+          "threshold": {
+            "active_firms_min": 5,
+            "agents_zero_transactions_30d_share_max_bp_exclusive": 5000,
+            "exchange_zero_trade_streak_max": 3,
+            "failure_share_max": 0.05,
+            "unemployment_rate_bp_exclusive": [
+              50,
+              6000
+            ],
+            "wealth_share.top1_max_bp_exclusive": 9000
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        }
+      },
+      "halt_reason": null,
+      "last_tick": 1800,
+      "population": 50,
+      "research_ineligibility_reasons": [
+        "population_below_1000",
+        "development_acceptance_fixture",
+        "reflex_only_ablation",
+        "stub_only_provider"
+      ],
+      "run_id": "9ebaf5e3-9239-501a-a69d-2eae1efdb2b1",
+      "seed": 2026072702,
+      "status": "completed",
+      "terminal_hash": "248fe01520b82577fe4c4c4e89d72b79b537ab66284f5401247fa0f1bd20be7b",
+      "ticks": 1800,
+      "ticks_per_second": 12.317,
+      "years": 5
+    },
+    {
+      "code_git_sha": "c6a1aaa46a87b1954c09a0c5e31847284e35e3b1",
+      "config": "configs\\m3-smoke.yaml",
+      "config_class": "engineering_diagnostic",
+      "elapsed_seconds": 136.522,
+      "events": 423630,
+      "gate_verdict": "fail",
+      "gates": {
+        "V1": {
+          "gate_id": "V1",
+          "notes": "",
+          "statistic": {
+            "cpi": {
+              "annual_difference_sign_changes": 14,
+              "checks": {
+                "coverage": true,
+                "ratio": true,
+                "sign_changes": true,
+                "slope": true
+              },
+              "covered": true,
+              "log_slope_per_year": 0.00019475,
+              "newey_west_se_lag_one_year": 0.02061552,
+              "observations": 1800,
+              "terminal_initial_ratio": 1.7456
+            },
+            "gdp_real": {
+              "annual_changes": [
+                0.07604276,
+                0.03558692,
+                -0.12981354,
+                -0.16558909
+              ],
+              "annual_terminal_cents": [
+                6104868.0,
+                6569099.0,
+                6802873.0,
+                5919768.0,
+                4939519.0
+              ],
+              "checks": {
+                "five_annual_levels": true,
+                "no_three_year_absorbing_run": true,
+                "positive_levels": true,
+                "slope": true
+              },
+              "largest_same_sign_change_run_over_20_percent": 0,
+              "log_slope_per_year": -0.02940542,
+              "observations": 20
+            },
+            "market_index": {
+              "annual_difference_sign_changes": 0,
+              "checks": {
+                "coverage": false,
+                "ratio": false,
+                "sign_changes": false,
+                "slope": false
+              },
+              "covered": false,
+              "log_slope_per_year": 0.68790332,
+              "newey_west_se_lag_one_year": 0.23021648,
+              "observations": 5,
+              "terminal_initial_ratio": null
+            },
+            "unemployment_rate": {
+              "annual_changes_bp": [
+                12.325,
+                24.44166667,
+                -2.05833333,
+                8.49444444
+              ],
+              "annual_means_bp": [
+                434.83055556,
+                447.15555556,
+                471.59722222,
+                469.53888889,
+                478.03333333
+              ],
+              "checks": {
+                "annual_changes_bounded": true,
+                "annual_means_bounded": true,
+                "five_annual_means": true
+              },
+              "observations": 1800
+            }
+          },
+          "threshold": {
+            "annual_difference_sign_changes_min": 4,
+            "gdp_large_same_sign_consecutive_years_max": 2,
+            "gdp_log_slope_abs_max": 0.2,
+            "level_log_slope_abs_max": 0.15,
+            "level_ratio_max": 2.71828183,
+            "level_ratio_min": 0.36787944,
+            "unemployment_annual_change_abs_max_bp": 1500,
+            "unemployment_annual_mean_max_bp": 3000,
+            "unemployment_annual_mean_min_bp": 200
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        },
+        "V2": {
+          "gate_id": "V2",
+          "notes": "",
+          "statistic": {
+            "checks": {
+              "checked_every_tick": true,
+              "final_ledger_exact": true,
+              "zero_posthoc_violations": true,
+              "zero_runtime_violations": true
+            },
+            "expected_ticks_checked": 1801,
+            "final_ledger_checks_cents": {
+              "base_money": 0,
+              "deposits": 0,
+              "global": 0,
+              "materialisation": 0
+            },
+            "posthoc_violating_ticks": [],
+            "runtime_violations": {
+              "INV-LEDGER": 0,
+              "INV-MONEY": 0
+            },
+            "ticks_checked": 1801
+          },
+          "threshold": {
+            "final_ledger_imbalance_cents": 0,
+            "posthoc_violating_ticks_max": 0,
+            "runtime_violations_max": 0,
+            "ticks_checked": 1801
+          },
+          "verdict": "pass",
+          "window": {
+            "from_tick": 0,
+            "to_tick": 1800
+          }
+        },
+        "V3": {
+          "gate_id": "V3",
+          "notes": "",
+          "statistic": {
+            "active_firms": {
+              "evaluations": 1800,
+              "failure_share": 0.99666667,
+              "failures": 1794,
+              "pass": false
+            },
+            "agents.zero_transactions_30d_share": {
+              "evaluations": 257,
+              "failure_share": 0.53307393,
+              "failures": 137,
+              "pass": false
+            },
+            "exchange.zero_trade_streak": {
+              "evaluations": 1800,
+              "failure_share": 0.99611111,
+              "failures": 1793,
+              "pass": false
+            },
+            "unemployment_rate": {
+              "evaluations": 1800,
+              "failure_share": 0.03277778,
+              "failures": 59,
+              "pass": true
+            },
+            "wealth_share.top1": {
+              "evaluations": 1800,
+              "failure_share": 0.0,
+              "failures": 0,
+              "pass": true
+            }
+          },
+          "threshold": {
+            "active_firms_min": 5,
+            "agents_zero_transactions_30d_share_max_bp_exclusive": 5000,
+            "exchange_zero_trade_streak_max": 3,
+            "failure_share_max": 0.05,
+            "unemployment_rate_bp_exclusive": [
+              50,
+              6000
+            ],
+            "wealth_share.top1_max_bp_exclusive": 9000
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        }
+      },
+      "halt_reason": null,
+      "last_tick": 1800,
+      "population": 50,
+      "research_ineligibility_reasons": [
+        "population_below_1000",
+        "development_acceptance_fixture",
+        "reflex_only_ablation",
+        "stub_only_provider"
+      ],
+      "run_id": "bbde165d-8be8-53dd-b0d1-c8a0fe50e176",
+      "seed": 2026072703,
+      "status": "completed",
+      "terminal_hash": "15952fd6bb55aed34a34718a03cd1e7af3431c52147d2829d8911a5c70f608ba",
+      "ticks": 1800,
+      "ticks_per_second": 13.185,
+      "years": 5
+    },
+    {
+      "code_git_sha": "c6a1aaa46a87b1954c09a0c5e31847284e35e3b1",
+      "config": "configs\\m3-smoke.yaml",
+      "config_class": "engineering_diagnostic",
+      "elapsed_seconds": 142.735,
+      "events": 430491,
+      "gate_verdict": "fail",
+      "gates": {
+        "V1": {
+          "gate_id": "V1",
+          "notes": "",
+          "statistic": {
+            "cpi": {
+              "annual_difference_sign_changes": 17,
+              "checks": {
+                "coverage": true,
+                "ratio": true,
+                "sign_changes": true,
+                "slope": true
+              },
+              "covered": true,
+              "log_slope_per_year": -0.00133817,
+              "newey_west_se_lag_one_year": 0.01245434,
+              "observations": 1800,
+              "terminal_initial_ratio": 1.37555022
+            },
+            "gdp_real": {
+              "annual_changes": [
+                0.10135402,
+                -0.09014091,
+                -0.11507691,
+                0.14402519
+              ],
+              "annual_terminal_cents": [
+                5470962.0,
+                6025466.0,
+                5482325.0,
+                4851436.0,
+                5550165.0
+              ],
+              "checks": {
+                "five_annual_levels": true,
+                "no_three_year_absorbing_run": true,
+                "positive_levels": true,
+                "slope": true
+              },
+              "largest_same_sign_change_run_over_20_percent": 0,
+              "log_slope_per_year": -0.03376466,
+              "observations": 20
+            },
+            "market_index": {
+              "annual_difference_sign_changes": 0,
+              "checks": {
+                "coverage": false,
+                "ratio": false,
+                "sign_changes": false,
+                "slope": false
+              },
+              "covered": false,
+              "log_slope_per_year": 0.68790332,
+              "newey_west_se_lag_one_year": 0.23021648,
+              "observations": 5,
+              "terminal_initial_ratio": null
+            },
+            "unemployment_rate": {
+              "annual_changes_bp": [
+                -1.15555556,
+                -16.2,
+                -0.00277778,
+                28.93333333
+              ],
+              "annual_means_bp": [
+                69.43888889,
+                68.28333333,
+                52.08333333,
+                52.08055556,
+                81.01388889
+              ],
+              "checks": {
+                "annual_changes_bounded": true,
+                "annual_means_bounded": false,
+                "five_annual_means": true
+              },
+              "observations": 1800
+            }
+          },
+          "threshold": {
+            "annual_difference_sign_changes_min": 4,
+            "gdp_large_same_sign_consecutive_years_max": 2,
+            "gdp_log_slope_abs_max": 0.2,
+            "level_log_slope_abs_max": 0.15,
+            "level_ratio_max": 2.71828183,
+            "level_ratio_min": 0.36787944,
+            "unemployment_annual_change_abs_max_bp": 1500,
+            "unemployment_annual_mean_max_bp": 3000,
+            "unemployment_annual_mean_min_bp": 200
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        },
+        "V2": {
+          "gate_id": "V2",
+          "notes": "",
+          "statistic": {
+            "checks": {
+              "checked_every_tick": true,
+              "final_ledger_exact": true,
+              "zero_posthoc_violations": true,
+              "zero_runtime_violations": true
+            },
+            "expected_ticks_checked": 1801,
+            "final_ledger_checks_cents": {
+              "base_money": 0,
+              "deposits": 0,
+              "global": 0,
+              "materialisation": 0
+            },
+            "posthoc_violating_ticks": [],
+            "runtime_violations": {
+              "INV-LEDGER": 0,
+              "INV-MONEY": 0
+            },
+            "ticks_checked": 1801
+          },
+          "threshold": {
+            "final_ledger_imbalance_cents": 0,
+            "posthoc_violating_ticks_max": 0,
+            "runtime_violations_max": 0,
+            "ticks_checked": 1801
+          },
+          "verdict": "pass",
+          "window": {
+            "from_tick": 0,
+            "to_tick": 1800
+          }
+        },
+        "V3": {
+          "gate_id": "V3",
+          "notes": "",
+          "statistic": {
+            "active_firms": {
+              "evaluations": 1800,
+              "failure_share": 0.99666667,
+              "failures": 1794,
+              "pass": false
+            },
+            "agents.zero_transactions_30d_share": {
+              "evaluations": 257,
+              "failure_share": 0.47859922,
+              "failures": 123,
+              "pass": false
+            },
+            "exchange.zero_trade_streak": {
+              "evaluations": 1800,
+              "failure_share": 0.99611111,
+              "failures": 1793,
+              "pass": false
+            },
+            "unemployment_rate": {
+              "evaluations": 1800,
+              "failure_share": 0.99166667,
+              "failures": 1785,
+              "pass": false
+            },
+            "wealth_share.top1": {
+              "evaluations": 1800,
+              "failure_share": 0.0,
+              "failures": 0,
+              "pass": true
+            }
+          },
+          "threshold": {
+            "active_firms_min": 5,
+            "agents_zero_transactions_30d_share_max_bp_exclusive": 5000,
+            "exchange_zero_trade_streak_max": 3,
+            "failure_share_max": 0.05,
+            "unemployment_rate_bp_exclusive": [
+              50,
+              6000
+            ],
+            "wealth_share.top1_max_bp_exclusive": 9000
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        }
+      },
+      "halt_reason": null,
+      "last_tick": 1800,
+      "population": 50,
+      "research_ineligibility_reasons": [
+        "population_below_1000",
+        "development_acceptance_fixture",
+        "reflex_only_ablation",
+        "stub_only_provider"
+      ],
+      "run_id": "7392f0da-98b0-5c90-b32a-af0d6d650892",
+      "seed": 2026072704,
+      "status": "completed",
+      "terminal_hash": "c80deb2d1b16c5bcaa50f303572c0b8d04a9093df90821d68d1b365aed2bd7c2",
+      "ticks": 1800,
+      "ticks_per_second": 12.611,
+      "years": 5
+    },
+    {
+      "code_git_sha": "c6a1aaa46a87b1954c09a0c5e31847284e35e3b1",
+      "config": "configs\\m3-smoke.yaml",
+      "config_class": "engineering_diagnostic",
+      "elapsed_seconds": 139.413,
+      "events": 432310,
+      "gate_verdict": "fail",
+      "gates": {
+        "V1": {
+          "gate_id": "V1",
+          "notes": "",
+          "statistic": {
+            "cpi": {
+              "annual_difference_sign_changes": 9,
+              "checks": {
+                "coverage": true,
+                "ratio": true,
+                "sign_changes": true,
+                "slope": true
+              },
+              "covered": true,
+              "log_slope_per_year": -0.02800451,
+              "newey_west_se_lag_one_year": 0.01681149,
+              "observations": 1800,
+              "terminal_initial_ratio": 1.3032
+            },
+            "gdp_real": {
+              "annual_changes": [
+                -0.01949187,
+                0.05951239,
+                -0.03742383,
+                0.00836544
+              ],
+              "annual_terminal_cents": [
+                5956638.0,
+                5840532.0,
+                6188116.0,
+                5956533.0,
+                6006362.0
+              ],
+              "checks": {
+                "five_annual_levels": true,
+                "no_three_year_absorbing_run": true,
+                "positive_levels": true,
+                "slope": true
+              },
+              "largest_same_sign_change_run_over_20_percent": 0,
+              "log_slope_per_year": -0.00158904,
+              "observations": 20
+            },
+            "market_index": {
+              "annual_difference_sign_changes": 0,
+              "checks": {
+                "coverage": false,
+                "ratio": false,
+                "sign_changes": false,
+                "slope": false
+              },
+              "covered": false,
+              "log_slope_per_year": 0.68790332,
+              "newey_west_se_lag_one_year": 0.23021648,
+              "observations": 5,
+              "terminal_initial_ratio": null
+            },
+            "unemployment_rate": {
+              "annual_changes_bp": [
+                -311.425,
+                -4.35277778,
+                -1.11111111,
+                408.88888889
+              ],
+              "annual_means_bp": [
+                451.33333333,
+                139.90833333,
+                135.55555556,
+                134.44444444,
+                543.33333333
+              ],
+              "checks": {
+                "annual_changes_bounded": true,
+                "annual_means_bounded": false,
+                "five_annual_means": true
+              },
+              "observations": 1800
+            }
+          },
+          "threshold": {
+            "annual_difference_sign_changes_min": 4,
+            "gdp_large_same_sign_consecutive_years_max": 2,
+            "gdp_log_slope_abs_max": 0.2,
+            "level_log_slope_abs_max": 0.15,
+            "level_ratio_max": 2.71828183,
+            "level_ratio_min": 0.36787944,
+            "unemployment_annual_change_abs_max_bp": 1500,
+            "unemployment_annual_mean_max_bp": 3000,
+            "unemployment_annual_mean_min_bp": 200
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        },
+        "V2": {
+          "gate_id": "V2",
+          "notes": "",
+          "statistic": {
+            "checks": {
+              "checked_every_tick": true,
+              "final_ledger_exact": true,
+              "zero_posthoc_violations": true,
+              "zero_runtime_violations": true
+            },
+            "expected_ticks_checked": 1801,
+            "final_ledger_checks_cents": {
+              "base_money": 0,
+              "deposits": 0,
+              "global": 0,
+              "materialisation": 0
+            },
+            "posthoc_violating_ticks": [],
+            "runtime_violations": {
+              "INV-LEDGER": 0,
+              "INV-MONEY": 0
+            },
+            "ticks_checked": 1801
+          },
+          "threshold": {
+            "final_ledger_imbalance_cents": 0,
+            "posthoc_violating_ticks_max": 0,
+            "runtime_violations_max": 0,
+            "ticks_checked": 1801
+          },
+          "verdict": "pass",
+          "window": {
+            "from_tick": 0,
+            "to_tick": 1800
+          }
+        },
+        "V3": {
+          "gate_id": "V3",
+          "notes": "",
+          "statistic": {
+            "active_firms": {
+              "evaluations": 1800,
+              "failure_share": 0.99666667,
+              "failures": 1794,
+              "pass": false
+            },
+            "agents.zero_transactions_30d_share": {
+              "evaluations": 257,
+              "failure_share": 0.58754864,
+              "failures": 151,
+              "pass": false
+            },
+            "exchange.zero_trade_streak": {
+              "evaluations": 1800,
+              "failure_share": 0.99611111,
+              "failures": 1793,
+              "pass": false
+            },
+            "unemployment_rate": {
+              "evaluations": 1800,
+              "failure_share": 0.59388889,
+              "failures": 1069,
+              "pass": false
+            },
+            "wealth_share.top1": {
+              "evaluations": 1800,
+              "failure_share": 0.0,
+              "failures": 0,
+              "pass": true
+            }
+          },
+          "threshold": {
+            "active_firms_min": 5,
+            "agents_zero_transactions_30d_share_max_bp_exclusive": 5000,
+            "exchange_zero_trade_streak_max": 3,
+            "failure_share_max": 0.05,
+            "unemployment_rate_bp_exclusive": [
+              50,
+              6000
+            ],
+            "wealth_share.top1_max_bp_exclusive": 9000
+          },
+          "verdict": "fail",
+          "window": {
+            "from_tick": 1,
+            "to_tick": 1800
+          }
+        }
+      },
+      "halt_reason": null,
+      "last_tick": 1800,
+      "population": 50,
+      "research_ineligibility_reasons": [
+        "population_below_1000",
+        "development_acceptance_fixture",
+        "reflex_only_ablation",
+        "stub_only_provider"
+      ],
+      "run_id": "02d003dd-e77f-51b5-a999-15f475e47457",
+      "seed": 2026072705,
+      "status": "completed",
+      "terminal_hash": "c6bc77681c4efe17b1eea66a984fbc79e612a35c00be0e081a6fa4ad987de4e4",
+      "ticks": 1800,
+      "ticks_per_second": 12.911,
+      "years": 5
+    }
+  ],
+  "seeds": [
+    2026072701,
+    2026072702,
+    2026072703,
+    2026072704,
+    2026072705
+  ],
+  "status": "engineering_diagnostic_failed",
+  "throughput_ticks_per_second": {
+    "maximum": 13.185,
+    "mean": 12.725,
+    "minimum": 12.317
+  },
+  "years_per_seed": 5
+}
