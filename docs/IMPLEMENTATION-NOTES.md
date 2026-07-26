@@ -97,3 +97,37 @@ choice.
 C11 keeps firm kinds in 6000–6099. Per the ratified chunk contract, every C12 goods kind
 moves to its documented value plus 100 (6100–6199); the illustrative 6020 row in
 `02-ARCHITECTURE.md` is stale and must not be registered.
+
+## M2 / C12
+
+### CPI base includes contemporaneous policy
+
+The fixed basket stores consumer prices inclusive of the sales-tax and health-subsidy
+policy active at tick 0. Transaction prices use the same construction. Using untaxed
+posted prices as the base and tax-inclusive transactions thereafter would manufacture an
+inflation jump at tick 1 even when firms had not changed a price.
+
+Genesis inventory and base prices use the same Cobb-Douglas production function as the
+daily firm engine, evaluated at target headcount and the declared seed effective-labour
+assumption. This prevents the base basket from pricing output as if labour were free or
+linear while live production uses diminishing returns. Per-SKU yields remain explicit
+calibration parameters; the food and transport yields are sized against their configured
+annual subsistence quantities.
+
+Mechanical necessity purchases are staggered deterministically per `(agent, sku)` from
+`gamma_units_per_year`, with at most three purchase actions per agent per sim-day. This
+preserves the annual consumption floor without a permanent agent-id priority or a hidden
+one-unit-per-tick demand multiplier.
+
+The basket contains every non-capital SKU produced by the genesis firms. Small smoke runs
+may contain fewer than the nominal 12-SKU warning floor because they intentionally seed
+only three firms; the 1,000-agent calibration seeds all sectors and is the binding basket
+coverage gate. A basket is fixed once and never expanded when a later firm enters.
+
+### Household boundary
+
+M2 has agents, firms and individual deposit accounts but intentionally has no household
+entity; households, family formation and shared budgets belong to M5. C12's linear
+expenditure plan and consumption loop therefore operate per agent in M2. Rent payment and
+household pooling remain visibly unavailable until the M5 household projection exists,
+rather than fabricating one-person households and later changing the unit of analysis.

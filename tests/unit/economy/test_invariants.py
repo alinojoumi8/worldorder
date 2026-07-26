@@ -11,7 +11,7 @@ from polis.economy.invariants import (
 )
 from polis.economy.ledger import Ledger, Leg
 from polis.events.types import Event
-from polis.kernel.invariants import Ok
+from polis.kernel.invariants import INVARIANT_REGISTRY, NullWorldState, Ok, Severity, Violation
 
 RUN_ID = UUID("33333333-3333-3333-3333-333333333333")
 
@@ -63,3 +63,22 @@ def test_genesis_satisfies_global_base_and_deposit_identities() -> None:
     assert m0_cents(ledger) == 10_000
     assert issued_base_money_cents(ledger) == 10_000
     assert m1_cents(ledger) == 4_000
+
+
+class PriceState(NullWorldState):
+    def __init__(self, inflation_yoy_bp: int | None) -> None:
+        super().__init__()
+        self.inflation_yoy = inflation_yoy_bp
+
+    def price_inflation_yoy_bp(self) -> int | None:
+        return self.inflation_yoy
+
+
+def test_price_invariant_halts_outside_the_ratified_yearly_bounds() -> None:
+    check = INVARIANT_REGISTRY["INV-PRICE"]
+
+    assert isinstance(check.check(PriceState(None)), Ok)
+    assert isinstance(check.check(PriceState(40_000)), Ok)
+    result = check.check(PriceState(40_001))
+    assert isinstance(result, Violation)
+    assert result.severity == Severity.HALT

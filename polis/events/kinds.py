@@ -704,6 +704,93 @@ FIRM_PERIOD_CLOSED = register_kind(
         "cumulative_losses_cents",
     ),
 )
+GOODS_PURCHASED = register_kind(
+    6120,
+    "GOODS_PURCHASED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "txn_id",
+        "buyer_id",
+        "seller_firm_id",
+        "sku",
+        "qty",
+        "unit_price_cents",
+        "gross_cents",
+        "sales_tax_cents",
+        "subsidy_cents",
+        "ledger_txn_id",
+    ),
+)
+PURCHASE_FAILED = register_kind(
+    6121,
+    "PURCHASE_FAILED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("buyer_id", "sku", "qty", "reason"),
+)
+NEED_SATISFIED = register_kind(
+    6124,
+    "NEED_SATISFIED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "need", "sku", "from_bp", "to_bp"),
+)
+DURABLE_EXPIRED = register_kind(
+    6125,
+    "DURABLE_EXPIRED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "sku", "acquired_tick", "life_ticks"),
+)
+CPI_COMPUTED = register_kind(
+    6141,
+    "CPI_COMPUTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "basket_version",
+        "index_bp",
+        "category_index_bp",
+        "carried_forward_skus",
+        "window_ticks",
+    ),
+)
+INFLATION_COMPUTED = register_kind(
+    6142,
+    "INFLATION_COMPUTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("yoy_bp", "mom_annualised_bp", "core_bp"),
+)
+SECTOR_OUTPUT = register_kind(
+    6143,
+    "SECTOR_OUTPUT",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("sector", "units", "value_cents", "firms_n"),
+)
+BASKET_FIXED = register_kind(
+    6144,
+    "BASKET_FIXED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("basket_version", "quantities", "base_prices_cents", "tick"),
+)
+RENT_PAID = register_kind(
+    6150,
+    "RENT_PAID",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("place_id", "tenant_id", "landlord_id", "cents", "period_ticks", "txn_id"),
+)
+RENT_ARREARS = register_kind(
+    6151,
+    "RENT_ARREARS",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("place_id", "tenant_id", "owed_cents", "periods_missed"),
+)
 BANK_FOUNDED = register_kind(
     8001,
     "BANK_FOUNDED",

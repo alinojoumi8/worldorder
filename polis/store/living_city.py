@@ -55,11 +55,16 @@ async def _clear_projections(db: Database, run_id: Any) -> None:
         "ledger_entries",
         "ledger_accounts",
         "banks",
+        "cpi_series",
+        "cpi_baskets",
+        "goods_transactions",
+        "agent_skills",
         "inventory",
         "employments",
         "job_offers",
         "job_applications",
         "vacancies",
+        "skus",
         "firms",
         "cognition_traces",
         "metrics",
@@ -395,6 +400,34 @@ async def write_living_city_projections(
             )
             await cursor.executemany(
                 """
+                INSERT INTO skus(
+                    run_id,sku,category,is_necessity,base_utility_bp,
+                    perishable_bp_per_day,durable_life_ticks,is_service,is_capital,
+                    need_restore_bp,gamma_units_per_year,beta_bp,sectors,yield_units
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        sku.sku,
+                        sku.category,
+                        sku.is_necessity,
+                        sku.base_utility_bp,
+                        sku.perishable_bp_per_day,
+                        sku.durable_life_ticks,
+                        sku.is_service,
+                        sku.is_capital,
+                        Jsonb(sku.need_restore_bp),
+                        sku.gamma_units_per_year,
+                        sku.beta_bp,
+                        list(sku.sectors),
+                        sku.yield_units,
+                    )
+                    for sku in result.economy.skus.values()
+                ],
+            )
+            await cursor.executemany(
+                """
                 INSERT INTO inventory(
                     run_id,firm_id,sku,qty,unit_cost_cents,price_cents,carry_micro,
                     markup_bp,units_sold_28d,updated_tick
@@ -414,6 +447,93 @@ async def write_living_city_projections(
                         result.report.last_tick,
                     )
                     for inventory in result.economy.inventory.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO goods_transactions(
+                    run_id,txn_id,ledger_txn_id,tick,buyer_id,seller_firm_id,sku,
+                    qty,unit_price_cents,gross_cents,sales_tax_cents,subsidy_cents
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        transaction.txn_id,
+                        transaction.ledger_txn_id,
+                        transaction.tick,
+                        transaction.buyer_id,
+                        transaction.seller_firm_id,
+                        transaction.sku,
+                        transaction.qty,
+                        transaction.unit_price_cents,
+                        transaction.gross_cents,
+                        transaction.sales_tax_cents,
+                        transaction.subsidy_cents,
+                    )
+                    for transaction in result.economy.goods_transactions
+                ],
+            )
+            if result.economy.basket is not None:
+                await cursor.execute(
+                    """
+                    INSERT INTO cpi_baskets(
+                        run_id,version,fixed_tick,quantities,base_prices_cents
+                    ) VALUES(%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        run_id,
+                        result.economy.basket.version,
+                        result.economy.basket.fixed_tick,
+                        Jsonb(result.economy.basket.quantities),
+                        Jsonb(result.economy.basket.base_prices_cents),
+                    ),
+                )
+            await cursor.executemany(
+                """
+                INSERT INTO cpi_series(
+                    run_id,tick,index_bp,core_bp,fisher_bp,category_index_bp
+                ) VALUES(%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        tick,
+                        index_bp,
+                        result.economy.cpi_core_history_bp.get(tick, index_bp),
+                        result.economy.cpi_fisher_history_bp.get(tick, index_bp),
+                        Jsonb(
+                            {
+                                category: values[tick]
+                                for category, values in (
+                                    result.economy.cpi_category_history_bp.items()
+                                )
+                                if tick in values
+                            }
+                        ),
+                    )
+                    for tick, index_bp in sorted(result.economy.cpi_history_bp.items())
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO agent_skills(
+                    run_id,agent_id,skill,level_bp,last_used_tick
+                ) VALUES(%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        agent.agent_id,
+                        skill,
+                        round(level * 10_000),
+                        result.economy.skill_last_used_tick.get(
+                            agent.agent_id,
+                            {},
+                        ).get(skill, 0),
+                    )
+                    for agent in result.population
+                    for skill, level in sorted(agent.skills.items())
                 ],
             )
             await cursor.executemany(

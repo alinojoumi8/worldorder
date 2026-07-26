@@ -7,6 +7,7 @@ from polis.agents.state import AgentPopulation
 from polis.config.mechanisms import mechanism
 from polis.config.settings import Settings
 from polis.economy.firms import FirmEngine
+from polis.economy.goods import GoodsEngine
 from polis.economy.labour import (
     LabourMarket,
     Occupation,
@@ -69,6 +70,7 @@ class MechanicalPolicy:
         self.occupations = occupations
         self.labour = LabourMarket(settings, population, world, economy, rng, occupations)
         self.firms = FirmEngine(settings, economy, rng)
+        self.goods = GoodsEngine(settings, population, world, economy, rng)
 
     def step(self, tick: int, emit: Emit) -> tuple[Event, ...]:
         events: list[Event] = list(self.labour.expire(tick, emit))
@@ -77,9 +79,12 @@ class MechanicalPolicy:
         shortlisted = self.labour.screen_pending(tick, emit)
         offer_actions = self._offer_actions(shortlisted, tick)
         events.extend(self.labour.resolve(offer_actions, tick, emit))
+        events.extend(self.goods.expire_durables(tick, emit))
+        events.extend(self.goods.resolve(self.goods.mechanical_actions(tick), tick, emit))
         events.extend(self.labour.run_payroll(tick, emit))
         events.extend(self.labour.decay_unused_skills(tick, emit))
         events.extend(self.firms.run_daily(tick, emit))
+        events.extend(self.goods.compute_cpi(tick, emit))
         events.append(self.labour.emit_summary(tick, emit))
         self.economy.sync_denormalised(self.population)
         self.economy.ledger.commit_tick(tick)

@@ -1,0 +1,230 @@
+skus:
+  fd_staple:
+    category: food
+    necessity: true
+    sectors: [food]
+    utility_bp: 7000
+    perishable_bp_per_day: 0
+    need_restore_bp: {hunger: 3500}
+    gamma_units_per_year: 365
+    beta_bp: 1200
+    yield_units: 80
+  fd_fresh:
+    category: food
+    necessity: true
+    sectors: [food]
+    utility_bp: 7600
+    perishable_bp_per_day: 2000
+    need_restore_bp: {hunger: 3000, health: 300}
+    gamma_units_per_year: 180
+    beta_bp: 700
+    yield_units: 50
+  fd_prepared:
+    category: food
+    necessity: false
+    sectors: [food, retail]
+    utility_bp: 8000
+    perishable_bp_per_day: 2000
+    need_restore_bp: {hunger: 4000}
+    gamma_units_per_year: 0
+    beta_bp: 400
+    yield_units: 20
+  fd_restaurant:
+    category: food
+    necessity: false
+    sectors: [services]
+    utility_bp: 8500
+    service: true
+    need_restore_bp: {hunger: 3500, social: 1500}
+    gamma_units_per_year: 0
+    beta_bp: 300
+    yield_units: 4
+  hs_utilities:
+    category: housing
+    necessity: true
+    sectors: [industrial]
+    utility_bp: 6500
+    service: true
+    need_restore_bp: {security: 800}
+    gamma_units_per_year: 12
+    beta_bp: 600
+    yield_units: 5
+  hs_furnishing:
+    category: housing
+    necessity: false
+    sectors: [industrial, retail]
+    utility_bp: 7200
+    durable_life_days: 1800
+    need_restore_bp: {esteem: 500, security: 300}
+    gamma_units_per_year: 0
+    beta_bp: 250
+    yield_units: 2
+  gd_clothing:
+    category: goods
+    necessity: true
+    sectors: [retail]
+    utility_bp: 7000
+    durable_life_days: 720
+    need_restore_bp: {esteem: 400, security: 200}
+    gamma_units_per_year: 4
+    beta_bp: 300
+    yield_units: 6
+  gd_household:
+    category: goods
+    necessity: false
+    sectors: [retail]
+    utility_bp: 7100
+    durable_life_days: 1080
+    need_restore_bp: {security: 500}
+    gamma_units_per_year: 0
+    beta_bp: 300
+    yield_units: 4
+  gd_electronics:
+    category: goods
+    necessity: false
+    sectors: [industrial, retail, media]
+    utility_bp: 8200
+    durable_life_days: 1080
+    need_restore_bp: {esteem: 1200, purpose: 300}
+    gamma_units_per_year: 0
+    beta_bp: 350
+    yield_units: 2
+  sv_transport:
+    category: services
+    necessity: true
+    sectors: [services]
+    utility_bp: 6800
+    service: true
+    need_restore_bp: {security: 300}
+    gamma_units_per_year: 240
+    beta_bp: 500
+    yield_units: 160
+  sv_childcare:
+    category: services
+    necessity: false
+    sectors: [services]
+    utility_bp: 7400
+    service: true
+    need_restore_bp: {security: 600}
+    gamma_units_per_year: 0
+    beta_bp: 250
+    yield_units: 3
+  sv_repair:
+    category: services
+    necessity: false
+    sectors: [services]
+    utility_bp: 6200
+    service: true
+    need_restore_bp: {security: 300}
+    gamma_units_per_year: 0
+    beta_bp: 250
+    yield_units: 5
+  sv_legal:
+    category: services
+    necessity: false
+    sectors: [services]
+    utility_bp: 6000
+    service: true
+    need_restore_bp: {security: 500}
+    gamma_units_per_year: 0
+    beta_bp: 200
+    yield_units: 2
+  hl_primary:
+    category: health
+    necessity: true
+    sectors: [health]
+    utility_bp: 8500
+    service: true
+    need_restore_bp: {health: 1800}
+    gamma_units_per_year: 2
+    beta_bp: 300
+    yield_units: 3
+  hl_medicine:
+    category: health
+    necessity: true
+    sectors: [health]
+    utility_bp: 8000
+    need_restore_bp: {health: 1200}
+    gamma_units_per_year: 6
+    beta_bp: 300
+    yield_units: 5
+  hl_hospital:
+    category: health
+    necessity: true
+    sectors: [health]
+    utility_bp: 10000
+    service: true
+    need_restore_bp: {health: 6000}
+    gamma_units_per_year: 0
+    beta_bp: 250
+    yield_units: 1
+  lx_dining:
+    category: luxury
+    necessity: false
+    sectors: [services]
+    utility_bp: 8600
+    service: true
+    need_restore_bp: {social: 2200, esteem: 800}
+    gamma_units_per_year: 0
+    beta_bp: 300
+    yield_units: 4
+  lx_travel:
+    category: luxury
+    necessity: false
+    sectors: [services]
+    utility_bp: 9000
+    service: true
+    need_restore_bp: {social: 1600, esteem: 1400, purpose: 1000}
+    gamma_units_per_year: 0
+    beta_bp: 300
+    yield_units: 2
+  lx_jewellery:
+    category: luxury
+    necessity: false
+    sectors: [retail]
+    utility_bp: 8800
+    durable_life_days: 3600
+    need_restore_bp: {esteem: 2200}
+    gamma_units_per_year: 0
+    beta_bp: 250
+    yield_units: 1
+  ed_tuition:
+    category: services
+    necessity: false
+    sectors: [education]
+    utility_bp: 8400
+    service: true
+    need_restore_bp: {purpose: 1200, esteem: 500}
+    gamma_units_per_year: 0
+    beta_bp: 300
+    yield_units: 2
+  cap_machine:
+    category: goods
+    necessity: false
+    sectors: [industrial]
+    utility_bp: 0
+    capital: true
+    need_restore_bp: {}
+    gamma_units_per_year: 0
+    beta_bp: 0
+    yield_units: 1
+  cap_fixture:
+    category: goods
+    necessity: false
+    sectors: [industrial]
+    utility_bp: 0
+    capital: true
+    need_restore_bp: {}
+    gamma_units_per_year: 0
+    beta_bp: 0
+    yield_units: 2
+  cap_software:
+    category: goods
+    necessity: false
+    sectors: [industrial]
+    utility_bp: 0
+    capital: true
+    need_restore_bp: {}
+    gamma_units_per_year: 0
+    beta_bp: 0
+    yield_units: 3

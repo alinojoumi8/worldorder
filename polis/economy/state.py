@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from polis.agents.state import AgentPopulation
 from polis.economy.invariants import check_money, m1_cents
 from polis.economy.ledger import Ledger
 from polis.kernel.invariants import Violation
+
+
+def _int_history(value: Mapping[object, object]) -> dict[int, int]:
+    return {int(cast(Any, tick)): int(cast(Any, amount)) for tick, amount in value.items()}
 
 
 @dataclass(slots=True)
@@ -115,6 +119,56 @@ class InventoryState:
 
 
 @dataclass(slots=True)
+class SkuState:
+    sku: str
+    category: str
+    is_necessity: bool
+    base_utility_bp: int
+    perishable_bp_per_day: int
+    durable_life_ticks: int | None
+    is_service: bool
+    is_capital: bool
+    need_restore_bp: dict[str, int]
+    gamma_units_per_year: int
+    beta_bp: int
+    sectors: tuple[str, ...]
+    yield_units: int
+
+
+@dataclass(slots=True)
+class GoodsTransactionState:
+    txn_id: str
+    ledger_txn_id: str
+    tick: int
+    buyer_id: str
+    seller_firm_id: str
+    sku: str
+    qty: int
+    unit_price_cents: int
+    gross_cents: int
+    sales_tax_cents: int
+    subsidy_cents: int
+
+
+@dataclass(slots=True)
+class DurableState:
+    durable_id: str
+    agent_id: str
+    sku: str
+    acquired_tick: int
+    life_ticks: int
+    qty: int
+
+
+@dataclass(slots=True)
+class BasketState:
+    version: int
+    quantities: dict[str, int]
+    base_prices_cents: dict[str, int]
+    fixed_tick: int
+
+
+@dataclass(slots=True)
 class EconomyState:
     ledger: Ledger
     banks: dict[str, BankState]
@@ -125,6 +179,15 @@ class EconomyState:
     employments: dict[str, EmploymentState] = field(default_factory=dict)
     inventory: dict[str, InventoryState] = field(default_factory=dict)
     skill_last_used_tick: dict[str, dict[str, int]] = field(default_factory=dict)
+    skus: dict[str, SkuState] = field(default_factory=dict)
+    goods_transactions: list[GoodsTransactionState] = field(default_factory=list)
+    food_on_hand: dict[str, dict[str, int]] = field(default_factory=dict)
+    durables: dict[str, DurableState] = field(default_factory=dict)
+    basket: BasketState | None = None
+    cpi_history_bp: dict[int, int] = field(default_factory=dict)
+    cpi_core_history_bp: dict[int, int] = field(default_factory=dict)
+    cpi_fisher_history_bp: dict[int, int] = field(default_factory=dict)
+    cpi_category_history_bp: dict[str, dict[int, int]] = field(default_factory=dict)
 
     def cached_net_worth_cents(self) -> Mapping[str, int]:
         result = {firm_id: firm.liquid_cents for firm_id, firm in sorted(self.firms.items())}
@@ -172,6 +235,23 @@ class EconomyState:
                 agent_id: dict(sorted(values.items()))
                 for agent_id, values in sorted(self.skill_last_used_tick.items())
             },
+            "skus": {sku: asdict(row) for sku, row in sorted(self.skus.items())},
+            "goods_transactions": [asdict(row) for row in self.goods_transactions],
+            "food_on_hand": {
+                agent_id: dict(sorted(values.items()))
+                for agent_id, values in sorted(self.food_on_hand.items())
+            },
+            "durables": {
+                durable_id: asdict(row) for durable_id, row in sorted(self.durables.items())
+            },
+            "basket": asdict(self.basket) if self.basket is not None else None,
+            "cpi_history_bp": dict(sorted(self.cpi_history_bp.items())),
+            "cpi_core_history_bp": dict(sorted(self.cpi_core_history_bp.items())),
+            "cpi_fisher_history_bp": dict(sorted(self.cpi_fisher_history_bp.items())),
+            "cpi_category_history_bp": {
+                category: dict(sorted(values.items()))
+                for category, values in sorted(self.cpi_category_history_bp.items())
+            },
         }
 
     def load(self, state: Mapping[str, Any]) -> None:
@@ -184,6 +264,15 @@ class EconomyState:
         employments = state.get("employments", {})
         inventory = state.get("inventory", {})
         skill_last_used_tick = state.get("skill_last_used_tick", {})
+        skus = state.get("skus", {})
+        goods_transactions = state.get("goods_transactions", ())
+        food_on_hand = state.get("food_on_hand", {})
+        durables = state.get("durables", {})
+        basket = state.get("basket")
+        cpi_history_bp = state.get("cpi_history_bp", {})
+        cpi_core_history_bp = state.get("cpi_core_history_bp", {})
+        cpi_fisher_history_bp = state.get("cpi_fisher_history_bp", {})
+        cpi_category_history_bp = state.get("cpi_category_history_bp", {})
         if not isinstance(ledger, Mapping):
             raise ValueError("economy checkpoint ledger must be a mapping")
         if not isinstance(banks, Mapping) or not isinstance(firms, Mapping):
@@ -195,6 +284,13 @@ class EconomyState:
             employments,
             inventory,
             skill_last_used_tick,
+            skus,
+            food_on_hand,
+            durables,
+            cpi_history_bp,
+            cpi_core_history_bp,
+            cpi_fisher_history_bp,
+            cpi_category_history_bp,
         )
         if any(not isinstance(item, Mapping) for item in projections):
             raise ValueError("economy checkpoint projections must be mappings")
@@ -239,14 +335,52 @@ class EconomyState:
             for agent_id, row in sorted(skill_last_used_tick.items())
             if isinstance(row, Mapping)
         }
+        self.skus = {
+            str(sku): SkuState(**dict(row))
+            for sku, row in sorted(skus.items())
+            if isinstance(row, Mapping)
+        }
+        if not isinstance(goods_transactions, list | tuple):
+            raise ValueError("economy goods transactions must be a sequence")
+        self.goods_transactions = [
+            GoodsTransactionState(**dict(row))
+            for row in goods_transactions
+            if isinstance(row, Mapping)
+        ]
+        self.food_on_hand = {
+            str(agent_id): {str(sku): int(qty) for sku, qty in row.items()}
+            for agent_id, row in sorted(food_on_hand.items())
+            if isinstance(row, Mapping)
+        }
+        self.durables = {
+            str(durable_id): DurableState(**dict(row))
+            for durable_id, row in sorted(durables.items())
+            if isinstance(row, Mapping)
+        }
+        self.basket = BasketState(**dict(basket)) if isinstance(basket, Mapping) else None
+        self.cpi_history_bp = _int_history(cpi_history_bp)
+        self.cpi_core_history_bp = _int_history(cpi_core_history_bp)
+        self.cpi_fisher_history_bp = _int_history(cpi_fisher_history_bp)
+        self.cpi_category_history_bp = {
+            str(category): _int_history(values)
+            for category, values in sorted(cpi_category_history_bp.items())
+            if isinstance(values, Mapping)
+        }
 
 
 class EconomyWorldState:
     """Kernel invariant view combining M1 population with the M2 ledger."""
 
-    def __init__(self, population: AgentPopulation, economy: EconomyState) -> None:
+    def __init__(
+        self,
+        population: AgentPopulation,
+        economy: EconomyState,
+        *,
+        ticks_per_year: int,
+    ) -> None:
         self.population_state = population
         self.economy = economy
+        self.ticks_per_year = ticks_per_year
 
     @property
     def tick(self) -> int:
@@ -272,6 +406,13 @@ class EconomyWorldState:
             if isinstance(value, Mapping):
                 return sum(abs(int(item)) for item in value.values()) or 1
         return 1
+
+    def price_inflation_yoy_bp(self) -> int | None:
+        current = self.economy.cpi_history_bp.get(self.tick)
+        prior = self.economy.cpi_history_bp.get(self.tick - self.ticks_per_year)
+        if current is None or prior is None or prior <= 0:
+            return None
+        return 10_000 * (current - prior) // prior
 
     def cached_net_worth_cents(self) -> Mapping[str, int]:
         values = dict(self.economy.cached_net_worth_cents())

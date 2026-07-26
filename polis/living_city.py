@@ -725,7 +725,17 @@ async def run_living_city(
         runtime=runtime,
         settings=settings,
         invariants=InvariantRunner(clock),
-        state=EconomyWorldState(population, economy) if economy is not None else population,
+        state=(
+            EconomyWorldState(
+                population,
+                economy,
+                ticks_per_year=(
+                    settings.clock.days_per_sim_year * settings.clock.ticks_per_sim_day
+                ),
+            )
+            if economy is not None
+            else population
+        ),
     )
     for handler in engine.handlers():
         loop.register(handler)

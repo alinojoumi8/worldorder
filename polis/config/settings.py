@@ -242,6 +242,7 @@ class FirmSettings(FrozenModel):
     min_founding_capital_cents: int = 0
     max_firms_per_founder: int = 3
     working_capital_months: int = 3
+    seed_effective_labour_bp_per_worker: int = 4_000
     markup: FirmMarkupSettings = FirmMarkupSettings()
 
 
@@ -249,11 +250,24 @@ class ConsumptionSettings(FrozenModel):
     subsistence_gamma_bp: int = 4_000
     max_sellers_considered: int = 6
     sales_tax_bp: int = 800
+    savings_share_bp: int = 2_400
+    buffer_bp: int = 2_000
 
 
 class GoodsSettings(FrozenModel):
+    catalogue_path: str = "configs/skus.yaml"
+    search_k: int = 5
+    search_radius_districts: int = 2
+    food_stock_cap_units: int = 14
+    reflex_value_cap_cents: int = 0
+    purchase_max_qty: int = 1_000
     cpi_base_bp: int = 10_000
+    cpi_window_days: int = 30
+    cpi_basket_min_skus: int = 12
+    cpi_carry_warn_frac_bp: int = 2_500
+    fisher_enabled: bool = True
     initial_inventory_days: int = 30
+    max_purchases_per_agent_per_day: int = 3
     consumption: ConsumptionSettings = ConsumptionSettings()
 
 
@@ -295,12 +309,14 @@ class TaxSettings(FrozenModel):
     payroll_employer_bp: int = 500
     corporate_bp: int = 2_000
     sales_bp: int = 800
+    exempt_necessities: bool = False
     arrears_penalty_bp: int = 800
 
 
 class SpendSettings(FrozenModel):
     benefit_replacement_bp: int = 4_000
     benefit_max_days: int = 182
+    health_subsidy_bp: int = 0
 
 
 class TreasurySettings(FrozenModel):

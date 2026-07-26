@@ -40,6 +40,8 @@ class WorldStateView(Protocol):
 
     def ledger_imbalance_cents(self) -> int: ...
 
+    def price_inflation_yoy_bp(self) -> int | None: ...
+
     def population(self) -> int: ...
 
     def initial_population(self) -> int: ...
@@ -61,6 +63,9 @@ class NullWorldState:
 
     def ledger_imbalance_cents(self) -> int:
         return 0
+
+    def price_inflation_yoy_bp(self) -> int | None:
+        return None
 
     def population(self) -> int:
         return 0
@@ -118,6 +123,19 @@ def _ledger(state: WorldStateView) -> Result:
     )
 
 
+def _price(state: WorldStateView) -> Result:
+    actual = state.price_inflation_yoy_bp()
+    if actual is None or -5_000 <= actual <= 40_000:
+        return Ok("INV-PRICE")
+    return Violation(
+        "INV-PRICE",
+        "[-5000, 40000]",
+        str(actual),
+        {"inflation_yoy_bp": actual},
+        Severity.HALT,
+    )
+
+
 def _population(state: WorldStateView) -> Result:
     initial = state.initial_population()
     population = state.population()
@@ -158,6 +176,7 @@ INVARIANT_REGISTRY: Final[dict[str, Invariant]] = {
     for item in (
         _FunctionInvariant("INV-MONEY", Severity.HALT, "tick", _money),
         _FunctionInvariant("INV-LEDGER", Severity.HALT, "tick", _ledger),
+        _FunctionInvariant("INV-PRICE", Severity.HALT, "sim_day", _price),
         _FunctionInvariant("INV-POP", Severity.WARN, "sim_day", _population),
         _FunctionInvariant("INV-ENTROPY", Severity.WARN, "sim_day", _entropy),
         _FunctionInvariant("INV-CHAIN", Severity.HALT, "checkpoint", _chain),

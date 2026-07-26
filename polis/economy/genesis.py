@@ -6,10 +6,17 @@ from uuid import UUID
 
 from polis.agents.state import AgentPopulation
 from polis.config.settings import Settings
+from polis.economy.goods import seed_goods_state
 from polis.economy.ledger import Ledger, Leg, bank_of
 from polis.economy.money import allocate, bp
 from polis.economy.state import BankState, EconomyState, FirmState
-from polis.events.kinds import ACCOUNT_OPENED, BANK_FOUNDED, FIRM_FOUNDED, MONEY_ISSUED
+from polis.events.kinds import (
+    ACCOUNT_OPENED,
+    BANK_FOUNDED,
+    BASKET_FIXED,
+    FIRM_FOUNDED,
+    MONEY_ISSUED,
+)
 from polis.events.types import Event, NewEvent
 from polis.kernel.rng import RngRegistry
 from polis.world.api import Place, World
@@ -343,5 +350,19 @@ def create_economy(
             agent.employment_status = "unemployed"
 
     state = EconomyState(ledger, banks, firms)
+    basket = seed_goods_state(settings, state)
+    events.append(
+        emit(
+            NewEvent(
+                BASKET_FIXED,
+                {
+                    "basket_version": basket.version,
+                    "quantities": basket.quantities,
+                    "base_prices_cents": basket.base_prices_cents,
+                    "tick": 0,
+                },
+            )
+        )
+    )
     state.sync_denormalised(population)
     return GenesisResult(state, tuple(events))

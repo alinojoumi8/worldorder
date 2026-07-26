@@ -38,6 +38,9 @@ class AgentPopulation:
     def ledger_imbalance_cents(self) -> int:
         return 0
 
+    def price_inflation_yoy_bp(self) -> int | None:
+        return None
+
     def population(self) -> int:
         return len(self.alive())
 

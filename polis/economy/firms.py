@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from decimal import Decimal, localcontext
 
 from polis.config.mechanisms import mechanism
 from polis.config.settings import FirmMarkupSettings, Settings
-from polis.economy.money import MONEY_CTX, bp, round_to_tick
+from polis.economy.goods import sector_skus
+from polis.economy.money import allocate, bp, round_to_tick
+from polis.economy.production import production_output_micro
 from polis.economy.state import EconomyState, FirmState, InventoryState
 from polis.events.kinds import (
     CAPITAL_DEPRECIATED,
@@ -18,68 +19,6 @@ from polis.events.types import Event, NewEvent
 from polis.kernel.rng import RngRegistry
 
 Emit = Callable[[NewEvent], Event]
-SECTOR_SKU = {
-    "industrial": "cap_machine",
-    "food": "fd_prepared",
-    "retail": "retail_bundle",
-    "services": "svc_general",
-    "finance": "svc_finance",
-    "health": "svc_health",
-    "education": "svc_education",
-    "media": "media_story",
-}
-SECTOR_YIELD_UNITS = {
-    "industrial": 2,
-    "food": 8,
-    "retail": 5,
-    "services": 3,
-    "finance": 2,
-    "health": 2,
-    "education": 2,
-    "media": 3,
-}
-PERISHABLE_SKUS = frozenset({"fd_fresh", "fd_prepared"})
-
-
-@mechanism(
-    "firms.production_cobb_douglas",
-    entails=(
-        "Output has constant returns jointly in labour and capital, diminishing returns "
-        "to either input alone, and is multiplicatively separable in productivity."
-    ),
-    config_key="firms.beta_capital_bp",
-)
-def production_output_micro(
-    *,
-    productivity_bp: int,
-    capital_cents: int,
-    capital_ref_cents: int,
-    effective_labour_bp: int,
-    beta_capital_bp: int,
-    yield_units: int,
-) -> int:
-    if (
-        productivity_bp <= 0
-        or capital_cents <= 0
-        or capital_ref_cents <= 0
-        or effective_labour_bp <= 0
-        or yield_units <= 0
-    ):
-        return 0
-    with localcontext(MONEY_CTX):
-        beta = Decimal(beta_capital_bp) / Decimal(10_000)
-        labour_share = Decimal(1) - beta
-        capital_factor = (Decimal(capital_cents) / Decimal(capital_ref_cents)) ** beta
-        labour_factor = (Decimal(effective_labour_bp) / Decimal(10_000)) ** labour_share
-        output = (
-            Decimal(productivity_bp)
-            / Decimal(10_000)
-            * capital_factor
-            * labour_factor
-            * Decimal(yield_units)
-            * Decimal(1_000_000)
-        )
-    return int(output)
 
 
 def add_inventory(inventory: InventoryState, quantity: int, unit_cost_cents: int) -> None:
@@ -182,51 +121,69 @@ class FirmEngine:
         labour_bp = sum(row.last_effective_labour_bp for row in employments)
         if labour_bp <= 0:
             return ()
-        sku = SECTOR_SKU.get(firm.sector, "svc_general")
-        inventory_id = f"{firm.firm_id}:{sku}"
-        inventory = self.economy.inventory.setdefault(
-            inventory_id,
-            InventoryState(
-                firm.firm_id,
-                sku,
-                price_cents=max(1, self.settings.economy.median_wage_cents // 24 // 20),
-                markup_bp=self.settings.firms.markup.initial_bp,
-            ),
+        skus = sector_skus(self.economy, firm.sector)
+        if not skus:
+            return ()
+        labour_allocations = split_labour_by_revenue(
+            labour_bp,
+            tuple((sku.sku, 1) for sku in skus),
         )
-        output_micro = production_output_micro(
-            productivity_bp=firm.productivity_bp,
-            capital_cents=firm.capital_cents,
-            capital_ref_cents=self.settings.firms.capital_ref_cents,
-            effective_labour_bp=labour_bp,
-            beta_capital_bp=self.settings.firms.beta_capital_bp,
-            yield_units=SECTOR_YIELD_UNITS.get(firm.sector, 2),
-        )
-        total_micro = inventory.carry_micro + output_micro
-        units = total_micro // 1_000_000
-        inventory.carry_micro = total_micro % 1_000_000
         daily_wage_cost = sum(row.wage_cents // 14 for row in employments)
-        unit_cost = daily_wage_cost // max(1, units)
-        if units:
-            add_inventory(inventory, units, max(1, unit_cost))
-            firm.cumulative_output_units += units
-        event = emit(
-            NewEvent(
-                PRODUCTION_RUN,
-                {
-                    "firm_id": firm.firm_id,
-                    "sku": sku,
-                    "labour_bp": labour_bp,
-                    "capital_cents_used": firm.capital_cents,
-                    "productivity_bp": firm.productivity_bp,
-                    "output_micro": output_micro,
-                    "units_produced": units,
-                    "unit_cost_cents": max(1, unit_cost),
-                    "carry_micro_after": inventory.carry_micro,
-                },
-                actor_id=firm.firm_id,
-            )
+        wage_allocations = allocate(
+            daily_wage_cost,
+            tuple((sku.sku, max(1, labour_allocations[sku.sku])) for sku in skus),
         )
-        return (event,)
+        events: list[Event] = []
+        for sku in skus:
+            inventory_id = f"{firm.firm_id}:{sku.sku}"
+            inventory = self.economy.inventory.setdefault(
+                inventory_id,
+                InventoryState(
+                    firm.firm_id,
+                    sku.sku,
+                    price_cents=max(
+                        1,
+                        self.settings.economy.median_wage_cents // 24 // 20,
+                    ),
+                    markup_bp=self.settings.firms.markup.initial_bp,
+                ),
+            )
+            sku_labour = labour_allocations[sku.sku]
+            output_micro = production_output_micro(
+                productivity_bp=firm.productivity_bp,
+                capital_cents=firm.capital_cents,
+                capital_ref_cents=self.settings.firms.capital_ref_cents,
+                effective_labour_bp=sku_labour,
+                beta_capital_bp=self.settings.firms.beta_capital_bp,
+                yield_units=sku.yield_units,
+            )
+            total_micro = inventory.carry_micro + output_micro
+            units = total_micro // 1_000_000
+            inventory.carry_micro = total_micro % 1_000_000
+            unit_cost = wage_allocations[sku.sku] // max(1, units)
+            if units:
+                add_inventory(inventory, units, max(1, unit_cost))
+                firm.cumulative_output_units += units
+            events.append(
+                emit(
+                    NewEvent(
+                        PRODUCTION_RUN,
+                        {
+                            "firm_id": firm.firm_id,
+                            "sku": sku.sku,
+                            "labour_bp": sku_labour,
+                            "capital_cents_used": firm.capital_cents,
+                            "productivity_bp": firm.productivity_bp,
+                            "output_micro": output_micro,
+                            "units_produced": units,
+                            "unit_cost_cents": max(1, unit_cost),
+                            "carry_micro_after": inventory.carry_micro,
+                        },
+                        actor_id=firm.firm_id,
+                    )
+                )
+            )
+        return tuple(events)
 
     def _update_productivity(self, firm: FirmState, tick: int, emit: Emit) -> tuple[Event, ...]:
         old = firm.productivity_bp
@@ -314,13 +271,14 @@ class FirmEngine:
 
     def _spoil(self, tick: int, emit: Emit) -> tuple[Event, ...]:
         events: list[Event] = []
-        rate = self.settings.firms.spoilage_bp_per_day
         for inventory in sorted(
             self.economy.inventory.values(),
             key=lambda row: (row.firm_id, row.sku),
         ):
-            if inventory.sku not in PERISHABLE_SKUS or inventory.quantity <= 0:
+            sku = self.economy.skus.get(inventory.sku)
+            if sku is None or sku.perishable_bp_per_day <= 0 or inventory.quantity <= 0:
                 continue
+            rate = sku.perishable_bp_per_day
             raw = inventory.quantity * rate
             spoiled = raw // 10_000
             remainder = raw % 10_000
