@@ -1,0 +1,7 @@
+{# version: 1 #}
+Agent: {{ agent_id }}
+Recent memories:
+{% for memory in memories %}- {{ memory }}
+{% endfor %}
+Return one question whose answer would help this agent form a grounded reflection.
+

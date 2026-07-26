@@ -1,0 +1,80 @@
+run:
+  name: m1-calibration-1k-2k
+  seed: 2026072601
+  ticks: 2000
+  checkpoint_interval: 500
+  retention: metrics_only
+  scale: 1000
+  tags: [m1, calibration, stub]
+clock:
+  profile: microscope
+  ticks_per_sim_day: 24
+  days_per_sim_year: 360
+  demographic_acceleration: 4.0
+population:
+  initial_agents: 1000
+  age_distribution: pyramid_ca_2020
+  trait_model: big_five_plus_econ
+world:
+  width: 200
+  height: 200
+  districts: 6
+  places_per_district: 60
+llm:
+  est_tokens_per_call: 3300
+  providers:
+    stub:
+      kind: stub
+      max_concurrency: 128
+      billing: free
+  budget:
+    lines:
+      cognition: {calls_per_tick: 90, tokens_per_tick: 300000}
+      ancillary: {calls_per_tick: 24, tokens_per_tick: 79200}
+      external: {calls_per_tick: 1, tokens_per_tick: 3300}
+      free: {calls_per_tick: 512, tokens_per_tick: 1689600}
+    usd_per_run: 0
+    usd_halt_multiple: 1.2
+    on_exhaustion: degrade_to_reflex
+  routing:
+    DELIBERATE: {lane: stub, model: stub-v1, temperature: 0.8, template: deliberate/user.v1.jinja}
+    REFLECT: {lane: stub, model: stub-v1, temperature: 0.9, template: reflect/questions.v1.jinja}
+    IMPORTANCE: {lane: stub, model: stub-v1, temperature: 0.0, template: importance/user.v1.jinja}
+    EMBED: {lane: stub, model: stub-v1, temperature: 0.0, template: embedding/user.v1.jinja}
+  fallback_policy: permissive
+  cache:
+    mode: live
+    path: file://./.cache/completions
+salience:
+  policy: weighted
+  deliberate_share: 0.07
+  exploration_epsilon: 0.02
+  cognition_sample_rate: 0.02
+memory:
+  write_threshold: 0.25
+  max_per_agent: 3000
+  retrieval_k: 12
+  retrieval_max_tokens: 600
+  reflection_threshold: 4.0
+  reflection_min_gap_ticks: 24
+mechanisms: {}
+society:
+  feed_algorithm: engagement
+  outlets: 4
+ablations:
+  reflex_only: false
+  obfuscate_domain: false
+  disclose_simulation: false
+store:
+  dsn: postgresql://polis_engine:polis@127.0.0.1:5432/polis
+  reader_dsn: postgresql://polis_reader:polis_reader@127.0.0.1:5432/polis
+  redis_url: redis://127.0.0.1:6379/0
+  blob_url: file://./.blobs
+telemetry:
+  timing_sample_every: 25
+  phase_budget_warn: true
+  redis_publish: false
+observatory:
+  enabled: false
+  bind: 127.0.0.1:8080
+  static_dir: web/dist

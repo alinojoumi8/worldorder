@@ -1,0 +1,7 @@
+{# version: 1 #}
+Question: {{ question }}
+Memories, including stable ids:
+{% for memory in memories %}- {{ memory.id }}: {{ memory.text }}
+{% endfor %}
+Return insights with the memory ids that directly support each statement.
+

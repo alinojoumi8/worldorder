@@ -496,19 +496,28 @@ place for accounting closure to break, and it is worth an integration test of it
 
 ---
 
-## 14. Open calibration questions (resolve in M1)
+## 14. M1 calibration decisions
 
-These are listed in `01-PRD.md §11` and are called out here because M1's chunks own them:
+The formal 1,000-agent, 2,000-tick run is recorded in
+`artifacts/acceptance/m1-calibration.json`.
 
-1. What salience cutoff yields ~7% deliberate rate with behaviour that a reader finds
-   sensible? Calibrate empirically on a 2,000-tick run; do not guess.
-2. Is trait-conditioned prompt variation enough to pass V4 (behavioural entropy), or do we
-   need per-agent template variation?
-3. Are global retrieval weights (`w_r`, `w_i`, `w_v`) adequate, or do they need per-agent
-   variation?
-4. Is reflection better scheduled or purely event-triggered?
-
-Each should be answered with a small sweep and the result written back into this document.
+1. The deliberate target remains 7%. The measured mean, p05, p50 and p95 were all
+   exactly 700 basis points. Event-triggered reflections use the budget above the
+   deliberate reserve.
+2. Trait-conditioned prompt variation is sufficient for M1. Across three full validation
+   seeds, normalized V4 action entropy averaged 0.854824–0.864050, never fell below
+   0.782199 and passed the 0.35 floor on every measured tick. Per-agent templates were
+   not added.
+3. Global retrieval weights (`w_r`, `w_i`, `w_v`) remain fixed for M1 as planned. The
+   acceptance run establishes operational adequacy, not scientific identification;
+   later retrieval-weight sweeps must preserve that distinction.
+4. Reflection remains importance/life-event triggered with a 24-tick cooldown. Due
+   reflections are queued deterministically by accumulated importance and agent id so
+   synchronized threshold crossings cannot consume the deliberate reserve.
+5. Stakes are event deltas, not chronic need pressure. M1 emits zero event stakes until
+   later institutions provide auditable wealth, health, employment, relationship or
+   legal-jeopardy changes. This prevents routine low-need ticks from becoming permanent
+   high-salience memories.
 
 ---
 

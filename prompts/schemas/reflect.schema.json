@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["insights"],
+  "additionalProperties": false,
+  "properties": {
+    "insights": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["statement", "supported_by"],
+        "additionalProperties": false,
+        "properties": {
+          "statement": {"type": "string"},
+          "supported_by": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}
+

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["action", "reasoning", "confidence"],
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "type": "object",
+      "required": ["type", "params"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {"type": "string", "enum": ["MOVE", "REST", "STUDY", "TALK", "NULL_ACTION"]},
+        "params": {"type": "object"}
+      }
+    },
+    "reasoning": {"type": "string"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+  }
+}
+

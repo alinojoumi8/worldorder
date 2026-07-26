@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "polis-sim"
+version = "0.1.0"
+description = "Deterministic, event-sourced AI city simulation and research observatory"
+readme = "PRODUCT.md"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.14",
+  "fastapi>=0.115",
+  "httpx>=0.28",
+  "jinja2>=3.1",
+  "jsonschema>=4.23",
+  "numpy>=2.1",
+  "psycopg[binary,pool]>=3.2",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "pyyaml>=6.0",
+  "redis>=5.2",
+  "structlog>=24.4",
+  "typer>=0.15",
+  "uvicorn[standard]>=0.32",
+]
+
+[project.scripts]
+polis = "polis.cli.app:main"
+
+[dependency-groups]
+dev = [
+  "hypothesis>=6.122",
+  "import-linter>=2.2",
+  "mypy>=1.14",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "pytest-cov>=6.0",
+  "ruff>=0.9",
+  "types-jsonschema>=4.23",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["polis"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "integration: requires local infrastructure or composes multiple subsystems",
+  "determinism: byte-level deterministic replay check",
+  "live: makes bounded provider calls and is never run by default",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["polis"]
+plugins = ["pydantic.mypy"]
+exclude = ["web/"]
+
+[[tool.mypy.overrides]]
+module = ["yaml", "redis.*"]
+ignore_missing_imports = true

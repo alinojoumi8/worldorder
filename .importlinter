@@ -1,0 +1,38 @@
+[importlinter]
+root_package = polis
+
+[importlinter:contract:events-boundary]
+name = Events only depend on config
+type = forbidden
+source_modules =
+    polis.events
+forbidden_modules =
+    polis.kernel
+    polis.store
+    polis.llm
+    polis.agents
+    polis.world
+    polis.observatory
+    polis.research
+
+[importlinter:contract:kernel-boundary]
+name = Kernel does not know domain modules
+type = forbidden
+source_modules =
+    polis.kernel
+forbidden_modules =
+    polis.agents
+    polis.world
+    polis.observatory
+    polis.research
+
+[importlinter:contract:observatory-read-only]
+name = Observatory does not import engine or agent cognition
+type = forbidden
+source_modules =
+    polis.observatory
+forbidden_modules =
+    polis.kernel
+    polis.agents
+    polis.research
+

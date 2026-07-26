@@ -1,0 +1,67 @@
+run:
+  name: live-minimax-smoke
+  seed: 2026072602
+  ticks: 1
+  checkpoint_interval: 1
+  retention: metrics_only
+  scale: 1
+  tags: [m1, live-provider-smoke]
+clock:
+  profile: chronicle
+  ticks_per_sim_day: 1
+  days_per_sim_year: 360
+  demographic_acceleration: 1.0
+population:
+  initial_agents: 1
+world:
+  width: 20
+  height: 20
+  districts: 1
+  places_per_district: 4
+llm:
+  est_tokens_per_call: 3300
+  providers:
+    reasoning:
+      kind: minimax
+      base_url: https://api.minimax.io/v1
+      api_key_env: MINIMAX_API_KEY
+      max_concurrency: 1
+      timeout_s: 45
+      structured_output: none
+      billing: token
+      price_in_usd_per_mtok: 1
+      price_out_usd_per_mtok: 10
+  budget:
+    lines:
+      cognition: {calls_per_tick: 1, tokens_per_tick: 5000}
+      ancillary: {calls_per_tick: 1, tokens_per_tick: 5000}
+      external: {calls_per_tick: 0, tokens_per_tick: 0}
+      free: {calls_per_tick: 1, tokens_per_tick: 5000}
+    usd_per_run: 0.05
+    usd_halt_multiple: 1.0
+    on_exhaustion: halt
+  routing:
+    DELIBERATE: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.0, max_tokens: 128, structured: none, template: deliberate/user.v1.jinja}
+    REFLECT: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.0, max_tokens: 128, structured: none, template: reflect/questions.v1.jinja}
+    IMPORTANCE: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.0, max_tokens: 64, structured: none, template: importance/user.v1.jinja}
+    EMBED: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.0, max_tokens: 64, structured: none, template: embedding/user.v1.jinja}
+  fallback_policy: strict
+  cache:
+    mode: live
+    path: file://./.cache/live-smoke
+salience:
+  policy: always
+  deliberate_share: 1.0
+memory: {}
+mechanisms: {}
+society: {}
+ablations: {}
+store:
+  dsn: postgresql://polis_engine:polis@127.0.0.1:5432/polis
+  reader_dsn: postgresql://polis_reader:polis_reader@127.0.0.1:5432/polis
+  redis_url: redis://127.0.0.1:6379/0
+  blob_url: file://./.blobs
+telemetry: {}
+observatory:
+  enabled: false
+  bind: 127.0.0.1:8080

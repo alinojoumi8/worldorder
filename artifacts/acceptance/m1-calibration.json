@@ -1,0 +1,68 @@
+{
+  "action_types_per_tick": {
+    "maximum": 6,
+    "minimum": 6
+  },
+  "config": "configs\\calibration-m1.yaml",
+  "deliberate_share_bp": {
+    "mean": 700.0,
+    "p05": 700.0,
+    "p50": 700.0,
+    "p95": 700.0
+  },
+  "elapsed_s": 647.766,
+  "events_hashed": 4736532,
+  "gates": {
+    "deliberate_share_near_7_percent": true,
+    "invariants_and_population": true,
+    "multiple_action_types": true,
+    "nonzero_wellbeing": true,
+    "throughput_at_least_1_tick_s": true,
+    "v4_entropy_floor_on_90_percent_ticks": true
+  },
+  "halt_reason": null,
+  "memory": {
+    "configured_maximum": 3000,
+    "per_agent_maximum": 20,
+    "per_agent_mean": 2.256,
+    "per_agent_p95": 9,
+    "projected_mean_cap_tick": 2659574.5,
+    "retained": 2256,
+    "writes_per_agent_tick": 0.001128
+  },
+  "population": 1000,
+  "run_id": "50d51fb0-50db-5a28-8353-58cf667d6f20",
+  "sampled_cognition_traces": 40096,
+  "seed": 2026072601,
+  "status": "passed",
+  "terminal_hash": "cc43e04ed23e0c50ad9232c049ebcdaaf990cf33e0351089b4475d71ada23458",
+  "throughput_profile": {
+    "early_ticks_per_second": 3.229,
+    "late_ticks_per_second": 3.025,
+    "late_to_early_ratio": 0.936952,
+    "window_ticks": 500
+  },
+  "ticks": 2000,
+  "ticks_per_second": 3.088,
+  "v4_action_entropy_normalized": {
+    "mean": 0.86405,
+    "minimum": 0.797186,
+    "pass_share": 1.0,
+    "threshold": 0.35
+  },
+  "wellbeing": {
+    "final": 44.75657,
+    "final_need_means": {
+      "energy": 0.811715,
+      "esteem": 0.0,
+      "hunger": 0.830644,
+      "purpose": 0.0,
+      "security": 0.0,
+      "social": 0.003833
+    },
+    "initial": 76.86465,
+    "last_200_mean": 44.639619,
+    "last_200_slope_per_1000_ticks": -1.330538,
+    "minimum": 44.24258
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "call_id": "77b5f62e-41e8-5849-945e-561ac639d0d2",
+  "cost_usd": "0.001321",
+  "finish_reason": "stop",
+  "gates": {
+    "hard_cost_limit": true,
+    "hard_output_token_bound": true,
+    "offline_replay_cache_hit": true,
+    "offline_replay_exact": true,
+    "offline_replay_has_no_lanes": true,
+    "real_provider_response": true
+  },
+  "hard_cost_limit_usd": "0.05",
+  "latency_ms": 2625,
+  "model": "MiniMax-M2.7",
+  "model_version": "MiniMax-M2.7",
+  "offline_replay": {
+    "cache_mode": "replay",
+    "call_id_matches": true,
+    "lanes": 0,
+    "text_sha256_matches": true
+  },
+  "parsed_ok": true,
+  "provider": "minimax",
+  "status": "passed",
+  "tokens_in": 41,
+  "tokens_out": 128
+}
