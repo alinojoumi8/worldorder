@@ -4,15 +4,15 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
-from polis.agents.actions.types import Action, ActionType
+from polis.agents.actions.types import Action, ActionType, make_action
 from polis.agents.state import AgentPopulation
 from polis.config.canon import canonical_json
 from polis.config.settings import Settings
 from polis.economy.credit import CreditContext, write_off_loan
 from polis.economy.exchange.engine import ExchangeEngine
 from polis.economy.ledger import LedgerError, Leg, bank_of, parse_account_id
-from polis.economy.money import allocate
-from polis.economy.state import EconomyState, FirmState
+from polis.economy.money import allocate, bp
+from polis.economy.state import EconomyState, FirmState, InventoryState
 from polis.economy.venture_state import (
     AcquisitionState,
     BankruptcyCaseState,
@@ -227,6 +227,82 @@ class VentureEngine:
         events.extend(self._advance_bankruptcies(tick, emit))
         events.extend(self._fund_step(tick, emit))
         return tuple(events)
+
+    def liquidation_actions(self, tick: int) -> tuple[Action, ...]:
+        """Create deterministic institutional market sells before the exchange resolves."""
+        if not (self.settings.exchange.enabled and self.settings.bankruptcy.enabled):
+            return ()
+        ticks_per_day = self.settings.clock.ticks_per_sim_day
+        if self.settings.clock.profile == "microscope" and tick % ticks_per_day != 9:
+            return ()
+        actions: list[Action] = []
+        for case in sorted(
+            self.economy.ventures.bankruptcies.values(),
+            key=lambda row: row.case_id,
+        ):
+            if (
+                case.status != "open"
+                or case.liquidation_tick is None
+                or tick <= case.filed_tick
+                or tick > case.liquidation_tick
+            ):
+                continue
+            sessions_left = max(
+                1,
+                (case.liquidation_tick - tick) // ticks_per_day + 1,
+            )
+            for symbol, security in sorted(self.economy.exchange.securities.items()):
+                if security.status != "listed":
+                    continue
+                holding = self.economy.exchange.holdings.get(
+                    self.economy.exchange.holding_key(case.entity_id, symbol)
+                )
+                if holding is None:
+                    continue
+                available = max(0, holding.qty - holding.reserved_qty)
+                if available == 0:
+                    continue
+                if sessions_left == 1:
+                    target = available
+                else:
+                    even_slice = max(1, (available + sessions_left - 1) // sessions_left)
+                    jitter_bp = self.rng.get(
+                        "exchange.liquidation",
+                        f"{case.case_id}:{symbol}",
+                        tick,
+                    ).randint(7_500, 12_500)
+                    target = min(available, max(1, bp(even_slice, jitter_bp)))
+                max_order_qty = max(
+                    1,
+                    security.shares_outstanding * self.settings.exchange.max_order_qty_bp // 10_000,
+                )
+                remaining = target
+                ordinal = 0
+                while remaining:
+                    qty = min(remaining, max_order_qty)
+                    actions.append(
+                        make_action(
+                            actor_id=case.entity_id,
+                            tick=tick,
+                            action_type=ActionType.SUBMIT_ORDER,
+                            params={
+                                "symbol": symbol,
+                                "side": "sell",
+                                "order_type": "market",
+                                "qty": qty,
+                                "flags": [
+                                    "forced_liquidation",
+                                    f"bankruptcy:{case.case_id}",
+                                ],
+                            },
+                            origin="reflex",
+                            reasoning="institutional bankruptcy liquidation",
+                            ordinal=ordinal,
+                        )
+                    )
+                    remaining -= qty
+                    ordinal += 1
+        return tuple(actions)
 
     def _found_company(self, action: Action, tick: int, emit: Emit) -> tuple[Event, ...]:
         if not self.settings.ventures.enabled:
@@ -1161,6 +1237,14 @@ class VentureEngine:
             return ()
         return self._file_case(entity_id, str(action.params.get("reason", "voluntary")), tick, emit)
 
+    def _liquidation_end_tick(self, filed_tick: int) -> int:
+        sessions = max(1, self.settings.bankruptcy.liquidation_days)
+        ticks_per_day = self.settings.clock.ticks_per_sim_day
+        if self.settings.clock.profile == "chronicle":
+            return filed_tick + sessions * ticks_per_day
+        filed_day = filed_tick // ticks_per_day
+        return (filed_day + sessions) * ticks_per_day + 9
+
     def _file_case(
         self,
         entity_id: str,
@@ -1180,7 +1264,48 @@ class VentureEngine:
             if entity_id in self.economy.ventures.funds
             else "agent"
         )
-        assets = max(0, self.economy.ledger.liquid(entity_id))
+        listed_book_qty = {
+            holding.symbol: holding.qty
+            for holding in sorted(
+                self.economy.exchange.holdings.values(),
+                key=lambda row: (row.symbol, row.holder_id),
+            )
+            if holding.holder_id == entity_id
+            and holding.qty > 0
+            and (security := self.economy.exchange.securities.get(holding.symbol)) is not None
+            and security.status == "listed"
+        }
+        listed_book_cents = {
+            symbol: qty * self.economy.exchange.securities[symbol].last_price_cents
+            for symbol, qty in sorted(listed_book_qty.items())
+        }
+        inventory_book = sum(
+            row.quantity * row.unit_cost_cents
+            for row in self.economy.inventory.values()
+            if row.firm_id == entity_id and row.quantity > 0
+        )
+        capital_book = (
+            max(0, self.economy.firms[entity_id].capital_cents)
+            if entity_id in self.economy.firms
+            else 0
+        )
+        unlisted_book = sum(
+            max(0, row.invested_cents)
+            for row in self.economy.ventures.cap_table.values()
+            if row.holder_id == entity_id
+            and row.firm_id != entity_id
+            and not any(
+                security.issuer_firm_id == row.firm_id and security.status == "listed"
+                for security in self.economy.exchange.securities.values()
+            )
+        )
+        assets = (
+            max(0, self.economy.ledger.liquid(entity_id))
+            + sum(listed_book_cents.values())
+            + inventory_book
+            + capital_book
+            + unlisted_book
+        )
         loans = [
             row
             for row in self.economy.loans.values()
@@ -1198,8 +1323,9 @@ class VentureEngine:
             filed_tick=tick,
             stay_until_tick=tick
             + self.settings.bankruptcy.stay_max_days * self.settings.clock.ticks_per_sim_day,
-            liquidation_tick=tick
-            + self.settings.bankruptcy.liquidation_days * self.settings.clock.ticks_per_sim_day,
+            liquidation_tick=self._liquidation_end_tick(tick),
+            listed_book_qty=listed_book_qty,
+            listed_book_cents=listed_book_cents,
         )
         self.economy.ventures.bankruptcies[case_id] = case
         if entity_id in self.economy.firms:
@@ -1359,6 +1485,443 @@ class VentureEngine:
             )
         return tuple(events)
 
+    def _solvent_firm_buyers(self, debtor_id: str, sector: str) -> list[FirmState]:
+        buyers: list[FirmState] = []
+        for firm in sorted(self.economy.firms.values(), key=lambda row: row.firm_id):
+            if (
+                firm.firm_id == debtor_id
+                or firm.sector != sector
+                or firm.status not in {"active", "subsidiary"}
+                or self.economy.ledger.net_worth(firm.firm_id) < 0
+            ):
+                continue
+            try:
+                deposit = self._deposit(firm.firm_id)
+            except LedgerError:
+                continue
+            if self.economy.ledger.balance(deposit) > 0:
+                buyers.append(firm)
+        return buyers
+
+    def _post_asset_sale(
+        self,
+        *,
+        case: BankruptcyCaseState,
+        item: str,
+        asset_ref: str,
+        book_cents: int,
+        realised_cents: int,
+        haircut_bp: int,
+        buyer_id: str,
+        tick: int,
+        emit: Emit,
+        extra: Mapping[str, object] | None = None,
+    ) -> Event:
+        expected = self.economy.ledger.next_txn_id(tick)
+        payload: dict[str, object] = {
+            "case_id": case.case_id,
+            "item": item,
+            "asset_ref": asset_ref,
+            "book_cents": book_cents,
+            "realised_cents": realised_cents,
+            "haircut_bp": haircut_bp,
+            "buyer_id": buyer_id,
+            "txn_id": str(expected),
+        }
+        payload.update(extra or {})
+        event = emit(
+            NewEvent(
+                ASSETS_LIQUIDATED,
+                payload,
+                subject_ids=(case.entity_id, buyer_id),
+            )
+        )
+        txn_id = self.economy.ledger.post_transaction(
+            self.economy.ledger.transfer(
+                self._deposit(buyer_id),
+                self._deposit(case.entity_id),
+                realised_cents,
+                "trade",
+            ),
+            tick=tick,
+            cause=event,
+        )
+        if txn_id != expected:
+            raise RuntimeError("asset-sale ledger ordinal diverged")
+        return event
+
+    def _realise_inventory(
+        self,
+        case: BankruptcyCaseState,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        if case.entity_id not in self.economy.firms:
+            return ()
+        debtor = self.economy.firms[case.entity_id]
+        buyers = self._solvent_firm_buyers(case.entity_id, debtor.sector)
+        events: list[Event] = []
+        for inventory in sorted(
+            self.economy.inventory.values(),
+            key=lambda row: (row.firm_id, row.sku),
+        ):
+            if inventory.firm_id != case.entity_id or inventory.quantity <= 0:
+                continue
+            original_units = inventory.quantity
+            unit_book = inventory.unit_cost_cents
+            unit_price = bp(unit_book, self.settings.bankruptcy.inventory_haircut_bp)
+            allocations = (
+                allocate(
+                    original_units,
+                    [(row.firm_id, max(1, row.capital_cents)) for row in buyers],
+                )
+                if buyers and unit_price > 0
+                else {}
+            )
+            sold_units = 0
+            for buyer in buyers:
+                proposed = allocations.get(buyer.firm_id, 0)
+                affordable = self.economy.ledger.balance(self._deposit(buyer.firm_id)) // max(
+                    1, unit_price
+                )
+                units = min(proposed, affordable)
+                if units <= 0:
+                    continue
+                realised = units * unit_price
+                events.append(
+                    self._post_asset_sale(
+                        case=case,
+                        item="inventory",
+                        asset_ref=inventory.sku,
+                        book_cents=units * unit_book,
+                        realised_cents=realised,
+                        haircut_bp=10_000 - self.settings.bankruptcy.inventory_haircut_bp,
+                        buyer_id=buyer.firm_id,
+                        tick=tick,
+                        emit=emit,
+                        extra={"sku": inventory.sku, "units": units},
+                    )
+                )
+                key = f"{buyer.firm_id}:{inventory.sku}"
+                destination = self.economy.inventory.get(key)
+                if destination is None:
+                    destination = InventoryState(
+                        firm_id=buyer.firm_id,
+                        sku=inventory.sku,
+                        quantity=0,
+                        unit_cost_cents=max(1, unit_price),
+                        price_cents=max(1, unit_price),
+                    )
+                    self.economy.inventory[key] = destination
+                old_value = destination.quantity * destination.unit_cost_cents
+                destination.quantity += units
+                destination.unit_cost_cents = (old_value + realised) // destination.quantity
+                destination.price_cents = max(
+                    destination.price_cents,
+                    destination.unit_cost_cents,
+                )
+                sold_units += units
+            unsold = original_units - sold_units
+            inventory.quantity = 0
+            if unsold:
+                events.append(
+                    emit(
+                        NewEvent(
+                            INVENTORY_WRITTEN_OFF,
+                            {
+                                "firm_id": case.entity_id,
+                                "sku": inventory.sku,
+                                "units": unsold,
+                                "unit_cost_cents": unit_book,
+                                "value_cents": unsold * unit_book,
+                                "reason": "bankruptcy_no_buyer",
+                            },
+                            actor_id=case.entity_id,
+                        )
+                    )
+                )
+        return tuple(events)
+
+    def _realise_capital(
+        self,
+        case: BankruptcyCaseState,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        firm = self.economy.firms.get(case.entity_id)
+        if firm is None or firm.capital_cents <= 0:
+            return ()
+        book = firm.capital_cents
+        rate = self.settings.bankruptcy.capital_haircut_bp
+        buyers = self._solvent_firm_buyers(case.entity_id, firm.sector)
+        allocations = (
+            allocate(book, [(row.firm_id, max(1, row.capital_cents)) for row in buyers])
+            if buyers and rate > 0
+            else {}
+        )
+        events: list[Event] = []
+        sold_book = 0
+        for buyer in buyers:
+            proposed_book = allocations.get(buyer.firm_id, 0)
+            cash = self.economy.ledger.balance(self._deposit(buyer.firm_id))
+            affordable_book = cash * 10_000 // rate if rate else 0
+            transferred_book = min(proposed_book, affordable_book)
+            realised = bp(transferred_book, rate)
+            if transferred_book <= 0 or realised <= 0:
+                continue
+            events.append(
+                self._post_asset_sale(
+                    case=case,
+                    item="capital",
+                    asset_ref=firm.firm_id,
+                    book_cents=transferred_book,
+                    realised_cents=realised,
+                    haircut_bp=10_000 - rate,
+                    buyer_id=buyer.firm_id,
+                    tick=tick,
+                    emit=emit,
+                )
+            )
+            buyer.capital_cents += realised
+            sold_book += transferred_book
+        unsold_book = book - sold_book
+        firm.capital_cents = 0
+        if unsold_book:
+            events.append(
+                emit(
+                    NewEvent(
+                        ASSETS_LIQUIDATED,
+                        {
+                            "case_id": case.case_id,
+                            "item": "capital",
+                            "asset_ref": firm.firm_id,
+                            "book_cents": unsold_book,
+                            "realised_cents": 0,
+                            "haircut_bp": 10_000,
+                            "buyer_id": None,
+                            "txn_id": None,
+                            "disposition": "written_off_no_buyer",
+                        },
+                        subject_ids=(case.entity_id,),
+                    )
+                )
+            )
+        return tuple(events)
+
+    def _latest_private_price(self, firm_id: str, row: CapTableState) -> int:
+        startup = next(
+            (
+                startup
+                for startup in self.economy.ventures.startups.values()
+                if startup.firm_id == firm_id
+            ),
+            None,
+        )
+        rounds = (
+            [
+                round_row
+                for round_row in self.economy.ventures.rounds.values()
+                if round_row.startup_id == startup.startup_id
+            ]
+            if startup is not None
+            else []
+        )
+        if rounds:
+            return max(
+                rounds, key=lambda value: (value.closed_tick, value.round_id)
+            ).price_per_share_cents
+        if row.conversion_price_cents > 0:
+            return row.conversion_price_cents
+        return max(1, row.invested_cents // max(1, row.shares))
+
+    def _realise_unlisted_equity(
+        self,
+        case: BankruptcyCaseState,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        events: list[Event] = []
+        debtor_rows = sorted(
+            (
+                row
+                for row in self.economy.ventures.cap_table.values()
+                if row.holder_id == case.entity_id
+                and row.firm_id != case.entity_id
+                and row.shares > 0
+                and not any(
+                    security.issuer_firm_id == row.firm_id and security.status == "listed"
+                    for security in self.economy.exchange.securities.values()
+                )
+            ),
+            key=lambda row: (row.firm_id, row.share_class),
+        )
+        for debtor_row in debtor_rows:
+            original_shares = debtor_row.shares
+            last_price = self._latest_private_price(debtor_row.firm_id, debtor_row)
+            unit_price = bp(last_price, self.settings.bankruptcy.unlisted_haircut_bp)
+            holder_weights: dict[str, int] = defaultdict(int)
+            for row in self._cap_rows(debtor_row.firm_id):
+                if row.holder_id not in {case.entity_id, "option_pool"} and row.shares > 0:
+                    holder_weights[row.holder_id] += row.shares
+            eligible: list[str] = []
+            for holder_id in sorted(holder_weights):
+                try:
+                    deposit = self._deposit(holder_id)
+                except LedgerError:
+                    continue
+                if self.economy.ledger.balance(deposit) > 0:
+                    eligible.append(holder_id)
+            allocations = (
+                allocate(
+                    original_shares,
+                    [(holder_id, holder_weights[holder_id]) for holder_id in eligible],
+                )
+                if eligible and unit_price > 0
+                else {}
+            )
+            transferred = 0
+            before_seller = debtor_row.shares
+            for holder_id in eligible:
+                proposed = allocations.get(holder_id, 0)
+                affordable = self.economy.ledger.balance(self._deposit(holder_id)) // max(
+                    1, unit_price
+                )
+                shares = min(proposed, affordable)
+                if shares <= 0:
+                    continue
+                realised = shares * unit_price
+                events.append(
+                    self._post_asset_sale(
+                        case=case,
+                        item="securities",
+                        asset_ref=f"{debtor_row.firm_id}:{debtor_row.share_class}",
+                        book_cents=shares * last_price,
+                        realised_cents=realised,
+                        haircut_bp=10_000 - self.settings.bankruptcy.unlisted_haircut_bp,
+                        buyer_id=holder_id,
+                        tick=tick,
+                        emit=emit,
+                        extra={"shares": shares, "listed": False},
+                    )
+                )
+                buyer_key = self.economy.ventures.cap_key(
+                    debtor_row.firm_id,
+                    holder_id,
+                    debtor_row.share_class,
+                )
+                buyer_row = self.economy.ventures.cap_table.get(buyer_key)
+                if buyer_row is None:
+                    buyer_row = CapTableState(
+                        firm_id=debtor_row.firm_id,
+                        holder_id=holder_id,
+                        share_class=debtor_row.share_class,
+                        shares=0,
+                        round_id=debtor_row.round_id,
+                        liq_pref_bp=debtor_row.liq_pref_bp,
+                        participating=debtor_row.participating,
+                        pro_rata=debtor_row.pro_rata,
+                        conversion_price_cents=debtor_row.conversion_price_cents,
+                    )
+                    self.economy.ventures.cap_table[buyer_key] = buyer_row
+                before_buyer = buyer_row.shares
+                buyer_row.shares += shares
+                buyer_row.invested_cents += realised
+                events.append(
+                    self._cap_event(
+                        buyer_row,
+                        before=before_buyer,
+                        cause="bankruptcy_liquidation",
+                        emit=emit,
+                    )
+                )
+                transferred += shares
+            debtor_row.shares = 0
+            debtor_row.invested_cents = 0
+            events.append(
+                self._cap_event(
+                    debtor_row,
+                    before=before_seller,
+                    cause="bankruptcy_liquidation",
+                    emit=emit,
+                )
+            )
+            unsold = original_shares - transferred
+            if unsold:
+                events.append(
+                    emit(
+                        NewEvent(
+                            ASSETS_LIQUIDATED,
+                            {
+                                "case_id": case.case_id,
+                                "item": "securities",
+                                "asset_ref": (f"{debtor_row.firm_id}:{debtor_row.share_class}"),
+                                "book_cents": unsold * last_price,
+                                "realised_cents": 0,
+                                "haircut_bp": 10_000,
+                                "buyer_id": None,
+                                "txn_id": None,
+                                "shares": unsold,
+                                "listed": False,
+                                "disposition": "written_off_no_buyer",
+                            },
+                            subject_ids=(case.entity_id, debtor_row.firm_id),
+                        )
+                    )
+                )
+        return tuple(events)
+
+    def _listed_liquidation_events(
+        self,
+        case: BankruptcyCaseState,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        events: list[Event] = []
+        case_flag = f"bankruptcy:{case.case_id}"
+        order_ids = {
+            order.order_id
+            for order in self.economy.exchange.orders.values()
+            if order.trader_id == case.entity_id
+            and order.side == "sell"
+            and case_flag in order.flags
+        }
+        for symbol, initial_qty in sorted(case.listed_book_qty.items()):
+            trades = [
+                trade
+                for trade in self.economy.exchange.trades
+                if trade.symbol == symbol and trade.sell_order_id in order_ids
+            ]
+            sold_qty = sum(trade.qty for trade in trades)
+            realised = sum(
+                trade.price_cents * trade.qty - trade.commission_sell_cents for trade in trades
+            )
+            book = case.listed_book_cents.get(symbol, 0)
+            events.append(
+                emit(
+                    NewEvent(
+                        ASSETS_LIQUIDATED,
+                        {
+                            "case_id": case.case_id,
+                            "item": "securities",
+                            "asset_ref": symbol,
+                            "book_cents": book,
+                            "realised_cents": realised,
+                            "haircut_bp": min(
+                                10_000,
+                                max(0, 10_000 - 10_000 * realised // max(1, book)),
+                            ),
+                            "buyer_id": "market" if sold_qty else None,
+                            "txn_id": None,
+                            "shares": sold_qty,
+                            "initial_shares": initial_qty,
+                            "listed": True,
+                            "trade_ids": [trade.trade_id for trade in trades],
+                        },
+                        subject_ids=(case.entity_id, symbol),
+                    )
+                )
+            )
+        return tuple(events)
+
     def _advance_bankruptcies(self, tick: int, emit: Emit) -> tuple[Event, ...]:
         events: list[Event] = []
         for case in sorted(
@@ -1380,6 +1943,11 @@ class VentureEngine:
         tick: int,
         emit: Emit,
     ) -> tuple[Event, ...]:
+        events: list[Event] = []
+        events.extend(self._listed_liquidation_events(case, emit))
+        events.extend(self._realise_unlisted_equity(case, tick, emit))
+        events.extend(self._realise_inventory(case, tick, emit))
+        events.extend(self._realise_capital(case, tick, emit))
         estate = max(0, self.economy.ledger.liquid(case.entity_id))
         exempt = 0
         if case.entity_type == "agent":
@@ -1391,7 +1959,7 @@ class VentureEngine:
             )
         distributable = estate - exempt
         case.estate_cents = distributable
-        events: list[Event] = [
+        events.append(
             emit(
                 NewEvent(
                     ASSETS_LIQUIDATED,
@@ -1407,7 +1975,7 @@ class VentureEngine:
                     subject_ids=(case.entity_id,),
                 )
             )
-        ]
+        )
         if exempt:
             events.append(
                 emit(
@@ -1608,31 +2176,6 @@ class VentureEngine:
                         )
                     )
                 )
-            for inventory in sorted(
-                self.economy.inventory.values(),
-                key=lambda row: (row.firm_id, row.sku),
-            ):
-                if inventory.firm_id != case.entity_id or inventory.quantity <= 0:
-                    continue
-                units = inventory.quantity
-                inventory.quantity = 0
-                events.append(
-                    emit(
-                        NewEvent(
-                            INVENTORY_WRITTEN_OFF,
-                            {
-                                "firm_id": case.entity_id,
-                                "sku": inventory.sku,
-                                "units": units,
-                                "unit_cost_cents": inventory.unit_cost_cents,
-                                "value_cents": units * inventory.unit_cost_cents,
-                                "reason": "bankruptcy_no_buyer",
-                            },
-                            actor_id=case.entity_id,
-                        )
-                    )
-                )
-            firm.capital_cents = 0
             for security in list(self.economy.exchange.securities.values()):
                 if security.issuer_firm_id == case.entity_id and security.status == "listed":
                     security.last_price_cents = 0

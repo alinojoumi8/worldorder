@@ -148,6 +148,8 @@ class BankruptcyCaseState:
     stay_until_tick: int
     status: str = "open"
     liquidation_tick: int | None = None
+    listed_book_qty: dict[str, int] = field(default_factory=dict)
+    listed_book_cents: dict[str, int] = field(default_factory=dict)
     estate_cents: int = 0
     resolved_tick: int | None = None
 
