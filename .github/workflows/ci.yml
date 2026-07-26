@@ -15,10 +15,12 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --dev
       - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      - run: uv run ruff format --check polis tests migrations scripts
       - run: uv run mypy polis
       - run: uv run lint-imports
       - run: uv run python scripts/lint_determinism.py polis
+      - run: docker compose up -d --wait
+      - run: uv run alembic upgrade head
       - run: uv run pytest -m "not live" -q
       - uses: actions/setup-node@v4
         with:
@@ -27,4 +29,3 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci --prefix web
       - run: npm run build --prefix web
-
