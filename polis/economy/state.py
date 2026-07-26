@@ -5,8 +5,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, cast
 
 from polis.agents.state import AgentPopulation
+from polis.economy.exchange.models import ExchangeState
 from polis.economy.invariants import check_money, m1_cents
 from polis.economy.ledger import Ledger
+from polis.economy.venture_state import VentureState
 from polis.kernel.invariants import Violation
 
 
@@ -146,6 +148,7 @@ class FirmState:
     cumulative_revenue_cents: int = 0
     cumulative_wage_cents: int = 0
     status: str = "active"
+    dissolved_tick: int | None = None
 
 
 @dataclass(slots=True)
@@ -304,6 +307,8 @@ class EconomyState:
     bonds: dict[str, BondState] = field(default_factory=dict)
     bond_holdings_cents: dict[str, dict[str, int]] = field(default_factory=dict)
     treasury: TreasuryState = field(default_factory=TreasuryState)
+    exchange: ExchangeState = field(default_factory=ExchangeState)
+    ventures: VentureState = field(default_factory=VentureState)
     policy_rate_bp: int = 400
     pending_policy_rate: tuple[int, int] | None = None
 
@@ -407,6 +412,8 @@ class EconomyState:
                 for holder_id, values in sorted(self.bond_holdings_cents.items())
             },
             "treasury": asdict(self.treasury),
+            "exchange": self.exchange.dump(),
+            "ventures": self.ventures.dump(),
             "policy_rate_bp": self.policy_rate_bp,
             "pending_policy_rate": self.pending_policy_rate,
         }
@@ -443,6 +450,8 @@ class EconomyState:
         bonds = state.get("bonds", {})
         bond_holdings_cents = state.get("bond_holdings_cents", {})
         treasury = state.get("treasury", {})
+        exchange = state.get("exchange", {})
+        ventures = state.get("ventures", {})
         pending_policy_rate = state.get("pending_policy_rate")
         if not isinstance(ledger, Mapping):
             raise ValueError("economy checkpoint ledger must be a mapping")
@@ -474,6 +483,8 @@ class EconomyState:
             bonds,
             bond_holdings_cents,
             treasury,
+            exchange,
+            ventures,
         )
         if any(not isinstance(item, Mapping) for item in projections):
             raise ValueError("economy checkpoint projections must be mappings")
@@ -632,6 +643,8 @@ class EconomyState:
             if isinstance(row, Mapping)
         }
         self.treasury = TreasuryState(**dict(treasury))
+        self.exchange = ExchangeState.load(cast(Mapping[str, Any], exchange))
+        self.ventures = VentureState.load(cast(Mapping[str, Any], ventures))
         self.policy_rate_bp = int(state.get("policy_rate_bp", 400))
         self.pending_policy_rate = (
             (int(pending_policy_rate[0]), int(pending_policy_rate[1]))
@@ -710,6 +723,103 @@ class EconomyWorldState:
 
     def action_type_counts(self) -> Mapping[str, int]:
         return self.population_state.action_type_counts()
+
+    def order_invariant_failures(self) -> Mapping[str, object]:
+        state = self.economy.exchange
+        failures: dict[str, object] = {}
+        open_orders = [
+            order for order in state.orders.values() if order.status in {"open", "partial"}
+        ]
+        expected_reserved: dict[tuple[str, str], int] = {}
+        expected_escrow: dict[str, int] = {}
+        books: dict[str, dict[str, list[int]]] = {}
+        for order in open_orders:
+            if order.remaining_qty <= 0:
+                failures[f"order:{order.order_id}:remaining"] = order.remaining_qty
+            if order.reserved_cents < 0 or order.reserved_qty < 0:
+                failures[f"order:{order.order_id}:reservation"] = {
+                    "cents": order.reserved_cents,
+                    "qty": order.reserved_qty,
+                }
+            expected_escrow[order.trader_id] = (
+                expected_escrow.get(order.trader_id, 0) + order.reserved_cents
+            )
+            if order.side == "sell" and "opens_short" not in order.flags:
+                key = (order.trader_id, order.symbol)
+                expected_reserved[key] = expected_reserved.get(key, 0) + order.reserved_qty
+            if order.limit_price_cents is not None:
+                book = books.setdefault(order.symbol, {"buy": [], "sell": []})
+                book[order.side].append(order.limit_price_cents)
+        for short in state.shorts.values():
+            if short.status == "open":
+                expected_escrow[short.trader_id] = (
+                    expected_escrow.get(short.trader_id, 0) + short.collateral_cents
+                )
+        for ipo in state.ipos.values():
+            if ipo.status != "announced":
+                continue
+            for investor_id, (qty, limit_price) in ipo.indications.items():
+                expected_escrow[investor_id] = (
+                    expected_escrow.get(investor_id, 0) + qty * limit_price
+                )
+        for holding in state.holdings.values():
+            expected = expected_reserved.get((holding.holder_id, holding.symbol), 0)
+            if holding.reserved_qty != expected:
+                failures[f"holding:{holding.holder_id}:{holding.symbol}:reserved"] = {
+                    "expected": expected,
+                    "actual": holding.reserved_qty,
+                }
+        actual_escrow: dict[str, int] = {}
+        for account in self.economy.ledger.accounts():
+            if account.code == "esc":
+                actual_escrow[account.owner_id] = (
+                    actual_escrow.get(account.owner_id, 0) + account.balance_cents
+                )
+        for owner_id in sorted(set(expected_escrow) | set(actual_escrow)):
+            expected = expected_escrow.get(owner_id, 0)
+            actual = actual_escrow.get(owner_id, 0)
+            if expected != actual:
+                failures[f"escrow:{owner_id}"] = {
+                    "expected": expected,
+                    "actual": actual,
+                }
+        for symbol, book in sorted(books.items()):
+            if book["buy"] and book["sell"] and max(book["buy"]) >= min(book["sell"]):
+                failures[f"book:{symbol}:crossed"] = {
+                    "best_bid": max(book["buy"]),
+                    "best_ask": min(book["sell"]),
+                }
+        return failures
+
+    def share_invariant_failures(self) -> Mapping[str, object]:
+        state = self.economy.exchange
+        failures: dict[str, object] = {}
+        for holding in state.holdings.values():
+            if holding.reserved_qty < 0 or holding.locked_qty < 0:
+                failures[f"holding:{holding.holder_id}:{holding.symbol}"] = {
+                    "reserved_qty": holding.reserved_qty,
+                    "locked_qty": holding.locked_qty,
+                }
+        for symbol, security in sorted(state.securities.items()):
+            actual = sum(row.qty for row in state.holdings.values() if row.symbol == symbol)
+            if actual != security.shares_outstanding:
+                failures[f"security:{symbol}"] = {
+                    "expected": security.shares_outstanding,
+                    "actual": actual,
+                }
+        return failures
+
+    def cap_table_invariant_failures(self) -> Mapping[str, object]:
+        ventures = self.economy.ventures
+        failures: dict[str, object] = {}
+        for key, row in sorted(ventures.cap_table.items()):
+            if row.shares < 0:
+                failures[f"row:{key}"] = row.shares
+        for startup in ventures.startups.values():
+            shares = ventures.shares(startup.firm_id)
+            if startup.status == "active" and shares <= 0:
+                failures[f"startup:{startup.startup_id}"] = shares
+        return failures
 
     def chain_ok(self) -> bool:
         return self.population_state.chain_ok()

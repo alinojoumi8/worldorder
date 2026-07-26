@@ -49,6 +49,7 @@ KIND_RANGES: Final = (
     KindRange(6000, 6999, "firms_goods", "polis.economy", Persistence.PERSISTED),
     KindRange(7000, 7999, "exchange", "polis.economy", Persistence.PERSISTED),
     KindRange(8000, 8999, "banking", "polis.economy", Persistence.PERSISTED),
+    KindRange(9000, 9999, "ventures", "polis.economy", Persistence.PERSISTED),
     KindRange(14000, 14999, "education", "polis.agents", Persistence.PERSISTED),
     KindRange(90000, 90999, "ephemeral", "*", Persistence.EPHEMERAL),
     KindRange(99000, 99999, "research", "polis.research", Persistence.PERSISTED),
@@ -78,7 +79,11 @@ def register_kind(
         raise KindError(f"duplicate event kind: {kind}")
     if name in KIND_BY_NAME:
         raise KindError(f"duplicate event name: {name}")
-    if declared.owner != "*" and owner != declared.owner:
+    if (
+        declared.owner != "*"
+        and owner != declared.owner
+        and not owner.startswith(f"{declared.owner}.")
+    ):
         raise KindError(f"kind {kind} belongs to {declared.owner}, not requested owner {owner}")
     if declared.persistence != persistence:
         raise KindError(
@@ -791,6 +796,278 @@ RENT_ARREARS = register_kind(
     persistence=Persistence.PERSISTED,
     schema=_schema("place_id", "tenant_id", "owed_cents", "periods_missed"),
 )
+SECURITY_LISTED = register_kind(
+    7001,
+    "SECURITY_LISTED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "symbol",
+        "issuer_firm_id",
+        "class",
+        "shares_outstanding",
+        "listing_price_cents",
+        "ipo_round_id",
+        "lockup_until_tick",
+    ),
+)
+SECURITY_DELISTED = register_kind(
+    7002,
+    "SECURITY_DELISTED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("symbol", "reason", "final_price_cents", "holders_n"),
+)
+SESSION_OPENED = register_kind(
+    7003,
+    "SESSION_OPENED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("session_id", "tick", "symbols", "opening_auction", "reference_prices"),
+)
+SESSION_CLOSED = register_kind(
+    7004,
+    "SESSION_CLOSED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("session_id", "tick", "closing_auction", "trades_n", "volume", "notional_cents"),
+)
+ORDER_SUBMITTED = register_kind(
+    7010,
+    "ORDER_SUBMITTED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "order_id",
+        "symbol",
+        "trader_id",
+        "side",
+        "order_type",
+        "limit_price_cents",
+        "qty",
+        "tif",
+        "reserved_cents",
+        "reserved_qty",
+        "arrival_ordinal",
+    ),
+)
+ORDER_REJECTED = register_kind(
+    7011,
+    "ORDER_REJECTED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("trader_id", "symbol", "reason", "detail"),
+)
+ORDER_CANCELLED = register_kind(
+    7012,
+    "ORDER_CANCELLED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("order_id", "remaining_qty", "released_cents", "released_qty", "initiator"),
+)
+ORDER_EXPIRED = register_kind(
+    7013,
+    "ORDER_EXPIRED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("order_id", "remaining_qty", "released_cents", "released_qty"),
+)
+TRADE_EXECUTED = register_kind(
+    7020,
+    "TRADE_EXECUTED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "trade_id",
+        "symbol",
+        "price_cents",
+        "qty",
+        "buy_order_id",
+        "sell_order_id",
+        "buyer_id",
+        "seller_id",
+        "aggressor",
+        "commission_buy_cents",
+        "commission_sell_cents",
+        "ledger_txn_id",
+    ),
+)
+ORDER_FILLED = register_kind(
+    7021,
+    "ORDER_FILLED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("order_id", "total_qty", "avg_price_cents", "commission_cents"),
+)
+ORDER_PARTIALLY_FILLED = register_kind(
+    7022,
+    "ORDER_PARTIALLY_FILLED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("order_id", "filled_qty", "remaining_qty", "avg_price_cents"),
+)
+BOOK_SNAPSHOT = register_kind(
+    7030,
+    "BOOK_SNAPSHOT",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "symbol", "best_bid_cents", "best_ask_cents", "bid_depth", "ask_depth", "levels"
+    ),
+)
+OHLCV_COMPUTED = register_kind(
+    7040,
+    "OHLCV_COMPUTED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "symbol",
+        "session_tick",
+        "open_cents",
+        "high_cents",
+        "low_cents",
+        "close_cents",
+        "volume",
+        "vwap_cents",
+        "trades_n",
+    ),
+)
+INDEX_COMPUTED = register_kind(
+    7041,
+    "INDEX_COMPUTED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("index_name", "value_bp", "divisor", "constituents", "mcap_cents"),
+)
+CIRCUIT_BREAKER_TRIGGERED = register_kind(
+    7050,
+    "CIRCUIT_BREAKER_TRIGGERED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "symbol",
+        "reference_cents",
+        "last_cents",
+        "move_bp",
+        "band_bp",
+        "halt_until_tick",
+        "breaker_count",
+    ),
+)
+TRADING_RESUMED = register_kind(
+    7051,
+    "TRADING_RESUMED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("symbol", "reopen_auction_price_cents", "new_band_bp"),
+)
+SHORT_OPENED = register_kind(
+    7060,
+    "SHORT_OPENED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "trader_id",
+        "symbol",
+        "qty",
+        "price_cents",
+        "borrow_fee_bp",
+        "collateral_cents",
+        "margin_ratio_bp",
+    ),
+)
+SHORT_COVERED = register_kind(
+    7061,
+    "SHORT_COVERED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "trader_id", "symbol", "qty", "price_cents", "realised_pnl_cents", "fees_paid_cents"
+    ),
+)
+BORROW_FEE_CHARGED = register_kind(
+    7062,
+    "BORROW_FEE_CHARGED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("trader_id", "symbol", "cents", "distributed_to", "txn_id"),
+)
+MARGIN_CALL = register_kind(
+    7063,
+    "MARGIN_CALL",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("trader_id", "symbol", "equity_cents", "required_cents", "deadline_tick"),
+)
+FORCED_LIQUIDATION = register_kind(
+    7064,
+    "FORCED_LIQUIDATION",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("trader_id", "symbol", "qty", "avg_price_cents", "shortfall_cents"),
+)
+IPO_ANNOUNCED = register_kind(
+    7070,
+    "IPO_ANNOUNCED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "symbol",
+        "shares_offered",
+        "primary_shares",
+        "secondary_shares",
+        "price_low_cents",
+        "price_high_cents",
+        "underwriter_bank_id",
+        "book_close_tick",
+    ),
+)
+IPO_INDICATION = register_kind(
+    7071,
+    "IPO_INDICATION",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "investor_id", "qty", "limit_price_cents"),
+)
+IPO_PRICED = register_kind(
+    7072,
+    "IPO_PRICED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "symbol",
+        "clearing_price_cents",
+        "offer_price_cents",
+        "discount_bp",
+        "oversubscription_bp",
+    ),
+)
+IPO_COMPLETED = register_kind(
+    7073,
+    "IPO_COMPLETED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "symbol",
+        "allocations",
+        "gross_proceeds_cents",
+        "primary_cents",
+        "secondary_cents",
+        "underwriting_fee_cents",
+        "listing_fee_cents",
+        "txn_id",
+    ),
+)
+BOND_LISTED = register_kind(
+    7080,
+    "BOND_LISTED",
+    owner="polis.economy.exchange",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("symbol", "issuer", "face_cents", "coupon_bp", "matures_tick"),
+)
 BANK_FOUNDED = register_kind(
     8001,
     "BANK_FOUNDED",
@@ -1249,6 +1526,423 @@ GOV_BUDGET_CLOSED = register_kind(
         "debt_cents",
         "debt_to_gdp_bp",
     ),
+)
+STARTUP_FOUNDED = register_kind(
+    9001,
+    "STARTUP_FOUNDED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "startup_id",
+        "firm_id",
+        "founder_id",
+        "thesis",
+        "sector",
+        "initial_capital_cents",
+        "burn_rate_cents",
+    ),
+)
+THESIS_REVISED = register_kind(
+    9002,
+    "THESIS_REVISED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("startup_id", "from_thesis", "to_thesis", "trigger"),
+)
+RUNWAY_UPDATED = register_kind(
+    9003,
+    "RUNWAY_UPDATED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "startup_id",
+        "liquid_cents",
+        "burn_rate_cents",
+        "runway_ticks",
+        "stage",
+        "revenue_ttm_cents",
+    ),
+)
+STARTUP_DIED = register_kind(
+    9004,
+    "STARTUP_DIED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "startup_id", "cause", "age_ticks", "total_raised_cents", "investors_loss_cents"
+    ),
+)
+VC_FUND_FORMED = register_kind(
+    9005,
+    "VC_FUND_FORMED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "fund_id",
+        "firm_id",
+        "gp_agent_id",
+        "committed_cents",
+        "lps",
+        "vintage_tick",
+        "thesis",
+        "mgmt_fee_bp",
+        "carry_bp",
+        "hurdle_bp",
+    ),
+)
+CAPITAL_CALLED = register_kind(
+    9006,
+    "CAPITAL_CALLED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("fund_id", "lp_id", "called_cents", "cumulative_called_cents", "txn_id"),
+)
+LP_DEFAULTED = register_kind(
+    9007,
+    "LP_DEFAULTED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("fund_id", "lp_id", "called_cents", "forfeited_units", "reallocated_to"),
+)
+FUND_DISTRIBUTION = register_kind(
+    9008,
+    "FUND_DISTRIBUTION",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "fund_id",
+        "source_exit_id",
+        "gross_cents",
+        "lp_cents",
+        "carry_cents",
+        "hurdle_met",
+        "txn_id",
+    ),
+)
+MANAGEMENT_FEE_CHARGED = register_kind(
+    9009,
+    "MANAGEMENT_FEE_CHARGED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("fund_id", "cents", "period", "txn_id"),
+)
+ROUND_CLOSED = register_kind(
+    9010,
+    "ROUND_CLOSED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "round_id",
+        "startup_id",
+        "stage",
+        "pre_money_cents",
+        "amount_cents",
+        "post_money_cents",
+        "price_per_share_cents",
+        "new_shares",
+        "lead_investor_id",
+        "participants",
+        "option_pool_shares",
+        "txn_id",
+    ),
+)
+PITCH_MADE = register_kind(
+    9011,
+    "PITCH_MADE",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "pitch_id",
+        "startup_id",
+        "founder_id",
+        "investor_id",
+        "ask_cents",
+        "pre_money_ask_cents",
+        "deck_text",
+        "traction",
+    ),
+)
+PITCH_EVALUATED = register_kind(
+    9012,
+    "PITCH_EVALUATED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "pitch_id",
+        "investor_id",
+        "conviction_bp",
+        "thesis_fit_bp",
+        "valuation_view_cents",
+        "check_size_cents",
+        "verdict",
+        "concerns",
+        "llm_call_id",
+    ),
+)
+TERM_SHEET_ISSUED = register_kind(
+    9013,
+    "TERM_SHEET_ISSUED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "term_sheet_id",
+        "startup_id",
+        "investor_id",
+        "pre_money_cents",
+        "amount_cents",
+        "security",
+        "liq_pref_bp",
+        "participating",
+        "pro_rata",
+        "board_seat",
+        "option_pool_bp",
+        "anti_dilution",
+        "expires_tick",
+    ),
+)
+TERM_SHEET_ACCEPTED = register_kind(
+    9014,
+    "TERM_SHEET_ACCEPTED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("term_sheet_id", "round_id"),
+)
+TERM_SHEET_DECLINED = register_kind(
+    9015,
+    "TERM_SHEET_DECLINED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("term_sheet_id", "reason_code", "counter_pre_money_cents"),
+)
+TERM_SHEET_EXPIRED = register_kind(
+    9016,
+    "TERM_SHEET_EXPIRED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("term_sheet_id"),
+)
+DOWN_ROUND = register_kind(
+    9017,
+    "DOWN_ROUND",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "round_id",
+        "prior_price_per_share_cents",
+        "new_price_per_share_cents",
+        "decline_bp",
+        "anti_dilution_applied",
+        "extra_shares_issued",
+    ),
+)
+CAP_TABLE_UPDATED = register_kind(
+    9018,
+    "CAP_TABLE_UPDATED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "holder_id",
+        "share_class",
+        "shares_before",
+        "shares_after",
+        "cause",
+        "fully_diluted_after",
+    ),
+)
+OPTION_POOL_SET = register_kind(
+    9019,
+    "OPTION_POOL_SET",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "pool_shares", "pool_bp", "pre_money_pool", "granted_to"),
+)
+ACQUISITION_PROPOSED = register_kind(
+    9020,
+    "ACQUISITION_PROPOSED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "deal_id",
+        "acquirer_id",
+        "target_id",
+        "offer_cents",
+        "per_share_cents",
+        "consideration",
+        "stock_ratio_bp",
+        "premium_bp",
+        "integration_mode",
+        "expires_tick",
+        "financing",
+    ),
+)
+ACQUISITION_APPROVED = register_kind(
+    9021,
+    "ACQUISITION_APPROVED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "deal_id", "accepting_holders", "accepting_bp", "threshold_bp", "drag_along_applied"
+    ),
+)
+ACQUISITION_REJECTED = register_kind(
+    9022,
+    "ACQUISITION_REJECTED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("deal_id", "accepting_bp", "reason"),
+)
+ACQUISITION_COMPLETED = register_kind(
+    9023,
+    "ACQUISITION_COMPLETED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "deal_id", "price_cents", "per_share_cents", "integration_mode", "txn_id", "waterfall_ref"
+    ),
+)
+ASSET_SALE = register_kind(
+    9024,
+    "ASSET_SALE",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("deal_id", "seller_id", "buyer_id", "assets", "cents", "txn_id"),
+)
+INTEGRATION_COMPLETED = register_kind(
+    9025,
+    "INTEGRATION_COMPLETED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "deal_id",
+        "headcount_retained",
+        "redundancies",
+        "sku_transfers",
+        "productivity_delta_bp",
+        "loans_transferred",
+    ),
+)
+ACQUISITION_BLOCKED = register_kind(
+    9026,
+    "ACQUISITION_BLOCKED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("deal_id", "blocker", "hhi_before", "hhi_after", "sector", "policy_ref"),
+)
+BANKRUPTCY_FILED = register_kind(
+    9030,
+    "BANKRUPTCY_FILED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "entity_id",
+        "entity_type",
+        "trigger",
+        "assets_cents",
+        "liabilities_cents",
+        "filed_by",
+        "petitioning_creditor_id",
+    ),
+)
+AUTOMATIC_STAY_IMPOSED = register_kind(
+    9031,
+    "AUTOMATIC_STAY_IMPOSED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "entity_id",
+        "cancelled_order_ids",
+        "released_cents",
+        "released_shares",
+        "blocked_action_types",
+        "stay_until_tick",
+    ),
+)
+CLAIM_REGISTERED = register_kind(
+    9032,
+    "CLAIM_REGISTERED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id", "creditor_id", "claim_cents", "priority_class", "collateral_ref", "loan_id"
+    ),
+)
+ASSETS_LIQUIDATED = register_kind(
+    9033,
+    "ASSETS_LIQUIDATED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id", "item", "book_cents", "realised_cents", "haircut_bp", "buyer_id", "txn_id"
+    ),
+)
+DISTRIBUTION_MADE = register_kind(
+    9034,
+    "DISTRIBUTION_MADE",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "priority_class",
+        "creditor_id",
+        "claim_cents",
+        "paid_cents",
+        "class_recovery_bp",
+        "txn_id",
+    ),
+)
+BANKRUPTCY_DISCHARGED = register_kind(
+    9035,
+    "BANKRUPTCY_DISCHARGED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id", "outcome", "written_off_cents", "blended_recovery_bp", "resolved_tick"
+    ),
+)
+CREDIT_FLAG_SET = register_kind(
+    9036,
+    "CREDIT_FLAG_SET",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("entity_id", "flag", "set_tick", "expires_tick"),
+)
+EXEMPTION_APPLIED = register_kind(
+    9037,
+    "EXEMPTION_APPLIED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("case_id", "entity_id", "exempt_cents", "basis"),
+)
+ESTATE_DEFERRED_TO_CASE = register_kind(
+    9038,
+    "ESTATE_DEFERRED_TO_CASE",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("case_id", "deceased_agent_id", "estate_cents", "heirs"),
+)
+EXIT_COMPLETED = register_kind(
+    9040,
+    "EXIT_COMPLETED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "startup_id",
+        "type",
+        "gross_proceeds_cents",
+        "distribution",
+        "multiple_bp",
+        "holding_period_ticks",
+    ),
+)
+WATERFALL_APPLIED = register_kind(
+    9041,
+    "WATERFALL_APPLIED",
+    owner="polis.economy.ventures",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "proceeds_cents", "tranches"),
 )
 SKILL_ACCRUED = register_kind(
     14001,

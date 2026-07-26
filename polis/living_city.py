@@ -179,7 +179,10 @@ class LivingCityEngine:
 
     async def institutions(self, ctx: TickContext) -> None:
         if self.economy_policy is not None:
-            await self.economy_policy.step(ctx.tick, ctx.emit)
+            actions = tuple(
+                validation.action for _agent_id, validation in sorted(self.validations.items())
+            )
+            await self.economy_policy.step(ctx.tick, ctx.emit, actions)
 
     def _trace_kept(self, agent_id: str, tick: int, mode: str) -> bool:
         seed = self.rng.seed_for("cognition.sample", agent_id, tick)

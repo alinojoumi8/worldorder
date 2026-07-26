@@ -644,6 +644,11 @@ class CreditEngine:
         for loan in sorted(self.ctx.economy.loans.values(), key=lambda row: row.loan_id):
             if loan.status not in {"current", "delinquent"} or loan.outstanding_cents <= 0:
                 continue
+            if any(
+                case.entity_id == loan.borrower_id and case.status == "open"
+                for case in self.ctx.economy.ventures.bankruptcies.values()
+            ):
+                continue
             numerator = loan.outstanding_cents * loan.annual_rate_bp + loan.accrual_remainder
             accrued = numerator // denominator
             loan.accrual_remainder = numerator % denominator
@@ -669,6 +674,11 @@ class CreditEngine:
         events: list[Event] = []
         for loan in sorted(self.ctx.economy.loans.values(), key=lambda row: row.loan_id):
             if loan.status not in {"current", "delinquent"} or tick < loan.next_payment_tick:
+                continue
+            if any(
+                case.entity_id == loan.borrower_id and case.status == "open"
+                for case in self.ctx.economy.ventures.bankruptcies.values()
+            ):
                 continue
             if loan.borrower_id in self.ctx.economy.banks or (
                 loan.lender_id not in self.ctx.economy.banks and loan.lender_id != "gv_treasury"

@@ -1,0 +1,2034 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Any
+
+from polis.agents.actions.types import Action, ActionType
+from polis.agents.state import AgentPopulation
+from polis.config.canon import canonical_json
+from polis.config.settings import Settings
+from polis.economy.credit import CreditContext, write_off_loan
+from polis.economy.exchange.engine import ExchangeEngine
+from polis.economy.ledger import LedgerError, Leg, bank_of, parse_account_id
+from polis.economy.money import allocate
+from polis.economy.state import EconomyState, FirmState
+from polis.economy.venture_state import (
+    AcquisitionState,
+    BankruptcyCaseState,
+    CapTableState,
+    ClaimState,
+    FundingRoundState,
+    PitchState,
+    StartupState,
+    TermSheetState,
+    VCFundState,
+)
+from polis.events.kinds import (
+    ACCOUNT_OPENED,
+    ACQUISITION_APPROVED,
+    ACQUISITION_COMPLETED,
+    ACQUISITION_PROPOSED,
+    ASSETS_LIQUIDATED,
+    AUTOMATIC_STAY_IMPOSED,
+    BANKRUPTCY_DISCHARGED,
+    BANKRUPTCY_FILED,
+    CAP_TABLE_UPDATED,
+    CAPITAL_CALLED,
+    CLAIM_REGISTERED,
+    CREDIT_FLAG_SET,
+    DISTRIBUTION_MADE,
+    DIVIDEND_DECLARED,
+    DIVIDEND_PAID,
+    DOWN_ROUND,
+    EXEMPTION_APPLIED,
+    EXIT_COMPLETED,
+    FIRED,
+    FIRM_FOUNDED,
+    FUND_DISTRIBUTION,
+    INTEGRATION_COMPLETED,
+    INVENTORY_WRITTEN_OFF,
+    MANAGEMENT_FEE_CHARGED,
+    OFFER_EXPIRED,
+    OPTION_POOL_SET,
+    PITCH_EVALUATED,
+    PITCH_MADE,
+    ROUND_CLOSED,
+    RUNWAY_UPDATED,
+    STARTUP_DIED,
+    STARTUP_FOUNDED,
+    TERM_SHEET_ACCEPTED,
+    TERM_SHEET_EXPIRED,
+    TERM_SHEET_ISSUED,
+    VACANCY_CLOSED,
+    VC_FUND_FORMED,
+    WATERFALL_APPLIED,
+)
+from polis.events.types import Event, NewEvent
+from polis.kernel.rng import RngRegistry
+from polis.llm.purposes import Purpose
+from polis.llm.router import LLMRouter
+
+Emit = Callable[[NewEvent], Event]
+
+VC_EVAL_SCHEMA: Mapping[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "conviction_bp",
+        "thesis_fit_bp",
+        "valuation_view_cents",
+        "check_size_cents",
+        "verdict",
+        "concerns",
+    ],
+    "properties": {
+        "conviction_bp": {"type": "integer", "minimum": 0, "maximum": 10_000},
+        "thesis_fit_bp": {"type": "integer", "minimum": 0, "maximum": 10_000},
+        "valuation_view_cents": {"type": "integer", "minimum": 1},
+        "check_size_cents": {"type": "integer", "minimum": 0},
+        "verdict": {"type": "string", "enum": ["pass", "explore", "term_sheet"]},
+        "concerns": {
+            "type": "array",
+            "items": {"type": "string", "maxLength": 160},
+            "maxItems": 6,
+        },
+    },
+}
+
+
+def _coalesce(legs: Iterable[Leg]) -> list[Leg]:
+    totals: dict[tuple[str, int, str], int] = defaultdict(int)
+    for leg in legs:
+        totals[(leg.account_id, leg.direction, leg.reason)] += leg.amount_cents
+    return [
+        Leg(account, direction, cents, reason)
+        for (account, direction, reason), cents in sorted(totals.items())
+        if cents > 0
+    ]
+
+
+def venture_waterfall(
+    proceeds_cents: int,
+    cap_rows: Sequence[CapTableState],
+    rounds: Sequence[FundingRoundState],
+) -> dict[str, int]:
+    """Allocate acquisition/liquidation proceeds exactly and deterministically."""
+    if proceeds_cents < 0:
+        raise ValueError("waterfall proceeds cannot be negative")
+    if proceeds_cents == 0:
+        return {}
+    shares_by_holder: dict[str, int] = defaultdict(int)
+    for row in cap_rows:
+        if row.shares > 0:
+            shares_by_holder[row.holder_id] += row.shares
+    if not shares_by_holder:
+        raise ValueError("waterfall needs at least one positive shareholding")
+    remaining = proceeds_cents
+    result: dict[str, int] = defaultdict(int)
+    participating_holders: set[str] = set()
+    for round_row in sorted(rounds, key=lambda row: (-row.closed_tick, row.round_id)):
+        round_cap = [row for row in cap_rows if row.round_id == round_row.round_id]
+        if not round_cap:
+            continue
+        pref = round_row.amount_cents * round_row.liq_pref_bp // 10_000
+        paid = min(remaining, pref)
+        weights = [(row.holder_id, row.shares) for row in round_cap if row.shares > 0]
+        for holder_id, cents in allocate(paid, weights).items():
+            result[holder_id] += cents
+        remaining -= paid
+        if round_row.participating:
+            participating_holders.update(row.holder_id for row in round_cap)
+        if remaining == 0:
+            break
+    residual_weights = [
+        (holder_id, shares)
+        for holder_id, shares in sorted(shares_by_holder.items())
+        if any(
+            row.holder_id == holder_id
+            and (row.share_class == "common" or holder_id in participating_holders)
+            for row in cap_rows
+        )
+    ]
+    if remaining and not residual_weights:
+        residual_weights = list(sorted(shares_by_holder.items()))
+    for holder_id, cents in allocate(remaining, residual_weights).items():
+        result[holder_id] += cents
+    if sum(result.values()) != proceeds_cents:
+        raise RuntimeError("venture waterfall did not allocate exact proceeds")
+    return dict(sorted(result.items()))
+
+
+class VentureEngine:
+    def __init__(
+        self,
+        settings: Settings,
+        population: AgentPopulation,
+        economy: EconomyState,
+        rng: RngRegistry,
+        router: LLMRouter,
+        exchange: ExchangeEngine,
+        credit_context: CreditContext,
+    ) -> None:
+        self.settings = settings
+        self.population = population
+        self.economy = economy
+        self.rng = rng
+        self.router = router
+        self.exchange = exchange
+        self.credit_context = credit_context
+
+    async def resolve(
+        self,
+        actions: Sequence[Action],
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        if not (self.settings.ventures.enabled or self.settings.bankruptcy.enabled):
+            return ()
+        events: list[Event] = []
+        events.extend(self._expire_term_sheets(tick, emit))
+        venture_actions = [
+            action
+            for action in actions
+            if action.type
+            in {
+                ActionType.FOUND_COMPANY,
+                ActionType.PITCH,
+                ActionType.ISSUE_TERM_SHEET,
+                ActionType.INVEST,
+                ActionType.ACQUIRE,
+                ActionType.SELL_STAKE,
+                ActionType.FILE_BANKRUPTCY,
+                ActionType.DECLARE_DIVIDEND,
+            }
+        ]
+        for action in sorted(venture_actions, key=lambda row: (row.actor_id, str(row.action_id))):
+            if action.type != ActionType.FILE_BANKRUPTCY and self._action_under_stay(action):
+                continue
+            if action.type == ActionType.FOUND_COMPANY:
+                events.extend(self._found_company(action, tick, emit))
+            elif action.type == ActionType.PITCH:
+                events.extend(await self._pitch(action, tick, emit))
+            elif action.type == ActionType.ISSUE_TERM_SHEET:
+                events.extend(self._issue_term_sheet(action, tick, emit))
+            elif action.type == ActionType.INVEST:
+                events.extend(self._invest(action, tick, emit))
+            elif action.type == ActionType.ACQUIRE:
+                events.extend(self._propose_acquisition(action, tick, emit))
+            elif action.type == ActionType.SELL_STAKE:
+                events.extend(self._tender(action, tick, emit))
+            elif action.type == ActionType.FILE_BANKRUPTCY:
+                events.extend(self._file_action(action, tick, emit))
+            elif action.type == ActionType.DECLARE_DIVIDEND:
+                events.extend(self._declare_dividend(action, tick, emit))
+        events.extend(self._runway_step(tick, emit))
+        events.extend(self._solvency_step(tick, emit))
+        events.extend(self._advance_bankruptcies(tick, emit))
+        events.extend(self._fund_step(tick, emit))
+        return tuple(events)
+
+    def _found_company(self, action: Action, tick: int, emit: Emit) -> tuple[Event, ...]:
+        if not self.settings.ventures.enabled:
+            return ()
+        params = action.params
+        initial = int(params.get("initial_capital_cents", 0))
+        if initial <= 0:
+            return ()
+        try:
+            founder_deposit = self._deposit(action.actor_id)
+        except LedgerError:
+            return ()
+        if self.economy.ledger.balance(founder_deposit) < initial:
+            return ()
+        firm_id = f"fm_{str(action.action_id).replace('-', '')[:16]}"
+        bank_id = bank_of(founder_deposit)
+        if bank_id is None:
+            return ()
+        firm_deposit = self.economy.ledger.open_account(
+            "dep",
+            firm_id,
+            "firm",
+            bank_id=bank_id,
+            tick=tick,
+        )
+        account_event = emit(
+            NewEvent(
+                ACCOUNT_OPENED,
+                {
+                    "account_id": firm_deposit,
+                    "owner_id": firm_id,
+                    "owner_type": "firm",
+                    "bank_id": bank_id,
+                    "account_type": "deposit",
+                    "code": "dep",
+                },
+                subject_ids=(firm_id,),
+            )
+        )
+        firm = FirmState(
+            firm_id=firm_id,
+            name=str(params.get("name", "New Polis Company")),
+            sector=str(params.get("sector", "services")),
+            place_id=str(params.get("place_id", "")),
+            founder_id=action.actor_id,
+            ledger_account_id=firm_deposit,
+            productivity_bp=10_000,
+            capital_cents=self.settings.firms.capital_ref_cents,
+        )
+        self.economy.firms[firm_id] = firm
+        expected_txn = self.economy.ledger.next_txn_id(tick)
+        founded = emit(
+            NewEvent(
+                FIRM_FOUNDED,
+                {
+                    "firm_id": firm_id,
+                    "founder_id": action.actor_id,
+                    "name": firm.name,
+                    "sector": firm.sector,
+                    "place_id": firm.place_id,
+                    "initial_capital_cents": initial,
+                    "ledger_account_id": firm_deposit,
+                    "is_startup": bool(params.get("is_startup", False)),
+                    "registration_fee_cents": 0,
+                },
+                actor_id=action.actor_id,
+                subject_ids=(firm_id,),
+            )
+        )
+        txn_id = self.economy.ledger.post_transaction(
+            self.economy.ledger.transfer(
+                founder_deposit,
+                firm_deposit,
+                initial,
+                "trade",
+            ),
+            tick=tick,
+            cause=founded,
+        )
+        if txn_id != expected_txn:
+            raise RuntimeError("company formation ledger ordinal diverged")
+        cap = CapTableState(
+            firm_id=firm_id,
+            holder_id=action.actor_id,
+            share_class="common",
+            shares=self.settings.ventures.founder_shares,
+            invested_cents=initial,
+            conversion_price_cents=max(
+                1,
+                initial // self.settings.ventures.founder_shares,
+            ),
+        )
+        self.economy.ventures.cap_table[
+            self.economy.ventures.cap_key(firm_id, action.actor_id, "common")
+        ] = cap
+        events: list[Event] = [account_event, founded]
+        events.append(
+            self._cap_event(
+                cap,
+                before=0,
+                cause="formation",
+                emit=emit,
+            )
+        )
+        if bool(params.get("is_fund", False)):
+            fund_id = f"vf_{firm_id[3:]}"
+            fund = VCFundState(
+                fund_id=fund_id,
+                firm_id=firm_id,
+                gp_agent_id=action.actor_id,
+                committed_cents=initial,
+                called_cents=initial,
+                deployed_cents=0,
+                vintage_tick=tick,
+                thesis=str(params.get("thesis", "")),
+                management_fee_bp=self.settings.ventures.management_fee_bp,
+                carry_bp=self.settings.ventures.carry_bp,
+                hurdle_bp=self.settings.ventures.hurdle_bp,
+                lps={action.actor_id: initial},
+            )
+            self.economy.ventures.funds[fund_id] = fund
+            events.append(
+                emit(
+                    NewEvent(
+                        VC_FUND_FORMED,
+                        {
+                            "fund_id": fund_id,
+                            "firm_id": firm_id,
+                            "gp_agent_id": action.actor_id,
+                            "committed_cents": initial,
+                            "lps": dict(fund.lps),
+                            "vintage_tick": tick,
+                            "thesis": fund.thesis,
+                            "mgmt_fee_bp": fund.management_fee_bp,
+                            "carry_bp": fund.carry_bp,
+                            "hurdle_bp": fund.hurdle_bp,
+                        },
+                        actor_id=action.actor_id,
+                        subject_ids=(firm_id,),
+                    )
+                )
+            )
+        elif bool(params.get("is_startup", False)):
+            startup_id = f"st_{firm_id[3:]}"
+            burn = max(1, initial // max(1, self.settings.ventures.fundraise_trigger_days))
+            startup = StartupState(
+                startup_id=startup_id,
+                firm_id=firm_id,
+                founder_id=action.actor_id,
+                thesis=str(params.get("thesis", "")),
+                sector=firm.sector,
+                founded_tick=tick,
+                initial_capital_cents=initial,
+                burn_rate_cents=burn,
+                runway_ticks=initial // burn,
+            )
+            self.economy.ventures.startups[startup_id] = startup
+            events.append(
+                emit(
+                    NewEvent(
+                        STARTUP_FOUNDED,
+                        {
+                            "startup_id": startup_id,
+                            "firm_id": firm_id,
+                            "founder_id": action.actor_id,
+                            "thesis": startup.thesis,
+                            "sector": startup.sector,
+                            "initial_capital_cents": initial,
+                            "burn_rate_cents": burn,
+                        },
+                        actor_id=action.actor_id,
+                        subject_ids=(firm_id,),
+                    )
+                )
+            )
+        return tuple(events)
+
+    async def _pitch(self, action: Action, tick: int, emit: Emit) -> tuple[Event, ...]:
+        if not self.settings.ventures.enabled:
+            return ()
+        startup_id = str(action.params.get("startup_id", ""))
+        startup = self.economy.ventures.startups.get(startup_id)
+        investor_id = str(action.params.get("investor_id", ""))
+        if (
+            startup is None
+            or startup.founder_id != action.actor_id
+            or startup.status != "active"
+            or sum(
+                row.status == "open"
+                for row in self.economy.ventures.pitches.values()
+                if row.startup_id == startup_id
+            )
+            >= self.settings.ventures.max_open_pitches
+        ):
+            return ()
+        pitch_id = f"pt_{str(action.action_id).replace('-', '')[:18]}"
+        pitch = PitchState(
+            pitch_id=pitch_id,
+            startup_id=startup_id,
+            founder_id=action.actor_id,
+            investor_id=investor_id,
+            ask_cents=int(action.params["ask_cents"]),
+            pre_money_ask_cents=int(action.params["pre_money_ask_cents"]),
+            deck_text=str(action.params.get("deck_text", "")),
+            made_tick=tick,
+        )
+        self.economy.ventures.pitches[pitch_id] = pitch
+        traction = self._traction(startup)
+        made = emit(
+            NewEvent(
+                PITCH_MADE,
+                {
+                    "pitch_id": pitch_id,
+                    "startup_id": startup_id,
+                    "founder_id": action.actor_id,
+                    "investor_id": investor_id,
+                    "ask_cents": pitch.ask_cents,
+                    "pre_money_ask_cents": pitch.pre_money_ask_cents,
+                    "deck_text": pitch.deck_text,
+                    "traction": traction,
+                },
+                actor_id=action.actor_id,
+                subject_ids=(investor_id, startup.firm_id),
+            )
+        )
+        evaluation, llm_call_id = await self._evaluate_pitch(pitch, startup, traction, tick)
+        pitch.conviction_bp = int(evaluation["conviction_bp"])
+        pitch.valuation_view_cents = int(evaluation["valuation_view_cents"])
+        pitch.verdict = str(evaluation["verdict"])
+        pitch.status = "evaluated"
+        evaluated = emit(
+            NewEvent(
+                PITCH_EVALUATED,
+                {
+                    "pitch_id": pitch_id,
+                    "investor_id": investor_id,
+                    "conviction_bp": pitch.conviction_bp,
+                    "thesis_fit_bp": int(evaluation["thesis_fit_bp"]),
+                    "valuation_view_cents": pitch.valuation_view_cents,
+                    "check_size_cents": int(evaluation["check_size_cents"]),
+                    "verdict": pitch.verdict,
+                    "concerns": list(evaluation["concerns"]),
+                    "llm_call_id": llm_call_id,
+                },
+                actor_id=investor_id,
+                subject_ids=(startup.firm_id,),
+            )
+        )
+        return made, evaluated
+
+    async def _evaluate_pitch(
+        self,
+        pitch: PitchState,
+        startup: StartupState,
+        traction: Mapping[str, Any],
+        tick: int,
+    ) -> tuple[Mapping[str, Any], str | None]:
+        fallback = {
+            "conviction_bp": 5_000,
+            "thesis_fit_bp": 5_000,
+            "valuation_view_cents": pitch.pre_money_ask_cents,
+            "check_size_cents": min(pitch.ask_cents, self.economy.ledger.liquid(pitch.investor_id)),
+            "verdict": "explore",
+            "concerns": ["mechanical fallback"],
+        }
+        if Purpose.VC_EVAL.value not in self.settings.llm.routing:
+            return fallback, None
+        cap_table = [
+            {
+                "holder_id": row.holder_id,
+                "class": row.share_class,
+                "shares": row.shares,
+            }
+            for row in self._cap_rows(startup.firm_id)
+        ]
+        prompt = canonical_json(
+            {
+                "instruction": (
+                    "Evaluate this venture using only supplied simulation state. "
+                    "Return the structured decision."
+                ),
+                "startup": {
+                    "startup_id": startup.startup_id,
+                    "sector": startup.sector,
+                    "thesis": startup.thesis,
+                    "traction": dict(traction),
+                    "cap_table": cap_table,
+                },
+                "ask": {
+                    "amount_cents": pitch.ask_cents,
+                    "pre_money_cents": pitch.pre_money_ask_cents,
+                    "deck_text": pitch.deck_text,
+                },
+            }
+        )
+        result = await self.router.call(
+            Purpose.VC_EVAL,
+            pitch.investor_id,
+            tick,
+            {
+                "system": "You are a venture investor operating inside a simulation.",
+                "prompt": prompt,
+            },
+            VC_EVAL_SCHEMA,
+        )
+        if result.degraded or not result.parsed_ok or result.parsed is None:
+            return fallback, str(result.call_id)
+        return result.parsed, str(result.call_id)
+
+    def _issue_term_sheet(
+        self,
+        action: Action,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        if not self.settings.ventures.enabled:
+            return ()
+        startup_id = str(action.params.get("startup_id", ""))
+        startup = self.economy.ventures.startups.get(startup_id)
+        investor_id = str(action.params.get("investor_id", action.actor_id))
+        if startup is None or investor_id != action.actor_id:
+            return ()
+        qualified = any(
+            row.startup_id == startup_id
+            and row.investor_id == investor_id
+            and row.verdict == "term_sheet"
+            for row in self.economy.ventures.pitches.values()
+        )
+        if not qualified and any(
+            row.startup_id == startup_id and row.investor_id == investor_id
+            for row in self.economy.ventures.pitches.values()
+        ):
+            return ()
+        params = action.params
+        term_sheet_id = f"ts_{str(action.action_id).replace('-', '')[:18]}"
+        expires = tick + (
+            self.settings.ventures.term_sheet_days * self.settings.clock.ticks_per_sim_day
+        )
+        term = TermSheetState(
+            term_sheet_id=term_sheet_id,
+            startup_id=startup_id,
+            investor_id=investor_id,
+            pre_money_cents=int(params["pre_money_cents"]),
+            amount_cents=int(params["amount_cents"]),
+            security=str(params.get("security", "preferred")),
+            liq_pref_bp=int(params.get("liq_pref_bp", self.settings.ventures.liq_pref_bp)),
+            participating=bool(params.get("participating", False)),
+            pro_rata=bool(params.get("pro_rata", True)),
+            board_seat=bool(params.get("board_seat", False)),
+            option_pool_bp=int(params.get("option_pool_bp", self.settings.ventures.option_pool_bp)),
+            anti_dilution=str(params.get("anti_dilution", "broad_weighted")),
+            issued_tick=tick,
+            expires_tick=expires,
+        )
+        self.economy.ventures.term_sheets[term_sheet_id] = term
+        return (
+            emit(
+                NewEvent(
+                    TERM_SHEET_ISSUED,
+                    {
+                        "term_sheet_id": term_sheet_id,
+                        "startup_id": startup_id,
+                        "investor_id": investor_id,
+                        "pre_money_cents": term.pre_money_cents,
+                        "amount_cents": term.amount_cents,
+                        "security": term.security,
+                        "liq_pref_bp": term.liq_pref_bp,
+                        "participating": term.participating,
+                        "pro_rata": term.pro_rata,
+                        "board_seat": term.board_seat,
+                        "option_pool_bp": term.option_pool_bp,
+                        "anti_dilution": term.anti_dilution,
+                        "expires_tick": expires,
+                    },
+                    actor_id=investor_id,
+                    subject_ids=(startup.firm_id,),
+                )
+            ),
+        )
+
+    def _invest(self, action: Action, tick: int, emit: Emit) -> tuple[Event, ...]:
+        if not self.settings.ventures.enabled:
+            return ()
+        instrument = str(action.params.get("instrument", "round"))
+        if instrument == "lp_commitment":
+            return self._lp_commit(action, tick, emit)
+        startup_id = str(action.params.get("target_id", ""))
+        term_sheet_id = action.params.get("term_sheet_id")
+        term = (
+            self.economy.ventures.term_sheets.get(str(term_sheet_id))
+            if term_sheet_id
+            else next(
+                (
+                    row
+                    for row in self.economy.ventures.term_sheets.values()
+                    if row.startup_id == startup_id
+                    and row.investor_id == action.actor_id
+                    and row.status == "open"
+                ),
+                None,
+            )
+        )
+        if (
+            term is None
+            or term.startup_id != startup_id
+            or term.investor_id != action.actor_id
+            or term.status != "open"
+            or tick > term.expires_tick
+        ):
+            return ()
+        amount = min(int(action.params.get("cents", 0)), term.amount_cents)
+        if amount <= 0:
+            return ()
+        return self._close_round(term, amount, tick, emit)
+
+    def _close_round(
+        self,
+        term: TermSheetState,
+        amount_cents: int,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        startup = self.economy.ventures.startups[term.startup_id]
+        firm = self.economy.firms[startup.firm_id]
+        investor_deposit = self._deposit(term.investor_id)
+        if self.economy.ledger.balance(investor_deposit) < amount_cents:
+            return ()
+        cap_rows = self._cap_rows(firm.firm_id)
+        shares_pre = sum(row.shares for row in cap_rows)
+        pool_shares = (
+            shares_pre * term.option_pool_bp + (10_000 - term.option_pool_bp) - 1
+        ) // max(1, 10_000 - term.option_pool_bp)
+        shares_pre_pool = shares_pre + pool_shares
+        price_per_share = max(1, term.pre_money_cents // max(1, shares_pre_pool))
+        new_shares = amount_cents // price_per_share
+        if new_shares <= 0:
+            return ()
+        round_id = f"rd_{term.term_sheet_id[3:]}"
+        prior_rounds = [
+            row
+            for row in self.economy.ventures.rounds.values()
+            if row.startup_id == startup.startup_id
+        ]
+        round_row = FundingRoundState(
+            round_id=round_id,
+            startup_id=startup.startup_id,
+            stage=self._next_stage(startup.stage),
+            pre_money_cents=term.pre_money_cents,
+            amount_cents=amount_cents,
+            post_money_cents=term.pre_money_cents + amount_cents,
+            price_per_share_cents=price_per_share,
+            new_shares=new_shares,
+            lead_investor_id=term.investor_id,
+            participants={term.investor_id: amount_cents},
+            option_pool_shares=pool_shares,
+            liq_pref_bp=term.liq_pref_bp,
+            participating=term.participating,
+            closed_tick=tick,
+        )
+        accepted = emit(
+            NewEvent(
+                TERM_SHEET_ACCEPTED,
+                {
+                    "term_sheet_id": term.term_sheet_id,
+                    "round_id": round_id,
+                },
+                actor_id=startup.founder_id,
+                subject_ids=(term.investor_id, firm.firm_id),
+            )
+        )
+        expected_txn = self.economy.ledger.next_txn_id(tick)
+        closed = emit(
+            NewEvent(
+                ROUND_CLOSED,
+                {
+                    "round_id": round_id,
+                    "startup_id": startup.startup_id,
+                    "stage": round_row.stage,
+                    "pre_money_cents": term.pre_money_cents,
+                    "amount_cents": amount_cents,
+                    "post_money_cents": round_row.post_money_cents,
+                    "price_per_share_cents": price_per_share,
+                    "new_shares": new_shares,
+                    "lead_investor_id": term.investor_id,
+                    "participants": dict(round_row.participants),
+                    "option_pool_shares": pool_shares,
+                    "txn_id": str(expected_txn),
+                },
+                actor_id=term.investor_id,
+                subject_ids=(firm.firm_id,),
+            )
+        )
+        txn_id = self.economy.ledger.post_transaction(
+            self.economy.ledger.transfer(
+                investor_deposit,
+                firm.ledger_account_id,
+                amount_cents,
+                "trade",
+            ),
+            tick=tick,
+            cause=closed,
+        )
+        if txn_id != expected_txn:
+            raise RuntimeError("venture round ledger ordinal diverged")
+        events: list[Event] = [accepted, closed]
+        if pool_shares:
+            pool_key = self.economy.ventures.cap_key(
+                firm.firm_id,
+                "option_pool",
+                "common",
+            )
+            pool = self.economy.ventures.cap_table.get(pool_key)
+            before = pool.shares if pool is not None else 0
+            if pool is None:
+                pool = CapTableState(
+                    firm_id=firm.firm_id,
+                    holder_id="option_pool",
+                    share_class="common",
+                    shares=pool_shares,
+                )
+                self.economy.ventures.cap_table[pool_key] = pool
+            else:
+                pool.shares += pool_shares
+            events.append(
+                emit(
+                    NewEvent(
+                        OPTION_POOL_SET,
+                        {
+                            "firm_id": firm.firm_id,
+                            "pool_shares": pool.shares,
+                            "pool_bp": term.option_pool_bp,
+                            "pre_money_pool": True,
+                            "granted_to": [],
+                        },
+                        subject_ids=(firm.firm_id,),
+                    )
+                )
+            )
+            events.append(self._cap_event(pool, before, "option_pool", emit))
+        investor_key = self.economy.ventures.cap_key(
+            firm.firm_id,
+            term.investor_id,
+            term.security,
+        )
+        cap = self.economy.ventures.cap_table.get(investor_key)
+        before = cap.shares if cap is not None else 0
+        if cap is None:
+            cap = CapTableState(
+                firm_id=firm.firm_id,
+                holder_id=term.investor_id,
+                share_class=term.security,
+                shares=new_shares,
+                invested_cents=amount_cents,
+                round_id=round_id,
+                liq_pref_bp=term.liq_pref_bp,
+                participating=term.participating,
+                pro_rata=term.pro_rata,
+                conversion_price_cents=price_per_share,
+            )
+            self.economy.ventures.cap_table[investor_key] = cap
+        else:
+            cap.shares += new_shares
+            cap.invested_cents += amount_cents
+        events.append(self._cap_event(cap, before, "round", emit))
+        if prior_rounds:
+            previous_price = prior_rounds[-1].price_per_share_cents
+            if price_per_share < previous_price:
+                events.append(
+                    emit(
+                        NewEvent(
+                            DOWN_ROUND,
+                            {
+                                "round_id": round_id,
+                                "prior_price_per_share_cents": previous_price,
+                                "new_price_per_share_cents": price_per_share,
+                                "decline_bp": 10_000
+                                * (previous_price - price_per_share)
+                                // previous_price,
+                                "anti_dilution_applied": term.anti_dilution,
+                                "extra_shares_issued": 0,
+                            },
+                            subject_ids=(firm.firm_id,),
+                        )
+                    )
+                )
+        self.economy.ventures.rounds[round_id] = round_row
+        term.status = "accepted"
+        startup.stage = round_row.stage
+        startup.total_raised_cents += amount_cents
+        for fund in self.economy.ventures.funds.values():
+            if fund.firm_id == term.investor_id or fund.gp_agent_id == term.investor_id:
+                fund.deployed_cents += amount_cents
+        return tuple(events)
+
+    def _lp_commit(self, action: Action, tick: int, emit: Emit) -> tuple[Event, ...]:
+        fund_id = str(action.params.get("target_id", ""))
+        fund = self.economy.ventures.funds.get(fund_id)
+        cents = int(action.params.get("cents", 0))
+        if fund is None or cents <= 0:
+            return ()
+        source = self._deposit(action.actor_id)
+        destination = self._deposit(fund.firm_id)
+        if self.economy.ledger.balance(source) < cents:
+            return ()
+        expected = self.economy.ledger.next_txn_id(tick)
+        event = emit(
+            NewEvent(
+                CAPITAL_CALLED,
+                {
+                    "fund_id": fund_id,
+                    "lp_id": action.actor_id,
+                    "called_cents": cents,
+                    "cumulative_called_cents": fund.called_cents + cents,
+                    "txn_id": str(expected),
+                },
+                actor_id=fund.gp_agent_id,
+                subject_ids=(action.actor_id,),
+            )
+        )
+        txn_id = self.economy.ledger.post_transaction(
+            self.economy.ledger.transfer(source, destination, cents, "trade"),
+            tick=tick,
+            cause=event,
+        )
+        if txn_id != expected:
+            raise RuntimeError("capital call ledger ordinal diverged")
+        fund.committed_cents += cents
+        fund.called_cents += cents
+        fund.lps[action.actor_id] = fund.lps.get(action.actor_id, 0) + cents
+        return (event,)
+
+    def _propose_acquisition(
+        self,
+        action: Action,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        acquirer_id = str(action.params.get("acquirer_id", ""))
+        target_id = str(action.params.get("target_id", ""))
+        acquirer = self.economy.firms.get(acquirer_id)
+        target = self.economy.firms.get(target_id)
+        if (
+            acquirer is None
+            or target is None
+            or acquirer.founder_id != action.actor_id
+            or target.status != "active"
+        ):
+            return ()
+        offer = int(action.params.get("offer_cents", 0))
+        cash_bp = 10_000 - int(action.params.get("stock_ratio_bp", 0))
+        cash_required = offer * cash_bp // 10_000
+        if cash_required > self.economy.ledger.balance(acquirer.ledger_account_id):
+            return ()
+        shares = max(1, self.economy.ventures.shares(target_id))
+        per_share = offer // shares
+        anchor = max(1, self.economy.ledger.net_worth(target_id))
+        premium = 10_000 * (offer - anchor) // anchor
+        deal_id = f"ma_{str(action.action_id).replace('-', '')[:18]}"
+        deal = AcquisitionState(
+            deal_id=deal_id,
+            acquirer_id=acquirer_id,
+            target_id=target_id,
+            offer_cents=offer,
+            per_share_cents=per_share,
+            consideration=str(action.params.get("consideration", "cash")),
+            stock_ratio_bp=int(action.params.get("stock_ratio_bp", 0)),
+            premium_bp=premium,
+            integration_mode=str(action.params.get("integration_mode", "absorb")),
+            financing=str(action.params.get("financing", "cash")),
+            proposed_tick=tick,
+            expires_tick=tick + 30 * self.settings.clock.ticks_per_sim_day,
+        )
+        self.economy.ventures.acquisitions[deal_id] = deal
+        return (
+            emit(
+                NewEvent(
+                    ACQUISITION_PROPOSED,
+                    {
+                        "deal_id": deal_id,
+                        "acquirer_id": acquirer_id,
+                        "target_id": target_id,
+                        "offer_cents": offer,
+                        "per_share_cents": per_share,
+                        "consideration": deal.consideration,
+                        "stock_ratio_bp": deal.stock_ratio_bp,
+                        "premium_bp": premium,
+                        "integration_mode": deal.integration_mode,
+                        "expires_tick": deal.expires_tick,
+                        "financing": deal.financing,
+                    },
+                    actor_id=action.actor_id,
+                    subject_ids=(acquirer_id, target_id),
+                )
+            ),
+        )
+
+    def _tender(self, action: Action, tick: int, emit: Emit) -> tuple[Event, ...]:
+        deal_id = action.params.get("deal_id")
+        if not deal_id:
+            return ()
+        deal = self.economy.ventures.acquisitions.get(str(deal_id))
+        if deal is None or deal.status != "proposed" or tick > deal.expires_tick:
+            return ()
+        cap_rows = [row for row in self._cap_rows(deal.target_id) if row.holder_id != "option_pool"]
+        holder_shares = sum(row.shares for row in cap_rows if row.holder_id == action.actor_id)
+        qty = min(holder_shares, int(action.params.get("qty", 0)))
+        if qty <= 0:
+            return ()
+        deal.accepting_holders[action.actor_id] = max(
+            qty,
+            deal.accepting_holders.get(action.actor_id, 0),
+        )
+        total_shares = sum(row.shares for row in cap_rows)
+        accepting = sum(deal.accepting_holders.values())
+        accepting_bp = 10_000 * accepting // max(1, total_shares)
+        if accepting_bp < self.settings.ventures.acquisition_threshold_bp:
+            return ()
+        approved = emit(
+            NewEvent(
+                ACQUISITION_APPROVED,
+                {
+                    "deal_id": deal.deal_id,
+                    "accepting_holders": dict(sorted(deal.accepting_holders.items())),
+                    "accepting_bp": accepting_bp,
+                    "threshold_bp": self.settings.ventures.acquisition_threshold_bp,
+                    "drag_along_applied": accepting_bp >= self.settings.ventures.drag_along_bp,
+                },
+                subject_ids=(deal.acquirer_id, deal.target_id),
+            )
+        )
+        deal.status = "approved"
+        return (approved, *self._complete_acquisition(deal, tick, emit))
+
+    def _complete_acquisition(
+        self,
+        deal: AcquisitionState,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        cap_rows = [row for row in self._cap_rows(deal.target_id) if row.holder_id != "option_pool"]
+        rounds = [
+            row
+            for row in self.economy.ventures.rounds.values()
+            if self.economy.ventures.startups.get(row.startup_id) is not None
+            and self.economy.ventures.startups[row.startup_id].firm_id == deal.target_id
+        ]
+        cash_cents = deal.offer_cents * (10_000 - deal.stock_ratio_bp) // 10_000
+        distribution = venture_waterfall(cash_cents, cap_rows, rounds) if cash_cents else {}
+        events: list[Event] = []
+        if cash_cents:
+            events.append(
+                emit(
+                    NewEvent(
+                        WATERFALL_APPLIED,
+                        {
+                            "firm_id": deal.target_id,
+                            "proceeds_cents": cash_cents,
+                            "tranches": dict(distribution),
+                        },
+                        subject_ids=(deal.target_id,),
+                    )
+                )
+            )
+        expected = self.economy.ledger.next_txn_id(tick) if cash_cents else None
+        completed = emit(
+            NewEvent(
+                ACQUISITION_COMPLETED,
+                {
+                    "deal_id": deal.deal_id,
+                    "price_cents": deal.offer_cents,
+                    "per_share_cents": deal.per_share_cents,
+                    "integration_mode": deal.integration_mode,
+                    "txn_id": str(expected) if expected is not None else None,
+                    "waterfall_ref": deal.target_id,
+                },
+                subject_ids=(deal.acquirer_id, deal.target_id),
+            )
+        )
+        if cash_cents:
+            source = self._deposit(deal.acquirer_id)
+            legs: list[Leg] = []
+            for holder_id, cents in sorted(distribution.items()):
+                if cents:
+                    legs.extend(
+                        self.economy.ledger.transfer(
+                            source,
+                            self._deposit(holder_id),
+                            cents,
+                            "trade",
+                        )
+                    )
+            txn_id = self.economy.ledger.post_transaction(
+                _coalesce(legs),
+                tick=tick,
+                cause=completed,
+            )
+            if txn_id != expected:
+                raise RuntimeError("acquisition ledger ordinal diverged")
+        events.append(completed)
+        if deal.stock_ratio_bp:
+            self._issue_acquirer_shares(deal, cap_rows)
+        events.extend(self._integrate(deal, tick, emit))
+        for startup in self.economy.ventures.startups.values():
+            if startup.firm_id == deal.target_id:
+                startup.status = "exited"
+                events.append(
+                    emit(
+                        NewEvent(
+                            EXIT_COMPLETED,
+                            {
+                                "startup_id": startup.startup_id,
+                                "type": "acquisition",
+                                "gross_proceeds_cents": deal.offer_cents,
+                                "distribution": dict(distribution),
+                                "multiple_bp": 10_000
+                                * deal.offer_cents
+                                // max(1, startup.total_raised_cents),
+                                "holding_period_ticks": tick - startup.founded_tick,
+                            },
+                            subject_ids=(startup.firm_id,),
+                        )
+                    )
+                )
+        deal.status = "completed"
+        return tuple(events)
+
+    def _issue_acquirer_shares(
+        self,
+        deal: AcquisitionState,
+        target_rows: Sequence[CapTableState],
+    ) -> None:
+        acquirer_shares = max(1, self.economy.ventures.shares(deal.acquirer_id))
+        acquirer_value = max(1, self.economy.ledger.net_worth(deal.acquirer_id))
+        share_price = max(1, acquirer_value // acquirer_shares)
+        stock_value = deal.offer_cents * deal.stock_ratio_bp // 10_000
+        issued = stock_value // share_price
+        allocation = allocate(
+            issued,
+            [(row.holder_id, row.shares) for row in target_rows if row.shares > 0],
+        )
+        for holder_id, shares in allocation.items():
+            key = self.economy.ventures.cap_key(
+                deal.acquirer_id,
+                holder_id,
+                "common",
+            )
+            row = self.economy.ventures.cap_table.get(key)
+            if row is None:
+                self.economy.ventures.cap_table[key] = CapTableState(
+                    firm_id=deal.acquirer_id,
+                    holder_id=holder_id,
+                    share_class="common",
+                    shares=shares,
+                )
+            else:
+                row.shares += shares
+
+    def _integrate(
+        self,
+        deal: AcquisitionState,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        target = self.economy.firms[deal.target_id]
+        acquirer = self.economy.firms[deal.acquirer_id]
+        transferred = 0
+        if deal.integration_mode == "absorb":
+            for employment in self.economy.employments.values():
+                if employment.firm_id == target.firm_id and employment.ended_tick is None:
+                    employment.firm_id = acquirer.firm_id
+                    transferred += 1
+            acquirer.capital_cents += target.capital_cents
+            total_capital = max(1, acquirer.capital_cents)
+            acquirer.productivity_bp = (
+                acquirer.productivity_bp * (total_capital - target.capital_cents)
+                + target.productivity_bp * target.capital_cents
+            ) // total_capital
+            target.status = "acquired"
+            if any(
+                row.issuer_firm_id == target.firm_id and row.status == "listed"
+                for row in self.economy.exchange.securities.values()
+            ):
+                symbol = next(
+                    row.symbol
+                    for row in self.economy.exchange.securities.values()
+                    if row.issuer_firm_id == target.firm_id and row.status == "listed"
+                )
+                return (
+                    *self.exchange.delist(symbol, "acquisition", tick, emit),
+                    emit(
+                        NewEvent(
+                            INTEGRATION_COMPLETED,
+                            {
+                                "deal_id": deal.deal_id,
+                                "headcount_retained": transferred,
+                                "redundancies": 0,
+                                "sku_transfers": [],
+                                "productivity_delta_bp": 0,
+                                "loans_transferred": [],
+                            },
+                            subject_ids=(deal.acquirer_id, deal.target_id),
+                        )
+                    ),
+                )
+        elif deal.integration_mode == "standalone":
+            target.status = "subsidiary"
+        return (
+            emit(
+                NewEvent(
+                    INTEGRATION_COMPLETED,
+                    {
+                        "deal_id": deal.deal_id,
+                        "headcount_retained": transferred,
+                        "redundancies": 0,
+                        "sku_transfers": [],
+                        "productivity_delta_bp": 0,
+                        "loans_transferred": [],
+                    },
+                    subject_ids=(deal.acquirer_id, deal.target_id),
+                )
+            ),
+        )
+
+    def _file_action(self, action: Action, tick: int, emit: Emit) -> tuple[Event, ...]:
+        if not self.settings.bankruptcy.enabled:
+            return ()
+        entity_id = str(action.params.get("entity_id") or action.actor_id)
+        if entity_id != action.actor_id and not (
+            entity_id in self.economy.firms
+            and self.economy.firms[entity_id].founder_id == action.actor_id
+        ):
+            return ()
+        return self._file_case(entity_id, str(action.params.get("reason", "voluntary")), tick, emit)
+
+    def _file_case(
+        self,
+        entity_id: str,
+        trigger: str,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        if any(
+            row.entity_id == entity_id and row.status == "open"
+            for row in self.economy.ventures.bankruptcies.values()
+        ):
+            return ()
+        entity_type = (
+            "firm"
+            if entity_id in self.economy.firms
+            else "fund"
+            if entity_id in self.economy.ventures.funds
+            else "agent"
+        )
+        assets = max(0, self.economy.ledger.liquid(entity_id))
+        loans = [
+            row
+            for row in self.economy.loans.values()
+            if row.borrower_id == entity_id and row.status not in {"repaid", "written_off"}
+        ]
+        liabilities = sum(row.outstanding_cents for row in loans)
+        case_id = f"bc_{entity_id}_{tick:010d}"
+        case = BankruptcyCaseState(
+            case_id=case_id,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            trigger=trigger,
+            assets_cents=assets,
+            liabilities_cents=liabilities,
+            filed_tick=tick,
+            stay_until_tick=tick
+            + self.settings.bankruptcy.stay_max_days * self.settings.clock.ticks_per_sim_day,
+            liquidation_tick=tick
+            + self.settings.bankruptcy.liquidation_days * self.settings.clock.ticks_per_sim_day,
+        )
+        self.economy.ventures.bankruptcies[case_id] = case
+        if entity_id in self.economy.firms:
+            self.economy.firms[entity_id].status = "bankrupt"
+        filed = emit(
+            NewEvent(
+                BANKRUPTCY_FILED,
+                {
+                    "case_id": case_id,
+                    "entity_id": entity_id,
+                    "entity_type": entity_type,
+                    "trigger": trigger,
+                    "assets_cents": assets,
+                    "liabilities_cents": liabilities,
+                    "filed_by": "self" if trigger == "voluntary" else "institution",
+                    "petitioning_creditor_id": None,
+                },
+                actor_id=entity_id,
+                subject_ids=(entity_id,),
+            )
+        )
+        cancelled, order_ids, released, released_shares = self.exchange.cancel_entity(
+            entity_id,
+            tick,
+            emit,
+        )
+        for position in self.economy.exchange.shorts.values():
+            if position.trader_id == entity_id and position.status == "open" and position.qty > 0:
+                forced_tick = tick + self.settings.clock.ticks_per_sim_day
+                position.margin_deadline_tick = min(
+                    position.margin_deadline_tick or forced_tick,
+                    forced_tick,
+                )
+        allowed = {
+            ActionType.FILE_BANKRUPTCY,
+            ActionType.WORK,
+            ActionType.MOVE_TO,
+            ActionType.NULL_ACTION,
+            ActionType.SLEEP,
+            ActionType.EAT,
+        }
+        stay = emit(
+            NewEvent(
+                AUTOMATIC_STAY_IMPOSED,
+                {
+                    "case_id": case_id,
+                    "entity_id": entity_id,
+                    "cancelled_order_ids": list(order_ids),
+                    "released_cents": released,
+                    "released_shares": released_shares,
+                    "blocked_action_types": sorted(
+                        action_type.value
+                        for action_type in ActionType
+                        if action_type not in allowed
+                    ),
+                    "stay_until_tick": case.stay_until_tick,
+                },
+                subject_ids=(entity_id,),
+            )
+        )
+        events: list[Event] = [filed, *cancelled, stay]
+        claim_specs: list[tuple[str, int, int, str | None, str | None]] = []
+        admin_fee = assets * self.settings.bankruptcy.admin_fee_bp // 10_000
+        if admin_fee > 0:
+            claim_specs.append(("gv_treasury", admin_fee, 2, None, None))
+        if entity_id in self.economy.firms:
+            wage_period_days = max(1, self.settings.credit.payment_interval_days)
+            for employment in sorted(
+                self.economy.employments.values(),
+                key=lambda row: row.employment_id,
+            ):
+                if employment.firm_id != entity_id or employment.accrued_wage_cents <= 0:
+                    continue
+                wage_cap = (
+                    employment.wage_cents
+                    * self.settings.bankruptcy.wage_priority_days
+                    // wage_period_days
+                )
+                claim_specs.append(
+                    (
+                        employment.agent_id,
+                        min(employment.accrued_wage_cents, wage_cap),
+                        2,
+                        None,
+                        None,
+                    )
+                )
+        for assessment in sorted(
+            self.economy.tax_assessments.values(),
+            key=lambda row: row.assessment_id,
+        ):
+            outstanding_tax = assessment.assessed_cents - assessment.paid_cents
+            if assessment.taxpayer_id == entity_id and outstanding_tax > 0:
+                claim_specs.append(("gv_treasury", outstanding_tax, 3, None, None))
+        for loan in sorted(loans, key=lambda row: row.loan_id):
+            secured = (
+                min(loan.outstanding_cents, loan.collateral_value_cents) if loan.collateral else 0
+            )
+            if secured:
+                claim_specs.append(
+                    (
+                        loan.lender_id,
+                        secured,
+                        1,
+                        canonical_json(loan.collateral),
+                        loan.loan_id,
+                    )
+                )
+            deficiency = loan.outstanding_cents - secured
+            if deficiency:
+                claim_specs.append(
+                    (
+                        loan.lender_id,
+                        deficiency,
+                        4,
+                        None,
+                        loan.loan_id,
+                    )
+                )
+        for row in self._cap_rows(entity_id):
+            if row.holder_id != "option_pool" and row.invested_cents > 0:
+                claim_specs.append((row.holder_id, row.invested_cents, 5, None, None))
+
+        for ordinal, (
+            creditor_id,
+            claim_cents,
+            priority_class,
+            collateral_ref,
+            loan_id,
+        ) in enumerate(claim_specs):
+            claim_id = f"cl_{case_id}_{ordinal:04d}"
+            claim = ClaimState(
+                claim_id=claim_id,
+                case_id=case_id,
+                creditor_id=creditor_id,
+                claim_cents=claim_cents,
+                priority_class=priority_class,
+                collateral_ref=collateral_ref,
+                loan_id=loan_id,
+            )
+            self.economy.ventures.claims[claim_id] = claim
+            events.append(
+                emit(
+                    NewEvent(
+                        CLAIM_REGISTERED,
+                        {
+                            "case_id": case_id,
+                            "creditor_id": claim.creditor_id,
+                            "claim_cents": claim.claim_cents,
+                            "priority_class": claim.priority_class,
+                            "collateral_ref": claim.collateral_ref,
+                            "loan_id": claim.loan_id,
+                        },
+                        subject_ids=(entity_id, claim.creditor_id),
+                    )
+                )
+            )
+        return tuple(events)
+
+    def _advance_bankruptcies(self, tick: int, emit: Emit) -> tuple[Event, ...]:
+        events: list[Event] = []
+        for case in sorted(
+            self.economy.ventures.bankruptcies.values(),
+            key=lambda row: row.case_id,
+        ):
+            if (
+                case.status != "open"
+                or case.liquidation_tick is None
+                or tick < case.liquidation_tick
+            ):
+                continue
+            events.extend(self._liquidate_case(case, tick, emit))
+        return tuple(events)
+
+    def _liquidate_case(
+        self,
+        case: BankruptcyCaseState,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        estate = max(0, self.economy.ledger.liquid(case.entity_id))
+        exempt = 0
+        if case.entity_type == "agent":
+            exempt = min(
+                estate,
+                self.settings.economy.median_wage_cents
+                * self.settings.bankruptcy.exempt_months
+                // 12,
+            )
+        distributable = estate - exempt
+        case.estate_cents = distributable
+        events: list[Event] = [
+            emit(
+                NewEvent(
+                    ASSETS_LIQUIDATED,
+                    {
+                        "case_id": case.case_id,
+                        "item": "deposits",
+                        "book_cents": estate,
+                        "realised_cents": estate,
+                        "haircut_bp": 0,
+                        "buyer_id": None,
+                        "txn_id": None,
+                    },
+                    subject_ids=(case.entity_id,),
+                )
+            )
+        ]
+        if exempt:
+            events.append(
+                emit(
+                    NewEvent(
+                        EXEMPTION_APPLIED,
+                        {
+                            "case_id": case.case_id,
+                            "entity_id": case.entity_id,
+                            "exempt_cents": exempt,
+                            "basis": "one_sim_month_median_wage",
+                        },
+                        subject_ids=(case.entity_id,),
+                    )
+                )
+            )
+        claims = [
+            row
+            for row in self.economy.ventures.claims.values()
+            if row.case_id == case.case_id and row.claim_cents > 0
+        ]
+        source = self._deposit(case.entity_id) if distributable else None
+        remaining = distributable
+        total_claimed = sum(row.claim_cents for row in claims)
+        total_paid = 0
+        for priority in range(1, 6):
+            class_claims = [row for row in claims if row.priority_class == priority]
+            if not class_claims:
+                continue
+            class_total = sum(row.claim_cents for row in class_claims)
+            pool = min(remaining, class_total)
+            payments = allocate(
+                pool,
+                [(row.claim_id, row.claim_cents) for row in class_claims],
+            )
+            for claim in sorted(class_claims, key=lambda row: row.claim_id):
+                paid = payments.get(claim.claim_id, 0)
+                claim.paid_cents = paid
+                expected = self.economy.ledger.next_txn_id(tick) if paid else None
+                event = emit(
+                    NewEvent(
+                        DISTRIBUTION_MADE,
+                        {
+                            "case_id": case.case_id,
+                            "priority_class": priority,
+                            "creditor_id": claim.creditor_id,
+                            "claim_cents": claim.claim_cents,
+                            "paid_cents": paid,
+                            "class_recovery_bp": 10_000 * pool // max(1, class_total),
+                            "txn_id": str(expected) if expected is not None else None,
+                        },
+                        subject_ids=(case.entity_id, claim.creditor_id),
+                    )
+                )
+                if paid and source is not None:
+                    reason = "loan" if claim.loan_id is not None else "transfer"
+                    legs = self.economy.ledger.transfer(
+                        source,
+                        self._deposit(claim.creditor_id),
+                        paid,
+                        reason,
+                    )
+                    if claim.loan_id is not None:
+                        loan = self.economy.loans[claim.loan_id]
+                        principal = min(paid, loan.outstanding_cents)
+                        legs.extend(
+                            (
+                                Leg(
+                                    loan.lender_receivable_account_id,
+                                    -1,
+                                    principal,
+                                    "loan",
+                                ),
+                                Leg(
+                                    loan.borrower_payable_account_id,
+                                    1,
+                                    principal,
+                                    "loan",
+                                ),
+                            )
+                        )
+                    txn_id = self.economy.ledger.post_transaction(
+                        _coalesce(legs),
+                        tick=tick,
+                        cause=event,
+                    )
+                    if txn_id != expected:
+                        raise RuntimeError("bankruptcy distribution ordinal diverged")
+                    if claim.loan_id is not None:
+                        loan.outstanding_cents -= principal
+                events.append(event)
+                total_paid += paid
+            remaining -= pool
+            if remaining == 0:
+                break
+        loan_ids = sorted({str(claim.loan_id) for claim in claims if claim.loan_id is not None})
+        for loan_id in loan_ids:
+            loan = self.economy.loans[loan_id]
+            residual = loan.outstanding_cents
+            if residual > 0:
+                recovered = sum(claim.paid_cents for claim in claims if claim.loan_id == loan_id)
+                events.extend(
+                    write_off_loan(
+                        loan_id,
+                        residual,
+                        recovered,
+                        tick,
+                        ctx=self.credit_context,
+                        emit=emit,
+                    )
+                )
+        written_off = max(0, total_claimed - total_paid)
+        case.status = "discharged"
+        case.resolved_tick = tick
+        events.append(
+            emit(
+                NewEvent(
+                    BANKRUPTCY_DISCHARGED,
+                    {
+                        "case_id": case.case_id,
+                        "outcome": "liquidated",
+                        "written_off_cents": written_off,
+                        "blended_recovery_bp": 10_000 * total_paid // max(1, total_claimed),
+                        "resolved_tick": tick,
+                    },
+                    subject_ids=(case.entity_id,),
+                )
+            )
+        )
+        if case.entity_type == "firm":
+            firm = self.economy.firms[case.entity_id]
+            firm.status = "dissolved"
+            firm.dissolved_tick = tick
+            for employment in sorted(
+                self.economy.employments.values(),
+                key=lambda row: row.employment_id,
+            ):
+                if employment.firm_id != case.entity_id or employment.ended_tick is not None:
+                    continue
+                employment.ended_tick = tick
+                self.population[employment.agent_id].employment_status = "unemployed"
+                events.append(
+                    emit(
+                        NewEvent(
+                            FIRED,
+                            {
+                                "employment_id": employment.employment_id,
+                                "agent_id": employment.agent_id,
+                                "firm_id": case.entity_id,
+                                "reason": "firm_exit",
+                                "severance_cents": 0,
+                                "notice_ticks": 0,
+                            },
+                            actor_id=case.entity_id,
+                            subject_ids=(employment.agent_id,),
+                        )
+                    )
+                )
+            firm.headcount = 0
+            for vacancy in sorted(
+                self.economy.vacancies.values(),
+                key=lambda row: row.vacancy_id,
+            ):
+                if vacancy.firm_id != case.entity_id or vacancy.status != "open":
+                    continue
+                vacancy.status = "closed"
+                events.append(
+                    emit(
+                        NewEvent(
+                            VACANCY_CLOSED,
+                            {
+                                "vacancy_id": vacancy.vacancy_id,
+                                "reason": "firm_exit",
+                                "applicants_n": vacancy.applicants_n,
+                                "days_open": (tick - vacancy.posted_tick)
+                                // max(1, self.settings.clock.ticks_per_sim_day),
+                            },
+                            actor_id=case.entity_id,
+                        )
+                    )
+                )
+            for offer in sorted(
+                self.economy.offers.values(),
+                key=lambda row: row.offer_id,
+            ):
+                if offer.firm_id != case.entity_id or offer.status != "open":
+                    continue
+                offer.status = "expired"
+                events.append(
+                    emit(
+                        NewEvent(
+                            OFFER_EXPIRED,
+                            {
+                                "offer_id": offer.offer_id,
+                                "agent_id": offer.agent_id,
+                            },
+                            actor_id=case.entity_id,
+                            subject_ids=(offer.agent_id,),
+                        )
+                    )
+                )
+            for inventory in sorted(
+                self.economy.inventory.values(),
+                key=lambda row: (row.firm_id, row.sku),
+            ):
+                if inventory.firm_id != case.entity_id or inventory.quantity <= 0:
+                    continue
+                units = inventory.quantity
+                inventory.quantity = 0
+                events.append(
+                    emit(
+                        NewEvent(
+                            INVENTORY_WRITTEN_OFF,
+                            {
+                                "firm_id": case.entity_id,
+                                "sku": inventory.sku,
+                                "units": units,
+                                "unit_cost_cents": inventory.unit_cost_cents,
+                                "value_cents": units * inventory.unit_cost_cents,
+                                "reason": "bankruptcy_no_buyer",
+                            },
+                            actor_id=case.entity_id,
+                        )
+                    )
+                )
+            firm.capital_cents = 0
+            for security in list(self.economy.exchange.securities.values()):
+                if security.issuer_firm_id == case.entity_id and security.status == "listed":
+                    security.last_price_cents = 0
+                    events.extend(
+                        self.exchange.delist(
+                            security.symbol,
+                            "bankruptcy",
+                            tick,
+                            emit,
+                        )
+                    )
+            for startup in self.economy.ventures.startups.values():
+                if startup.firm_id == case.entity_id:
+                    startup.status = "dead"
+                    events.append(
+                        emit(
+                            NewEvent(
+                                STARTUP_DIED,
+                                {
+                                    "startup_id": startup.startup_id,
+                                    "cause": "bankruptcy",
+                                    "age_ticks": tick - startup.founded_tick,
+                                    "total_raised_cents": startup.total_raised_cents,
+                                    "investors_loss_cents": sum(
+                                        row.invested_cents
+                                        for row in self._cap_rows(case.entity_id)
+                                        if row.holder_id != startup.founder_id
+                                    ),
+                                },
+                                subject_ids=(case.entity_id,),
+                            )
+                        )
+                    )
+        elif case.entity_type == "agent":
+            expires = tick + (
+                self.settings.bankruptcy.credit_flag_years
+                * self.settings.clock.days_per_sim_year
+                * self.settings.clock.ticks_per_sim_day
+            )
+            self.economy.ventures.credit_flags_until_tick[case.entity_id] = expires
+            events.append(
+                emit(
+                    NewEvent(
+                        CREDIT_FLAG_SET,
+                        {
+                            "entity_id": case.entity_id,
+                            "flag": "bankruptcy",
+                            "set_tick": tick,
+                            "expires_tick": expires,
+                        },
+                        subject_ids=(case.entity_id,),
+                    )
+                )
+            )
+        return tuple(events)
+
+    def _declare_dividend(
+        self,
+        action: Action,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        firm_id = str(action.params.get("firm_id", ""))
+        firm = self.economy.firms.get(firm_id)
+        total = int(action.params.get("total_cents", 0))
+        if (
+            firm is None
+            or firm.founder_id != action.actor_id
+            or total <= 0
+            or self.economy.ledger.balance(firm.ledger_account_id) < total
+        ):
+            return ()
+        cap_rows = [row for row in self._cap_rows(firm_id) if row.holder_id != "option_pool"]
+        distribution = allocate(
+            total,
+            [(row.holder_id, row.shares) for row in cap_rows if row.shares > 0],
+        )
+        declared = emit(
+            NewEvent(
+                DIVIDEND_DECLARED,
+                {
+                    "firm_id": firm_id,
+                    "per_share_cents": total // max(1, sum(row.shares for row in cap_rows)),
+                    "total_cents": total,
+                    "record_tick": tick,
+                    "payable_tick": tick,
+                    "decided_by": action.actor_id,
+                },
+                actor_id=action.actor_id,
+                subject_ids=(firm_id,),
+            )
+        )
+        events: list[Event] = [declared]
+        for holder_id, cents in sorted(distribution.items()):
+            if cents <= 0:
+                continue
+            shares = sum(row.shares for row in cap_rows if row.holder_id == holder_id)
+            expected = self.economy.ledger.next_txn_id(tick)
+            paid = emit(
+                NewEvent(
+                    DIVIDEND_PAID,
+                    {
+                        "firm_id": firm_id,
+                        "holder_id": holder_id,
+                        "shares": shares,
+                        "cents": cents,
+                        "txn_id": str(expected),
+                    },
+                    subject_ids=(firm_id, holder_id),
+                )
+            )
+            txn_id = self.economy.ledger.post_transaction(
+                self.economy.ledger.transfer(
+                    firm.ledger_account_id,
+                    self._deposit(holder_id),
+                    cents,
+                    "dividend",
+                ),
+                tick=tick,
+                cause=paid,
+            )
+            if txn_id != expected:
+                raise RuntimeError("dividend ledger ordinal diverged")
+            events.append(paid)
+        paid_total = sum(distribution.values())
+        by_firm = self.economy.ventures.dividends_by_tick.setdefault(tick, {})
+        by_firm[firm_id] = by_firm.get(firm_id, 0) + paid_total
+        return tuple(events)
+
+    def _runway_step(self, tick: int, emit: Emit) -> tuple[Event, ...]:
+        if not self.settings.ventures.enabled:
+            return ()
+        if tick % self.settings.clock.ticks_per_sim_day != 0:
+            return ()
+        events: list[Event] = []
+        for startup in sorted(
+            self.economy.ventures.startups.values(),
+            key=lambda row: row.startup_id,
+        ):
+            if startup.status != "active":
+                continue
+            liquid = max(0, self.economy.ledger.liquid(startup.firm_id))
+            startup.runway_ticks = (
+                liquid * self.settings.clock.ticks_per_sim_day // max(1, startup.burn_rate_cents)
+            )
+            firm = self.economy.firms[startup.firm_id]
+            startup.revenue_ttm_cents = firm.cumulative_revenue_cents
+            events.append(
+                emit(
+                    NewEvent(
+                        RUNWAY_UPDATED,
+                        {
+                            "startup_id": startup.startup_id,
+                            "liquid_cents": liquid,
+                            "burn_rate_cents": startup.burn_rate_cents,
+                            "runway_ticks": startup.runway_ticks,
+                            "stage": startup.stage,
+                            "revenue_ttm_cents": startup.revenue_ttm_cents,
+                        },
+                        subject_ids=(startup.firm_id,),
+                    )
+                )
+            )
+        return tuple(events)
+
+    def _solvency_step(self, tick: int, emit: Emit) -> tuple[Event, ...]:
+        if not self.settings.bankruptcy.enabled:
+            return ()
+        events: list[Event] = []
+        persistence = (
+            self.settings.bankruptcy.insolvency_persist_days * self.settings.clock.ticks_per_sim_day
+        )
+        for firm in sorted(self.economy.firms.values(), key=lambda row: row.firm_id):
+            if firm.status != "active" or firm.firm_id == "fm_broker":
+                self.economy.ventures.insolvency_since_tick.pop(firm.firm_id, None)
+                continue
+            if self.economy.ledger.net_worth(firm.firm_id) < 0:
+                since = self.economy.ventures.insolvency_since_tick.setdefault(
+                    firm.firm_id,
+                    tick,
+                )
+                if tick - since >= persistence:
+                    events.extend(
+                        self._file_case(
+                            firm.firm_id,
+                            "balance_sheet",
+                            tick,
+                            emit,
+                        )
+                    )
+            else:
+                self.economy.ventures.insolvency_since_tick.pop(firm.firm_id, None)
+        return tuple(events)
+
+    def _fund_step(self, tick: int, emit: Emit) -> tuple[Event, ...]:
+        if not self.settings.ventures.enabled:
+            return ()
+        quarter = 90 * self.settings.clock.ticks_per_sim_day
+        if tick <= 0 or tick % quarter != 0:
+            return ()
+        events: list[Event] = []
+        for fund in sorted(self.economy.ventures.funds.values(), key=lambda row: row.fund_id):
+            fee = fund.committed_cents * fund.management_fee_bp // 10_000 // 4
+            source = self._deposit(fund.firm_id)
+            destination = self._deposit(fund.gp_agent_id)
+            if fee <= 0 or self.economy.ledger.balance(source) < fee:
+                continue
+            expected = self.economy.ledger.next_txn_id(tick)
+            event = emit(
+                NewEvent(
+                    MANAGEMENT_FEE_CHARGED,
+                    {
+                        "fund_id": fund.fund_id,
+                        "cents": fee,
+                        "period": tick // quarter,
+                        "txn_id": str(expected),
+                    },
+                    subject_ids=(fund.firm_id, fund.gp_agent_id),
+                )
+            )
+            txn_id = self.economy.ledger.post_transaction(
+                self.economy.ledger.transfer(
+                    source,
+                    destination,
+                    fee,
+                    "transfer",
+                ),
+                tick=tick,
+                cause=event,
+            )
+            if txn_id != expected:
+                raise RuntimeError("management-fee ledger ordinal diverged")
+            events.append(event)
+        return tuple(events)
+
+    def distribute_fund_exit(
+        self,
+        fund_id: str,
+        source_exit_id: str,
+        gross_cents: int,
+        tick: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        fund = self.economy.ventures.funds[fund_id]
+        source = self._deposit(fund.firm_id)
+        if gross_cents <= 0 or self.economy.ledger.balance(source) < gross_cents:
+            return ()
+        hurdle = fund.called_cents * (10_000 + fund.hurdle_bp) // 10_000
+        carry = (
+            max(0, gross_cents - hurdle) * fund.carry_bp // 10_000 if gross_cents > hurdle else 0
+        )
+        lp_pool = gross_cents - carry
+        lp_distribution = allocate(lp_pool, list(sorted(fund.lps.items())))
+        expected = self.economy.ledger.next_txn_id(tick)
+        event = emit(
+            NewEvent(
+                FUND_DISTRIBUTION,
+                {
+                    "fund_id": fund_id,
+                    "source_exit_id": source_exit_id,
+                    "gross_cents": gross_cents,
+                    "lp_cents": lp_pool,
+                    "carry_cents": carry,
+                    "hurdle_met": gross_cents > hurdle,
+                    "txn_id": str(expected),
+                },
+                subject_ids=(fund.firm_id,),
+            )
+        )
+        legs: list[Leg] = []
+        for lp_id, cents in sorted(lp_distribution.items()):
+            if cents:
+                legs.extend(
+                    self.economy.ledger.transfer(
+                        source,
+                        self._deposit(lp_id),
+                        cents,
+                        "dividend",
+                    )
+                )
+        if carry:
+            legs.extend(
+                self.economy.ledger.transfer(
+                    source,
+                    self._deposit(fund.gp_agent_id),
+                    carry,
+                    "dividend",
+                )
+            )
+        txn_id = self.economy.ledger.post_transaction(
+            _coalesce(legs),
+            tick=tick,
+            cause=event,
+        )
+        if txn_id != expected:
+            raise RuntimeError("fund distribution ledger ordinal diverged")
+        distributions = self.economy.ventures.fund_distributions_cents
+        distributions[fund_id] = distributions.get(fund_id, 0) + gross_cents
+        return (event,)
+
+    def _expire_term_sheets(self, tick: int, emit: Emit) -> tuple[Event, ...]:
+        events: list[Event] = []
+        for term in sorted(
+            self.economy.ventures.term_sheets.values(),
+            key=lambda row: row.term_sheet_id,
+        ):
+            if term.status != "open" or tick <= term.expires_tick:
+                continue
+            term.status = "expired"
+            events.append(
+                emit(
+                    NewEvent(
+                        TERM_SHEET_EXPIRED,
+                        {"term_sheet_id": term.term_sheet_id},
+                        subject_ids=(term.startup_id, term.investor_id),
+                    )
+                )
+            )
+        return tuple(events)
+
+    def _cap_event(
+        self,
+        row: CapTableState,
+        before: int,
+        cause: str,
+        emit: Emit,
+    ) -> Event:
+        return emit(
+            NewEvent(
+                CAP_TABLE_UPDATED,
+                {
+                    "firm_id": row.firm_id,
+                    "holder_id": row.holder_id,
+                    "share_class": row.share_class,
+                    "shares_before": before,
+                    "shares_after": row.shares,
+                    "cause": cause,
+                    "fully_diluted_after": self.economy.ventures.shares(row.firm_id),
+                },
+                subject_ids=(row.firm_id, row.holder_id),
+            )
+        )
+
+    def _cap_rows(self, firm_id: str) -> list[CapTableState]:
+        return sorted(
+            (row for row in self.economy.ventures.cap_table.values() if row.firm_id == firm_id),
+            key=lambda row: (row.share_class, row.holder_id),
+        )
+
+    def _traction(self, startup: StartupState) -> Mapping[str, Any]:
+        firm = self.economy.firms[startup.firm_id]
+        rounds = [
+            row
+            for row in self.economy.ventures.rounds.values()
+            if row.startup_id == startup.startup_id
+        ]
+        return {
+            "revenue_ttm_cents": firm.cumulative_revenue_cents,
+            "revenue_growth_bp": 0,
+            "headcount": firm.headcount,
+            "burn_rate_cents": startup.burn_rate_cents,
+            "runway_ticks": startup.runway_ticks,
+            "months_since_founding": 12
+            * (max(0, self.population.tick - startup.founded_tick))
+            // max(
+                1,
+                self.settings.clock.days_per_sim_year * self.settings.clock.ticks_per_sim_day,
+            ),
+            "prior_rounds": [row.round_id for row in rounds],
+        }
+
+    @staticmethod
+    def _next_stage(stage: str) -> str:
+        stages = ("pre_seed", "seed", "series_a", "series_b", "growth")
+        try:
+            return stages[min(len(stages) - 1, stages.index(stage) + 1)]
+        except ValueError:
+            return "seed"
+
+    def _deposit(self, owner_id: str) -> str:
+        deposits = [
+            account
+            for account in self.economy.ledger.accounts_of(owner_id)
+            if parse_account_id(account)[0] == "dep"
+        ]
+        if not deposits:
+            raise LedgerError(f"owner has no deposit account: {owner_id}")
+        return deposits[0]
+
+    def _action_under_stay(self, action: Action) -> bool:
+        candidates = {action.actor_id}
+        for key in ("entity_id", "firm_id", "acquirer_id", "target_id"):
+            value = action.params.get(key)
+            if value:
+                candidates.add(str(value))
+        return any(
+            case.status == "open" and case.entity_id in candidates
+            for case in self.economy.ventures.bankruptcies.values()
+        )

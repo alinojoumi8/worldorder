@@ -53,6 +53,15 @@ class AgentPopulation:
     def action_type_counts(self) -> Mapping[str, int]:
         return dict(self._action_counts)
 
+    def order_invariant_failures(self) -> Mapping[str, object]:
+        return {}
+
+    def share_invariant_failures(self) -> Mapping[str, object]:
+        return {}
+
+    def cap_table_invariant_failures(self) -> Mapping[str, object]:
+        return {}
+
     def record_action(self, action_type: str) -> None:
         self._action_counts[action_type] += 1
 
