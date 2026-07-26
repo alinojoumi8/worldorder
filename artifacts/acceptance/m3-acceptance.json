@@ -1,5 +1,5 @@
 {
-  "accepted_implementation_git_sha": "50f88335c6dcad6ea7192bac293eeedb224afae4",
+  "accepted_implementation_git_sha": "f5438fd7ccfb541034db34fa8f035b894a68abf8",
   "accepted_on": "2026-07-26",
   "branch": "codex/build/m3-capital",
   "status": "engineering_passed_research_pending",
@@ -13,7 +13,7 @@
       "wage_paid": 20
     },
     "events": 28382,
-    "hash": "a26b0f5c453bed7a95a1120be70b3197b74a57db9f46b483f97b9c850af9119d",
+    "hash": "6e374b1f1731a7fc98b8d1d77f6d44cc23355177799a4b16d985308269fd4c53",
     "ticks": 100
   },
   "integration_run": {
@@ -45,7 +45,7 @@
     "import_linter_contracts": 4,
     "mypy_source_files": 111,
     "prompt_lint": "passed",
-    "pytest_passed": 152,
+    "pytest_passed": 155,
     "ruff": "passed"
   },
   "read_only_observatory": {
@@ -62,13 +62,18 @@
     ]
   },
   "remaining_gates": [
-    "C15 sliced listed-security liquidation with realised book impact",
-    "C15 in-world liquidation buyers for inventory, capital, and unlisted stakes",
     "C15 acquisition redundancy, severance, loan transfer, and asset-sale shell paths",
     "M3 mechanism declarations and ablations",
     "C15 full property and bankruptcy-cascade matrix",
     "C20 death-bankruptcy integration in M5",
     "C18 antitrust decision integration in M4",
     "Stage 3 five-seed five-year V1-V3 calibration"
-  ]
+  ],
+  "liquidation_conformance": {
+    "inventory_and_capital_require_solvent_buyers": true,
+    "listed_market_order_slicing": true,
+    "private_stakes_offered_to_existing_holders": true,
+    "realised_book_impact": true,
+    "unsold_nonlisted_assets_written_off_without_money": true
+  }
 }
