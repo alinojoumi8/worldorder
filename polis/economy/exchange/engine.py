@@ -475,7 +475,8 @@ class ExchangeEngine:
             reserved_cents = collateral
         else:
             holding = self.state.holding(action.actor_id, symbol)
-            available = holding.qty - holding.reserved_qty - holding.locked_qty
+            locked = 0 if forced_liquidation else holding.locked_qty
+            available = holding.qty - holding.reserved_qty - locked
             if qty > max(0, available):
                 reason = "lockup" if holding.locked_qty else "insufficient_reservation"
                 return None, (
@@ -793,6 +794,8 @@ class ExchangeEngine:
         if "opens_short" not in sell.flags:
             seller_holding.reserved_qty -= qty
             sell.reserved_qty -= qty
+        if "forced_liquidation" in sell.flags and seller_holding.locked_qty:
+            seller_holding.locked_qty = max(0, seller_holding.locked_qty - qty)
 
         events: list[Event] = [trade_event]
         self.state.securities[buy.symbol].last_price_cents = fill.price_cents

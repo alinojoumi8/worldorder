@@ -15,10 +15,12 @@ from polis.economy.venture_state import CapTableState, ClaimState, FundingRoundS
 from polis.economy.ventures import VentureEngine, venture_waterfall
 from polis.events.kinds import (
     ACQUISITION_COMPLETED,
+    ASSETS_LIQUIDATED,
     BANKRUPTCY_DISCHARGED,
     DIVIDEND_PAID,
     FIRED,
     ROUND_CLOSED,
+    TRADE_EXECUTED,
 )
 from polis.events.log import EventLog, MemoryEventSink
 from polis.kernel.rng import RngRegistry
@@ -40,8 +42,8 @@ def configured() -> Settings:
             },
             "bankruptcy": {
                 "enabled": True,
-                "liquidation_days": 1,
-                "stay_max_days": 3,
+                "liquidation_days": 3,
+                "stay_max_days": 5,
             },
         },
     )
@@ -304,3 +306,241 @@ def test_cash_acquisition_and_bankruptcy_reach_terminal_states() -> None:
     assert employment.ended_tick == discharge_tick
     assert employee.employment_status == "unemployed"
     assert economy.ledger.global_balance_cents() == 0
+
+
+def test_listed_bankruptcy_assets_are_sliced_through_the_order_book() -> None:
+    settings, population, economy, engine, log = build()
+    exchange = engine.exchange
+    debtor, buyer = list(population)[:2]
+    issuer = next(
+        firm
+        for firm in economy.firms.values()
+        if firm.firm_id != "fm_broker" and firm.founder_id != debtor.agent_id
+    )
+    exchange.list_security(
+        symbol="LIQ",
+        issuer_firm_id=issuer.firm_id,
+        shares_outstanding=1_000,
+        listing_price_cents=10,
+        tick=0,
+        emit=emit_at(log, 0),
+        holders={debtor.agent_id: 100, issuer.founder_id: 900},
+        lockup_until_tick=100,
+    )
+    filing = make_action(
+        actor_id=debtor.agent_id,
+        tick=1,
+        action_type=ActionType.FILE_BANKRUPTCY,
+        params={"reason": "voluntary"},
+    )
+    asyncio.run(engine.resolve((filing,), 1, emit_at(log, 1)))
+    case = next(
+        row for row in economy.ventures.bankruptcies.values() if row.entity_id == debtor.agent_id
+    )
+    exchange_events = []
+    slice_quantities: list[int] = []
+    final_tick = case.liquidation_tick or 4
+    discharge_events = ()
+    for tick in range(2, final_tick + 1):
+        liquidation = engine.liquidation_actions(tick)
+        assert liquidation
+        assert all(action.params["order_type"] == "market" for action in liquidation)
+        assert all("forced_liquidation" in action.params["flags"] for action in liquidation)
+        quantity = sum(int(action.params["qty"]) for action in liquidation)
+        slice_quantities.append(quantity)
+        bid = make_action(
+            actor_id=buyer.agent_id,
+            tick=tick,
+            action_type=ActionType.SUBMIT_ORDER,
+            params={
+                "symbol": "LIQ",
+                "side": "buy",
+                "order_type": "limit",
+                "limit_price_cents": 8,
+                "qty": quantity,
+            },
+        )
+        exchange_events.extend(exchange.resolve((*liquidation, bid), tick, emit_at(log, tick)))
+        discharge_events = asyncio.run(engine.resolve((), tick, emit_at(log, tick)))
+
+    assert any(event.kind == TRADE_EXECUTED for event in exchange_events)
+    assert len(slice_quantities) == settings.bankruptcy.liquidation_days
+    assert sum(slice_quantities) == 100
+    assert slice_quantities[-1] >= max(slice_quantities[:-1])
+    liquidation_event = next(
+        event
+        for event in discharge_events
+        if event.kind == ASSETS_LIQUIDATED and event.payload.get("asset_ref") == "LIQ"
+    )
+    assert liquidation_event.payload["shares"] == 100
+    realised = sum(
+        int(event.payload["price_cents"]) * int(event.payload["qty"])
+        - int(event.payload["commission_sell_cents"])
+        for event in exchange_events
+        if event.kind == TRADE_EXECUTED
+    )
+    assert liquidation_event.payload["realised_cents"] == realised
+    assert 0 < realised < 1_000
+    assert exchange.state.securities["LIQ"].last_price_cents == 8
+    debtor_holding = exchange.state.holding(debtor.agent_id, "LIQ")
+    assert debtor_holding.qty == 0
+    assert debtor_holding.locked_qty == 0
+    assert case.status == "discharged"
+    assert economy.ledger.global_balance_cents() == 0
+    assert (
+        sum(row.qty for row in exchange.state.holdings.values() if row.symbol == "LIQ")
+        == exchange.state.securities["LIQ"].shares_outstanding
+    )
+
+
+def test_bankruptcy_inventory_and_capital_require_solvent_in_world_buyers() -> None:
+    _settings, _population, economy, engine, log = build()
+    firms = [row for row in economy.firms.values() if row.firm_id != "fm_broker"]
+    debtor, buyer = firms[:2]
+    buyer.sector = debtor.sector
+    for firm in firms:
+        if firm.sector == debtor.sector and firm.firm_id not in {debtor.firm_id, buyer.firm_id}:
+            firm.status = "acquired"
+    rows = [row for row in economy.inventory.values() if row.firm_id == debtor.firm_id]
+    assert rows
+    inventory = rows[0]
+    for row in rows:
+        row.quantity = 0
+    inventory.quantity = 2
+    inventory.unit_cost_cents = 10
+    debtor.capital_cents = 1_000
+    buyer_capital_before = buyer.capital_cents
+    buyer_inventory_before = economy.inventory.get(f"{buyer.firm_id}:{inventory.sku}")
+    buyer_units_before = buyer_inventory_before.quantity if buyer_inventory_before else 0
+
+    filing = make_action(
+        actor_id=debtor.founder_id,
+        tick=1,
+        action_type=ActionType.FILE_BANKRUPTCY,
+        params={"entity_id": debtor.firm_id, "reason": "voluntary"},
+    )
+    asyncio.run(engine.resolve((filing,), 1, emit_at(log, 1)))
+    case = next(
+        row for row in economy.ventures.bankruptcies.values() if row.entity_id == debtor.firm_id
+    )
+    events = asyncio.run(
+        engine.resolve(
+            (),
+            case.liquidation_tick or 2,
+            emit_at(log, case.liquidation_tick or 2),
+        )
+    )
+
+    sales = [
+        event
+        for event in events
+        if event.kind == ASSETS_LIQUIDATED and event.payload.get("buyer_id") == buyer.firm_id
+    ]
+    assert {event.payload["item"] for event in sales} >= {"inventory", "capital"}
+    assert all(event.payload["txn_id"] for event in sales)
+    assert economy.inventory[f"{buyer.firm_id}:{inventory.sku}"].quantity == (
+        buyer_units_before + 2
+    )
+    assert buyer.capital_cents == buyer_capital_before + 400
+    assert debtor.capital_cents == 0
+    assert case.status == "discharged"
+    assert economy.ledger.global_balance_cents() == 0
+
+
+def test_unlisted_bankruptcy_stake_is_offered_to_existing_holders() -> None:
+    settings, population, economy, engine, log = build()
+    founder, investor = list(population)[:2]
+    found = make_action(
+        actor_id=founder.agent_id,
+        tick=1,
+        action_type=ActionType.FOUND_COMPANY,
+        params={
+            "name": "Private Target",
+            "sector": "services",
+            "place_id": "pl_test",
+            "initial_capital_cents": 10_000,
+            "is_startup": True,
+            "is_fund": False,
+            "thesis": "Private market liquidation fixture",
+        },
+    )
+    asyncio.run(engine.resolve((found,), 1, emit_at(log, 1)))
+    startup = next(iter(economy.ventures.startups.values()))
+    term = make_action(
+        actor_id=investor.agent_id,
+        tick=2,
+        action_type=ActionType.ISSUE_TERM_SHEET,
+        params={
+            "startup_id": startup.startup_id,
+            "investor_id": investor.agent_id,
+            "pre_money_cents": 100_000_000,
+            "amount_cents": 5_000,
+            "security": "preferred",
+            "liq_pref_bp": 10_000,
+            "participating": False,
+            "pro_rata": True,
+            "board_seat": False,
+            "option_pool_bp": 0,
+            "anti_dilution": "broad_weighted",
+        },
+    )
+    asyncio.run(engine.resolve((term,), 2, emit_at(log, 2)))
+    term_state = next(iter(economy.ventures.term_sheets.values()))
+    invest = make_action(
+        actor_id=investor.agent_id,
+        tick=3,
+        action_type=ActionType.INVEST,
+        params={
+            "target_id": startup.startup_id,
+            "cents": 5_000,
+            "instrument": "round",
+            "term_sheet_id": term_state.term_sheet_id,
+        },
+    )
+    asyncio.run(engine.resolve((invest,), 3, emit_at(log, 3)))
+    investor_row = next(
+        row
+        for row in economy.ventures.cap_table.values()
+        if row.firm_id == startup.firm_id
+        and row.holder_id == investor.agent_id
+        and row.share_class == "preferred"
+    )
+    shares = investor_row.shares
+    total_before = economy.ventures.shares(startup.firm_id)
+
+    filing = make_action(
+        actor_id=investor.agent_id,
+        tick=4,
+        action_type=ActionType.FILE_BANKRUPTCY,
+        params={"reason": "voluntary"},
+    )
+    asyncio.run(engine.resolve((filing,), 4, emit_at(log, 4)))
+    case = next(
+        row for row in economy.ventures.bankruptcies.values() if row.entity_id == investor.agent_id
+    )
+    events = asyncio.run(
+        engine.resolve(
+            (),
+            case.liquidation_tick or 7,
+            emit_at(log, case.liquidation_tick or 7),
+        )
+    )
+
+    sale = next(
+        event
+        for event in events
+        if event.kind == ASSETS_LIQUIDATED
+        and event.payload.get("listed") is False
+        and event.payload.get("buyer_id") == founder.agent_id
+    )
+    assert sale.payload["shares"] == shares
+    assert sale.payload["realised_cents"] > 0
+    assert investor_row.shares == 0
+    founder_preferred = economy.ventures.cap_table[
+        economy.ventures.cap_key(startup.firm_id, founder.agent_id, "preferred")
+    ]
+    assert founder_preferred.shares == shares
+    assert economy.ventures.shares(startup.firm_id) == total_before
+    assert case.status == "discharged"
+    assert economy.ledger.global_balance_cents() == 0
+    assert settings.bankruptcy.unlisted_haircut_bp == 5_000
