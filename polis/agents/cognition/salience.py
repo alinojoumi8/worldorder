@@ -48,8 +48,10 @@ def _score(
         observation.digest_features,
         agent.expectation_features or observation.digest_features,
     )
-    need_stakes = 1 - min(agent.needs.as_dict().values())
-    stakes = min(1.0, need_stakes * (1 + agent.traits.neuroticism))
+    # Stakes describe a change in the current event, not chronic unmet needs.
+    # M1 observations emit zero until owning milestones provide wealth, health,
+    # employment, relationship, or legal-jeopardy deltas.
+    stakes = min(1.0, observation.stakes * (1 + agent.traits.neuroticism))
     situation = f"{observation.place.type}|{agent.employment_status}"
     novelty = (1.0 if situation not in agent.seen_situations else 0.0) * agent.traits.openness
     social = 0.4 if observation.co_located else 0.0

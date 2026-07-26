@@ -43,3 +43,16 @@ enter REFLECT together and suppressed the intended 7% DELIBERATE lane for long i
 M1 deterministically queues due reflections by accumulated importance and agent id, using
 only the call reserve above the deliberate target. The importance/life-event trigger and
 cooldown are unchanged; overflow remains armed for the next tick.
+
+### Event stakes are not chronic need pressure
+
+The first M1 calibration incorrectly used `1 - min(needs)` as the salience `stakes`
+component. This contradicted `04-AGENT-SPEC.md`, where stakes are deltas from wealth,
+health, employment, relationship or legal events. Once a non-restored M1 need reached
+zero, every routine tick became permanently high-stakes, producing roughly one memory
+per agent per tick and a projected memory-cap collision near tick 2,951.
+
+M1 observations now carry an explicit event-stakes value of zero. Later milestones own
+the event-delta calculations for their institutions. Unmet needs continue to drive reflex
+choice and wellbeing, but they no longer masquerade as event stakes. This intentionally
+changes the frozen M1 golden hash and is covered by a regression test.

@@ -78,6 +78,30 @@ def test_weighted_routing_hits_the_intended_deliberate_share() -> None:
     assert sorted(score.rank for score in result.scores.values()) == list(range(1, 101))
 
 
+def test_chronic_unmet_need_is_not_misclassified_as_event_stakes() -> None:
+    rng, world, population = _population()
+    agent = population.alive()[0]
+    agent.needs.social = 0
+    settings = load_settings(Path("configs/smoke.yaml"))
+    observations = build_observations(
+        population,
+        world,
+        tick=1,
+        sim_time=datetime(2100, 1, 2),
+    )
+
+    result = route_cognition(
+        population,
+        observations,
+        MemoryStore(MemorySettings()),
+        settings=settings,
+        rng=rng,
+    )
+
+    assert observations[agent.agent_id].stakes == 0
+    assert result.scores[agent.agent_id].components["stakes"] == 0
+
+
 def test_reflection_backlog_preserves_deliberate_reserve() -> None:
     rng, world, population = _population(50)
     settings = load_settings(Path("configs/smoke.yaml"))

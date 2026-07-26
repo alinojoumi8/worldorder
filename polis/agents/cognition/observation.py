@@ -52,6 +52,7 @@ class Observation:
     employer: None
     offers: tuple[dict[str, str], ...]
     obligations: tuple[dict[str, str], ...]
+    stakes: float
     digest_features: frozenset[str]
     digest_hash: str
 
@@ -140,6 +141,7 @@ def build_observations(
             employer=None,
             offers=(),
             obligations=(),
+            stakes=0.0,
             digest_features=features,
             digest_hash=digest_hash,
         )
