@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, cast
 
@@ -38,8 +40,9 @@ def run(
     profile: Annotated[list[str] | None, typer.Option()] = None,
     set_: Annotated[list[str] | None, typer.Option("--set")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
 ) -> None:
-    """Resolve and, once M0 is composed, execute a run."""
+    """Resolve and execute a deterministic POLIS run."""
     settings = load_settings(
         config,
         profiles=profile or (),
@@ -53,7 +56,16 @@ def run(
         "population": settings.population.initial_agents,
         "clock_profile": settings.clock.profile,
     }
-    typer.echo(json.dumps(result, sort_keys=True) if json_output else yaml_like(result))
+    if dry_run:
+        typer.echo(json.dumps(result, sort_keys=True) if json_output else yaml_like(result))
+        return
+    from polis.simulation import run_empty
+
+    simulation = asyncio.run(run_empty(settings))
+    output = {**result, "report": asdict(simulation.report)}
+    typer.echo(
+        json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
+    )
 
 
 def yaml_like(value: dict[str, object]) -> str:
@@ -103,7 +115,6 @@ def observe() -> None:
 
 
 def main() -> None:
-    import asyncio
     import sys
 
     if sys.platform == "win32":
