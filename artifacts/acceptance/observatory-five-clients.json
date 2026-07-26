@@ -1,0 +1,26 @@
+{
+  "baseline_median_seconds": 7.21,
+  "baseline_seconds": [
+    7.333,
+    6.802,
+    7.21
+  ],
+  "five_clients_median_seconds": 6.898,
+  "five_clients_seconds": [
+    6.898,
+    6.941,
+    6.893
+  ],
+  "gates": {
+    "clients_received_live_frames": true,
+    "five_clients_connected": true,
+    "live_path_uses_websocket_not_polling": true,
+    "tick_latency_regression_at_most_3_percent": true
+  },
+  "lag_frames": 750,
+  "received_frames": 1516,
+  "regression_pct": -4.324,
+  "status": "passed",
+  "ticks_per_trial": 300,
+  "trials": 3
+}

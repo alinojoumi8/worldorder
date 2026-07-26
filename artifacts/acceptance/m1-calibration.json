@@ -1,0 +1,44 @@
+{
+  "action_types_per_tick": {
+    "maximum": 6,
+    "minimum": 6
+  },
+  "config": "configs\\calibration-m1.yaml",
+  "deliberate_share_bp": {
+    "mean": 700.0,
+    "p05": 700.0,
+    "p50": 700.0,
+    "p95": 700.0
+  },
+  "elapsed_s": 1620.444,
+  "events_hashed": 5065238,
+  "gates": {
+    "deliberate_share_near_7_percent": true,
+    "invariants_and_population": true,
+    "multiple_action_types": true,
+    "nonzero_wellbeing": true,
+    "throughput_at_least_1_tick_s": true,
+    "v4_entropy_floor_on_90_percent_ticks": true
+  },
+  "halt_reason": null,
+  "population": 1000,
+  "retained_memories": 2039639,
+  "run_id": "48d40d5e-a56b-5658-8850-e0932ca1e625",
+  "sampled_cognition_traces": 40096,
+  "seed": 2026072601,
+  "status": "passed",
+  "terminal_hash": "84b1e31e6641f533506beade224fb4107b74072838bec1d71657f737a7468af1",
+  "ticks": 2000,
+  "ticks_per_second": 1.234,
+  "v4_action_entropy_normalized": {
+    "mean": 0.8641,
+    "minimum": 0.806881,
+    "pass_share": 1.0,
+    "threshold": 0.35
+  },
+  "wellbeing": {
+    "final": 44.79438,
+    "initial": 76.85164,
+    "minimum": 44.216
+  }
+}
