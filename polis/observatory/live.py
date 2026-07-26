@@ -39,7 +39,7 @@ class RedisEphemeralPublisher:
     async def publish(self, events: Sequence[Event]) -> None:
         if not events:
             return
-        frames = [
+        frames: list[dict[str, Any]] = [
             {
                 "op": "eph",
                 "kind": event.kind,

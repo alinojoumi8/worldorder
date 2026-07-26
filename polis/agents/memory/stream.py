@@ -190,8 +190,7 @@ class MemoryStore:
             key=lambda item: (-item[0], item[1].memory_id),
         )
         raw_recency = [
-            0.995 ** ((tick - row.last_accessed_tick) / 24)
-            for _similarity, row in relevant
+            0.995 ** ((tick - row.last_accessed_tick) / 24) for _similarity, row in relevant
         ]
         raw_importance = [row.importance for _similarity, row in relevant]
         raw_relevance = [(similarity + 1) / 2 for similarity, _row in relevant]

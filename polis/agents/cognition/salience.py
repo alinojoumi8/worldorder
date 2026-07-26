@@ -99,9 +99,7 @@ def route_cognition(
     # M1 reflection consumes one call. Keep synchronized trigger bursts inside
     # the reserve so they cannot erase the calibrated deliberate lane.
     reflection_capacity = max(0, cognition_line.calls_per_tick - intended)
-    reflect_ids = {
-        agent.agent_id for agent in reflection_candidates[:reflection_capacity]
-    }
+    reflect_ids = {agent.agent_id for agent in reflection_candidates[:reflection_capacity]}
     available = max(0, cognition_line.calls_per_tick - len(reflect_ids))
     target = min(intended, available)
     candidates = [score for score in ranked if score.agent_id not in reflect_ids]
