@@ -1,0 +1,32 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime data and secrets
+.env
+.env.*
+!.env.example
+.cache/
+.blobs/
+.minio/
+*.log
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.tmp/
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

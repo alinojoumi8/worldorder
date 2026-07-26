@@ -1,0 +1,33 @@
+{
+  "title": "Approve POLIS's composition",
+  "question": "Choose the structure that should govern the complete navigable prototype. Use the steer field if you want elements combined.",
+  "options": [
+    {
+      "id": "atlas-cockpit",
+      "label": "Atlas Cockpit",
+      "kicker": "MAP-FIRST",
+      "lineage": "living map with an attached evidence rail",
+      "body": "The clearest complete application shell: the city dominates, all eight views remain obvious, and one selected agent connects a macro anomaly to a full decision chain. Carry the structure forward, but replace the photoreal map treatment with POLIS's abstract city geometry.",
+      "hero": ".impeccable/comps/atlas-cockpit.png"
+    },
+    {
+      "id": "city-cross-section",
+      "label": "City Cross-Section",
+      "kicker": "CITY AS A SYSTEM",
+      "lineage": "architectural section plus synchronized causal ribbon",
+      "body": "The strongest expression of AI agents living and working inside one civic system. Districts, institutions, agents, macro charts, and the causal chain share a single time cursor. Risk: the cross-section should complement—not replace—the accurate top-down map.",
+      "hero": ".impeccable/comps/city-cross-section.png"
+    },
+    {
+      "id": "trace-lens",
+      "label": "Trace Lens",
+      "kicker": "AGENT-CENTERED",
+      "lineage": "urban atlas viewed through a causal microscope",
+      "body": "The most distinctive interaction: a lens reveals district conditions, nearby agents, perception, memory, action, and outcome in concentric layers. It makes macro-to-micro traceability memorable, but is the most technically ambitious and must preserve familiar navigation.",
+      "hero": ".impeccable/comps/trace-lens.png"
+    }
+  ],
+  "reroll": false,
+  "canon": false,
+  "steer": true
+}

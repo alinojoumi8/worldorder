@@ -1,0 +1,274 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-25T23:48:49.4012955-04:00",
+  "title": "Design System: POLIS",
+  "extensions": {
+    "colorMeta": {
+      "drafting-white": {
+        "role": "neutral",
+        "displayName": "Drafting White",
+        "canonical": "#f5f8fb",
+        "tonalRamp": ["#101722", "#293440", "#4b5967", "#71808f", "#9ca9b6", "#c3cdd6", "#e0e7ed", "#f5f8fb"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Atlas Surface",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#12171d", "#303941", "#56616a", "#7d8790", "#a5adb5", "#cbd1d6", "#e8ebee", "#ffffff"]
+      },
+      "surface-blue": {
+        "role": "neutral",
+        "displayName": "Pale Atlas Field",
+        "canonical": "#edf3f8",
+        "tonalRamp": ["#111a23", "#2a3946", "#4d6171", "#728596", "#99a9b8", "#bdc9d3", "#dce5ec", "#edf3f8"]
+      },
+      "surface-blue-strong": {
+        "role": "neutral",
+        "displayName": "Registration Field",
+        "canonical": "#dfe9f2",
+        "tonalRamp": ["#101a24", "#283a49", "#496274", "#6e8799", "#95aabc", "#b9cad8", "#d3dfe8", "#eef4f8"]
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Civic Graphite",
+        "canonical": "#122033",
+        "tonalRamp": ["#07101c", "#122033", "#26374c", "#44566c", "#68798c", "#91a0af", "#c9d4df", "#f5f8fb"]
+      },
+      "graphite-secondary": {
+        "role": "neutral",
+        "displayName": "Secondary Graphite",
+        "canonical": "#26374c",
+        "tonalRamp": ["#09121e", "#1a293a", "#26374c", "#465a70", "#697d91", "#92a2b2", "#c1ccd6", "#f0f4f7"]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Instrument Muted",
+        "canonical": "#58697d",
+        "tonalRamp": ["#101820", "#293746", "#43576a", "#58697d", "#7a8a9b", "#a3afbb", "#ccd3da", "#f2f5f7"]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Atlas Keyline",
+        "canonical": "#c9d4df",
+        "tonalRamp": ["#111920", "#2e3944", "#52616e", "#7a8996", "#a3b0bb", "#c9d4df", "#e2e8ed", "#f5f8fa"]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Registration Keyline",
+        "canonical": "#9cacbd",
+        "tonalRamp": ["#101820", "#2a3743", "#4a5b69", "#6f8190", "#9cacbd", "#bdc8d2", "#dce3e9", "#f4f7f9"]
+      },
+      "signal-cobalt": {
+        "role": "primary",
+        "displayName": "Signal Cobalt",
+        "canonical": "#145ae8",
+        "tonalRamp": ["#061a45", "#0c3287", "#0c43b7", "#145ae8", "#4f82ee", "#8eaff5", "#c5d7ff", "#edf3ff"]
+      },
+      "cobalt-deep": {
+        "role": "primary",
+        "displayName": "Deep Evidence Cobalt",
+        "canonical": "#0c43b7",
+        "tonalRamp": ["#05152f", "#08285f", "#0c43b7", "#1e61d8", "#5687e6", "#8eadef", "#c5d6f7", "#eff4fd"]
+      },
+      "cobalt-soft": {
+        "role": "primary",
+        "displayName": "Cobalt Drafting Wash",
+        "canonical": "#e5eeff",
+        "tonalRamp": ["#0d172d", "#24375a", "#465b86", "#6e83ae", "#98abd1", "#becdeb", "#d9e4fa", "#f2f6ff"]
+      },
+      "proof-vermilion": {
+        "role": "secondary",
+        "displayName": "Proof Vermilion",
+        "canonical": "#ce3429",
+        "tonalRamp": ["#3e0b08", "#7d1b15", "#aa281f", "#ce3429", "#e4685f", "#ef9c95", "#f7c9c5", "#fff1f0"]
+      },
+      "vermilion-soft": {
+        "role": "secondary",
+        "displayName": "Vermilion Proof Wash",
+        "canonical": "#fdeae8",
+        "tonalRamp": ["#251414", "#4d3030", "#76504e", "#9e7470", "#c39a96", "#e0c0bd", "#f1d9d6", "#fff3f2"]
+      },
+      "transit-amber": {
+        "role": "tertiary",
+        "displayName": "Transit Amber",
+        "canonical": "#a95c00",
+        "tonalRamp": ["#3b1b00", "#6d3500", "#8b4900", "#a95c00", "#ca8025", "#dea662", "#efcfa3", "#fff2dd"]
+      },
+      "amber-soft": {
+        "role": "tertiary",
+        "displayName": "Amber Sampling Wash",
+        "canonical": "#fff2dd",
+        "tonalRamp": ["#241a0d", "#4b3921", "#745a36", "#9f7e52", "#c5a475", "#e1c89f", "#f3dfc1", "#fff6e8"]
+      },
+      "civic-green": {
+        "role": "tertiary",
+        "displayName": "Civic Green",
+        "canonical": "#13764a",
+        "tonalRamp": ["#062817", "#0b4d2e", "#13764a", "#259564", "#55b987", "#8fd4ae", "#c6ead7", "#f2fbf6"]
+      },
+      "green-soft": {
+        "role": "tertiary",
+        "displayName": "Verified Green Wash",
+        "canonical": "#e6f4ec",
+        "tonalRamp": ["#101d16", "#293d32", "#496050", "#6f856f", "#98aa98", "#bdcdbd", "#d8e7dc", "#f1faf5"]
+      },
+      "civic-teal": {
+        "role": "tertiary",
+        "displayName": "Civic Teal",
+        "canonical": "#0e7782",
+        "tonalRamp": ["#03262a", "#074a51", "#0e7782", "#2999a2", "#5ebbc0", "#96d5d8", "#c7eaeb", "#f0fafa"]
+      },
+      "cognition-violet": {
+        "role": "tertiary",
+        "displayName": "Cognition Violet",
+        "canonical": "#7055ba",
+        "tonalRamp": ["#1d123e", "#38256f", "#553c98", "#7055ba", "#957ed0", "#b8a8df", "#d8cef0", "#f5f1fb"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Civic Heading",
+        "purpose": "View titles and named analytical objects."
+      },
+      "body": {
+        "displayName": "Working Text",
+        "purpose": "Descriptions, event summaries, and long-form inspection detail."
+      },
+      "label": {
+        "displayName": "Atlas Label",
+        "purpose": "Navigation, controls, data headers, and state labels."
+      },
+      "address": {
+        "displayName": "Address",
+        "purpose": "Ticks, sequences, run ids, agents, hashes, metrics, and event kinds."
+      }
+    },
+    "shadows": [
+      {
+        "name": "atlas-low",
+        "value": "1px 4px 14px rgba(24, 49, 74, 0.09)",
+        "purpose": "Map sheets and analytical rails floating above the city canvas."
+      },
+      {
+        "name": "evidence-float",
+        "value": "2px 10px 28px rgba(19, 44, 72, 0.16)",
+        "purpose": "Selected-agent address and other state that bridges map and evidence."
+      }
+    ],
+    "motion": [
+      {
+        "name": "atlas-reveal",
+        "value": "220ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Registration marks, selected routes, and evidence-sheet movement."
+      },
+      {
+        "name": "agent-pulse",
+        "value": "2800ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "One restrained locator pulse around the selected agent."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "desktop-compact",
+        "value": "1320px"
+      },
+      {
+        "name": "atlas-horizontal",
+        "value": "1040px"
+      },
+      {
+        "name": "monitoring-mobile",
+        "value": "760px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single strongest action inside a read-only analytical context.",
+      "html": "<button class=\"ds-btn-primary\">OPEN FULL INSPECTOR →</button>",
+      "css": ".ds-btn-primary { min-height: 36px; padding: 0 13px; background: var(--cobalt, #145ae8); color: white; border: 1px solid var(--cobalt, #145ae8); border-radius: 2px; font-family: Bahnschrift, 'Arial Narrow', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .035em; cursor: pointer; transition: background 180ms cubic-bezier(.22,1,.36,1), border-color 180ms cubic-bezier(.22,1,.36,1); } .ds-btn-primary:hover { background: var(--cobalt-deep, #0c43b7); border-color: var(--cobalt-deep, #0c43b7); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(20,90,232,.24); }"
+    },
+    {
+      "name": "Secondary Action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A precise keyline control for navigation or inspection.",
+      "html": "<button class=\"ds-btn-secondary\">OPEN EVENT →</button>",
+      "css": ".ds-btn-secondary { min-height: 36px; padding: 0 13px; background: white; color: #122033; border: 1px solid #9cacbd; border-radius: 2px; font-family: Bahnschrift, 'Arial Narrow', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .035em; cursor: pointer; transition: background 180ms cubic-bezier(.22,1,.36,1), border-color 180ms cubic-bezier(.22,1,.36,1); } .ds-btn-secondary:hover { background: #edf3f8; border-color: #145ae8; color: #0c43b7; } .ds-btn-secondary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(20,90,232,.24); }"
+    },
+    {
+      "name": "Atlas Navigation Item",
+      "kind": "nav",
+      "refersTo": "navigation-active",
+      "description": "An active view address inside the atlas index.",
+      "html": "<button class=\"ds-nav-active\" aria-current=\"page\"><span class=\"ds-nav-mark\"></span>MAP</button>",
+      "css": ".ds-nav-active { position: relative; min-width: 72px; min-height: 52px; background: #e5eeff; color: #0c43b7; border: 1px solid #c5d7ff; border-radius: 3px; font-family: Bahnschrift, 'Arial Narrow', sans-serif; font-size: 10px; font-weight: 700; cursor: pointer; } .ds-nav-mark { position: absolute; left: -1px; top: 15px; width: 3px; height: 22px; background: #145ae8; } .ds-nav-active:hover { background: #dbe7ff; } .ds-nav-active:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(20,90,232,.24); }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "description": "A bounded query input with an explicit search affordance.",
+      "html": "<label class=\"ds-search\"><svg aria-hidden=\"true\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\"><circle cx=\"11\" cy=\"11\" r=\"7\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"m20 20-3.5-3.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/></svg><input placeholder=\"Search id, role, or district\" /></label>",
+      "css": ".ds-search { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 10px; background: white; color: #58697d; border: 1px solid #9cacbd; } .ds-search input { min-width: 0; flex: 1; background: transparent; border: 0; outline: 0; color: #122033; font: 13px 'Segoe UI', sans-serif; } .ds-search:focus-within { border-color: #145ae8; box-shadow: 0 0 0 3px rgba(20,90,232,.18); }"
+    },
+    {
+      "name": "Evidence Step",
+      "kind": "custom",
+      "description": "One addressable step in the continuous city-to-agent trace.",
+      "html": "<div class=\"ds-evidence\"><span class=\"ds-step\">4</span><div><small>PERCEPTION · TICK 4,174</small><p>Observed: “I’m worried about losing my job.”</p></div></div>",
+      "css": ".ds-evidence { display: grid; grid-template-columns: 26px 1fr; gap: 9px; min-height: 64px; color: #122033; font-family: 'Segoe UI', sans-serif; } .ds-step { display: flex; align-items: center; justify-content: center; width: 25px; height: 25px; background: #7055ba; color: white; border: 3px solid white; border-radius: 50%; font: 700 10px 'Cascadia Mono', monospace; } .ds-evidence small { color: #0c43b7; font: 700 10px Bahnschrift, sans-serif; letter-spacing: .04em; } .ds-evidence p { margin: 5px 0 0; padding-bottom: 9px; border-bottom: 1px solid #c9d4df; font-size: 11px; line-height: 1.4; }"
+    },
+    {
+      "name": "Blocking Drift Banner",
+      "kind": "custom",
+      "description": "A non-dismissible scientific integrity failure that remains attached to the comparison.",
+      "html": "<div class=\"ds-drift\" role=\"alert\"><svg aria-hidden=\"true\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\"><path d=\"M12 3 2 21h20L12 3Z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"M12 9v5m0 3h.01\" stroke=\"currentColor\" stroke-width=\"2\"/></svg><div><strong>METRIC OVERLAY REFUSED</strong><p>The definition hash differs across selected runs.</p></div></div>",
+      "css": ".ds-drift { display: flex; align-items: flex-start; gap: 10px; padding: 12px; background: #fdeae8; color: #7d2923; border: 1px solid #e69b94; font-family: 'Segoe UI', sans-serif; } .ds-drift svg { flex: 0 0 auto; color: #ce3429; } .ds-drift strong { font: 700 12px Bahnschrift, sans-serif; letter-spacing: .04em; } .ds-drift p { margin: 3px 0 0; font-size: 11px; line-height: 1.4; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Living Systems Atlas",
+    "overview": "POLIS feels like a civic-scale scientific instrument: an explorable city rendered through the visual language of urban systems atlases, transit-control maps, and translucent analytical overlays. The city remains continuously present while work, housing, markets, social life, and cognition become inspectable layers. Macro patterns and individual decisions share one coordinate system.\n\nThe interface is precise, luminous, and spatial without becoming game-like. Its reusable signature is the evidence trace: a cobalt route that can begin on a district, chart anomaly, or event and continue through causal steps into a specific agent's perception, memory, decision, and outcome.",
+    "keyCharacteristics": [
+      "City-first, with analytical layers instead of decorative scenery.",
+      "Cool, bright working surfaces suited to long research sessions.",
+      "Dense but strongly indexed, with persistent tick and sequence references.",
+      "Linear movement interpolation and deliberate overlay transitions only.",
+      "Warnings and uncertainty are structural elements, never transient decoration."
+    ],
+    "rules": [
+      {
+        "name": "The Evidence Color Rule",
+        "body": "Saturated color must encode a current selection, data relationship, or scientific state. It is never scattered as decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The Addressable Type Rule",
+        "body": "Anything a researcher may quote, compare, or navigate to—tick, sequence, run, agent, metric, event kind—uses the mono voice and remains selectable text.",
+        "section": "typography"
+      },
+      {
+        "name": "The One City Plane Rule",
+        "body": "Decorative perspective never competes with data. Extrusion communicates a real district or place value, otherwise geometry stays flat.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep the living city visible as the anchor when the task permits it.",
+      "Do make the Map → Cause → Agent trail continuous and visibly addressable.",
+      "Do distinguish “not recorded,” “did not happen,” and “failed to reconstruct.”",
+      "Do keep scientific warnings attached to exported or captured visualizations.",
+      "Do use synthetic demonstration data at full fidelity and label it clearly."
+    ],
+    "donts": [
+      "Don't turn POLIS into a game HUD, fantasy city, or photorealistic world renderer.",
+      "Don't use generic dashboard card grids as the primary composition.",
+      "Don't hide lag, sampling gaps, drift, or uncertainty in tooltips or dismissible toasts.",
+      "Don't use decorative neon, glassmorphism, or arbitrary gradients.",
+      "Don't add run controls, shock controls, or other mutation affordances to the Observatory."
+    ]
+  }
+}

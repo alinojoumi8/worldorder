@@ -1,0 +1,34 @@
+{
+  "title": "Choose POLIS's visual world",
+  "question": "I recommend Living Systems Atlas: an explorable city of AI agents where every district, flow, and macro signal opens into traceable evidence.",
+  "options": [
+    {
+      "id": "living-systems-atlas",
+      "label": "Living Systems Atlas",
+      "kicker": "RECOMMENDED DIRECTION",
+      "lineage": "urban systems atlases, transit-control maps, translucent scientific overlays",
+      "body": "A luminous 2.5D city map owns the first viewport while flows, work, housing, markets, and cognition appear as precise analytical layers. Selecting an agent opens a continuous Map → Life → Decision → Outcome trail. Risk: the city must remain a research instrument rather than drifting into game UI."
+    },
+    {
+      "id": "brick-logic-manual",
+      "label": "Brick Logic Manual",
+      "kicker": "QUALITY BAR ALTERNATE",
+      "lineage": "numbered exploded assembly instructions",
+      "body": "Every causal chain becomes an exact sequence: prior state ghosted, new evidence highlighted, and each agent decision clicked into place. Exceptionally clear for the Inspector and Causal views, but its toy lineage risks making the research instrument feel game-like.",
+      "hero": "https://impeccable.style/worlds/cards/games-toys-physics-play-brick-build-instructions-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/games-toys-physics-play-brick-build-instructions.webp"
+    },
+    {
+      "id": "darkroom-evidence-bay",
+      "label": "Darkroom Evidence Bay",
+      "kicker": "QUALITY BAR ALTERNATE",
+      "lineage": "amber safelight, contact sheets, timed development stations",
+      "body": "Runs develop from raw events into legible findings across fixed stations, with contact sheets for agents and test strips for comparison. The metaphor suits evidence and reconstruction, though extended amber use could reduce analytical clarity.",
+      "hero": "https://impeccable.style/worlds/cards/signals-instruments-darkroom-safelight-bay-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/signals-instruments-darkroom-safelight-bay.webp"
+    }
+  ],
+  "reroll": true,
+  "canon": true,
+  "steer": true
+}

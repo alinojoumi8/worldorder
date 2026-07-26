@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "",
+    "indexed_at": "2026-07-26T04:16:00Z",
+    "project": "worldorder",
+    "nodes": 826,
+    "edges": 915,
+    "original_size": 2031616,
+    "compressed_size": 115885,
+    "compression_level": 3
+}
