@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 from polis.agents.actions.types import Action, ActionType, make_action
@@ -10,6 +11,7 @@ from polis.config.canon import canonical_json
 from polis.config.settings import Settings
 from polis.economy.credit import CreditContext, write_off_loan
 from polis.economy.exchange.engine import ExchangeEngine
+from polis.economy.labour import redundancy_order
 from polis.economy.ledger import LedgerError, Leg, bank_of, parse_account_id
 from polis.economy.money import allocate, bp
 from polis.economy.state import EconomyState, FirmState, InventoryState
@@ -29,6 +31,7 @@ from polis.events.kinds import (
     ACQUISITION_APPROVED,
     ACQUISITION_COMPLETED,
     ACQUISITION_PROPOSED,
+    ASSET_SALE,
     ASSETS_LIQUIDATED,
     AUTOMATIC_STAY_IMPOSED,
     BANKRUPTCY_DISCHARGED,
@@ -952,11 +955,18 @@ class VentureEngine:
         ):
             return ()
         offer = int(action.params.get("offer_cents", 0))
-        cash_bp = 10_000 - int(action.params.get("stock_ratio_bp", 0))
+        stock_ratio_bp = int(action.params.get("stock_ratio_bp", 0))
+        integration_mode = str(action.params.get("integration_mode", "absorb"))
+        if integration_mode == "asset_sale" and stock_ratio_bp:
+            return ()
+        cash_bp = 10_000 - stock_ratio_bp
         cash_required = offer * cash_bp // 10_000
         if cash_required > self.economy.ledger.balance(acquirer.ledger_account_id):
             return ()
-        shares = max(1, self.economy.ventures.shares(target_id))
+        shares = max(
+            1,
+            sum(row.shares for row in self._acquisition_equity_rows(target_id)),
+        )
         per_share = offer // shares
         anchor = max(1, self.economy.ledger.net_worth(target_id))
         premium = 10_000 * (offer - anchor) // anchor
@@ -968,9 +978,9 @@ class VentureEngine:
             offer_cents=offer,
             per_share_cents=per_share,
             consideration=str(action.params.get("consideration", "cash")),
-            stock_ratio_bp=int(action.params.get("stock_ratio_bp", 0)),
+            stock_ratio_bp=stock_ratio_bp,
             premium_bp=premium,
-            integration_mode=str(action.params.get("integration_mode", "absorb")),
+            integration_mode=integration_mode,
             financing=str(action.params.get("financing", "cash")),
             proposed_tick=tick,
             expires_tick=tick + 30 * self.settings.clock.ticks_per_sim_day,
@@ -1006,8 +1016,8 @@ class VentureEngine:
         deal = self.economy.ventures.acquisitions.get(str(deal_id))
         if deal is None or deal.status != "proposed" or tick > deal.expires_tick:
             return ()
-        cap_rows = [row for row in self._cap_rows(deal.target_id) if row.holder_id != "option_pool"]
-        holder_shares = sum(row.shares for row in cap_rows if row.holder_id == action.actor_id)
+        equity_rows = self._acquisition_equity_rows(deal.target_id)
+        holder_shares = sum(row.shares for row in equity_rows if row.holder_id == action.actor_id)
         qty = min(holder_shares, int(action.params.get("qty", 0)))
         if qty <= 0:
             return ()
@@ -1015,11 +1025,19 @@ class VentureEngine:
             qty,
             deal.accepting_holders.get(action.actor_id, 0),
         )
-        total_shares = sum(row.shares for row in cap_rows)
-        accepting = sum(deal.accepting_holders.values())
+        total_shares = sum(row.shares for row in equity_rows)
+        accepting = min(total_shares, sum(deal.accepting_holders.values()))
         accepting_bp = 10_000 * accepting // max(1, total_shares)
         if accepting_bp < self.settings.ventures.acquisition_threshold_bp:
             return ()
+        is_public = self._listed_symbol(deal.target_id) is not None
+        deal.accepting_bp = accepting_bp
+        deal.drag_along_applied = (
+            not is_public and accepting_bp >= self.settings.ventures.drag_along_bp
+        )
+        deal.squeeze_out_applied = (
+            is_public and accepting_bp >= self.settings.ventures.squeeze_out_bp
+        )
         approved = emit(
             NewEvent(
                 ACQUISITION_APPROVED,
@@ -1028,7 +1046,8 @@ class VentureEngine:
                     "accepting_holders": dict(sorted(deal.accepting_holders.items())),
                     "accepting_bp": accepting_bp,
                     "threshold_bp": self.settings.ventures.acquisition_threshold_bp,
-                    "drag_along_applied": accepting_bp >= self.settings.ventures.drag_along_bp,
+                    "drag_along_applied": deal.drag_along_applied,
+                    "squeeze_out_applied": deal.squeeze_out_applied,
                 },
                 subject_ids=(deal.acquirer_id, deal.target_id),
             )
@@ -1042,17 +1061,31 @@ class VentureEngine:
         tick: int,
         emit: Emit,
     ) -> tuple[Event, ...]:
-        cap_rows = [row for row in self._cap_rows(deal.target_id) if row.holder_id != "option_pool"]
+        equity_rows = self._acquisition_equity_rows(deal.target_id)
+        acquired_rows = self._acquired_equity_rows(deal, equity_rows)
+        eligible_shares = sum(row.shares for row in equity_rows)
+        acquired_shares = sum(row.shares for row in acquired_rows)
+        if acquired_shares <= 0 or eligible_shares <= 0:
+            return ()
+        consideration_cents = (
+            deal.offer_cents
+            if deal.integration_mode == "asset_sale"
+            else deal.offer_cents * acquired_shares // eligible_shares
+        )
         rounds = [
             row
             for row in self.economy.ventures.rounds.values()
             if self.economy.ventures.startups.get(row.startup_id) is not None
             and self.economy.ventures.startups[row.startup_id].firm_id == deal.target_id
         ]
-        cash_cents = deal.offer_cents * (10_000 - deal.stock_ratio_bp) // 10_000
-        distribution = venture_waterfall(cash_cents, cap_rows, rounds) if cash_cents else {}
+        cash_cents = consideration_cents * (10_000 - deal.stock_ratio_bp) // 10_000
+        distribution = (
+            venture_waterfall(cash_cents, acquired_rows, rounds)
+            if cash_cents and deal.integration_mode != "asset_sale"
+            else {}
+        )
         events: list[Event] = []
-        if cash_cents:
+        if distribution:
             events.append(
                 emit(
                     NewEvent(
@@ -1067,46 +1100,92 @@ class VentureEngine:
                 )
             )
         expected = self.economy.ledger.next_txn_id(tick) if cash_cents else None
+        asset_sale_event: Event | None = None
+        if deal.integration_mode == "asset_sale":
+            asset_sale_event = emit(
+                NewEvent(
+                    ASSET_SALE,
+                    {
+                        "deal_id": deal.deal_id,
+                        "seller_id": deal.target_id,
+                        "buyer_id": deal.acquirer_id,
+                        "assets": self._asset_manifest(deal.target_id),
+                        "cents": cash_cents,
+                        "txn_id": str(expected) if expected is not None else None,
+                    },
+                    actor_id=deal.acquirer_id,
+                    subject_ids=(deal.target_id,),
+                )
+            )
+            events.append(asset_sale_event)
         completed = emit(
             NewEvent(
                 ACQUISITION_COMPLETED,
                 {
                     "deal_id": deal.deal_id,
-                    "price_cents": deal.offer_cents,
+                    "price_cents": consideration_cents,
                     "per_share_cents": deal.per_share_cents,
                     "integration_mode": deal.integration_mode,
                     "txn_id": str(expected) if expected is not None else None,
-                    "waterfall_ref": deal.target_id,
+                    "waterfall_ref": (
+                        "asset_sale" if deal.integration_mode == "asset_sale" else deal.target_id
+                    ),
                 },
                 subject_ids=(deal.acquirer_id, deal.target_id),
             )
         )
         if cash_cents:
             source = self._deposit(deal.acquirer_id)
-            legs: list[Leg] = []
-            for holder_id, cents in sorted(distribution.items()):
-                if cents:
-                    legs.extend(
-                        self.economy.ledger.transfer(
-                            source,
-                            self._deposit(holder_id),
-                            cents,
-                            "trade",
-                        )
+            if deal.integration_mode == "asset_sale":
+                legs = list(
+                    self.economy.ledger.transfer(
+                        source,
+                        self._deposit(deal.target_id),
+                        cash_cents,
+                        "trade",
                     )
+                )
+            else:
+                legs = []
+                for holder_id, cents in sorted(distribution.items()):
+                    if cents:
+                        legs.extend(
+                            self.economy.ledger.transfer(
+                                source,
+                                self._deposit(holder_id),
+                                cents,
+                                "trade",
+                            )
+                        )
             txn_id = self.economy.ledger.post_transaction(
                 _coalesce(legs),
                 tick=tick,
-                cause=completed,
+                cause=asset_sale_event or completed,
             )
             if txn_id != expected:
                 raise RuntimeError("acquisition ledger ordinal diverged")
         events.append(completed)
         if deal.stock_ratio_bp:
-            self._issue_acquirer_shares(deal, cap_rows)
-        events.extend(self._integrate(deal, tick, emit))
-        for startup in self.economy.ventures.startups.values():
-            if startup.firm_id == deal.target_id:
+            recipients = (
+                (CapTableState(deal.target_id, deal.target_id, "common", 1),)
+                if deal.integration_mode == "asset_sale"
+                else tuple(acquired_rows)
+            )
+            events.extend(
+                self._issue_acquirer_shares(
+                    deal,
+                    recipients,
+                    consideration_cents,
+                    emit,
+                )
+            )
+        if deal.integration_mode != "asset_sale":
+            events.extend(self._transfer_target_equity(deal, acquired_rows, emit))
+        events.extend(self._integrate(deal, tick, emit, completed))
+        if deal.integration_mode != "asset_sale":
+            for startup in self.economy.ventures.startups.values():
+                if startup.firm_id != deal.target_id:
+                    continue
                 startup.status = "exited"
                 events.append(
                     emit(
@@ -1115,10 +1194,10 @@ class VentureEngine:
                             {
                                 "startup_id": startup.startup_id,
                                 "type": "acquisition",
-                                "gross_proceeds_cents": deal.offer_cents,
+                                "gross_proceeds_cents": consideration_cents,
                                 "distribution": dict(distribution),
                                 "multiple_bp": 10_000
-                                * deal.offer_cents
+                                * consideration_cents
                                 // max(1, startup.total_raised_cents),
                                 "holding_period_ticks": tick - startup.founded_tick,
                             },
@@ -1129,102 +1208,430 @@ class VentureEngine:
         deal.status = "completed"
         return tuple(events)
 
+    def _listed_symbol(self, firm_id: str) -> str | None:
+        return next(
+            (
+                row.symbol
+                for row in sorted(
+                    self.economy.exchange.securities.values(),
+                    key=lambda item: item.symbol,
+                )
+                if row.issuer_firm_id == firm_id and row.status == "listed"
+            ),
+            None,
+        )
+
+    def _acquisition_equity_rows(self, firm_id: str) -> list[CapTableState]:
+        symbol = self._listed_symbol(firm_id)
+        if symbol is None:
+            return [
+                row
+                for row in self._cap_rows(firm_id)
+                if row.holder_id != "option_pool" and row.shares > 0
+            ]
+        return [
+            CapTableState(firm_id, holding.holder_id, "common", holding.qty)
+            for holding in sorted(
+                self.economy.exchange.holdings.values(),
+                key=lambda row: row.holder_id,
+            )
+            if holding.symbol == symbol and holding.qty > 0
+        ]
+
+    def _acquired_equity_rows(
+        self,
+        deal: AcquisitionState,
+        equity_rows: Sequence[CapTableState],
+    ) -> list[CapTableState]:
+        force_all = deal.drag_along_applied or deal.squeeze_out_applied
+        remaining = dict(deal.accepting_holders)
+        result: list[CapTableState] = []
+        for row in equity_rows:
+            shares = row.shares if force_all else min(row.shares, remaining.get(row.holder_id, 0))
+            if shares <= 0:
+                continue
+            remaining[row.holder_id] = max(0, remaining.get(row.holder_id, 0) - shares)
+            invested = row.invested_cents * shares // max(1, row.shares)
+            result.append(replace(row, shares=shares, invested_cents=invested))
+        return result
+
     def _issue_acquirer_shares(
         self,
         deal: AcquisitionState,
         target_rows: Sequence[CapTableState],
-    ) -> None:
-        acquirer_shares = max(1, self.economy.ventures.shares(deal.acquirer_id))
-        acquirer_value = max(1, self.economy.ledger.net_worth(deal.acquirer_id))
-        share_price = max(1, acquirer_value // acquirer_shares)
-        stock_value = deal.offer_cents * deal.stock_ratio_bp // 10_000
+        consideration_cents: int,
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        symbol = self._listed_symbol(deal.acquirer_id)
+        security = self.economy.exchange.securities.get(symbol) if symbol else None
+        acquirer_shares = (
+            security.shares_outstanding
+            if security is not None
+            else max(1, self.economy.ventures.shares(deal.acquirer_id))
+        )
+        share_price = (
+            security.last_price_cents
+            if security is not None
+            else max(
+                1,
+                self.economy.ledger.net_worth(deal.acquirer_id) // max(1, acquirer_shares),
+            )
+        )
+        stock_value = consideration_cents * deal.stock_ratio_bp // 10_000
         issued = stock_value // share_price
+        weights: dict[str, int] = defaultdict(int)
+        for row in target_rows:
+            if row.shares > 0:
+                weights[row.holder_id] += row.shares
         allocation = allocate(
             issued,
-            [(row.holder_id, row.shares) for row in target_rows if row.shares > 0],
+            sorted(weights.items()),
         )
+        if security is not None and symbol is not None:
+            security.shares_outstanding += issued
+            for holder_id, shares in sorted(allocation.items()):
+                holding = self.economy.exchange.holding(holder_id, symbol)
+                old_qty = holding.qty
+                holding.qty += shares
+                holding.avg_cost_cents = (
+                    old_qty * holding.avg_cost_cents + shares * share_price
+                ) // max(1, holding.qty)
+            return ()
+        events: list[Event] = []
         for holder_id, shares in allocation.items():
             key = self.economy.ventures.cap_key(
                 deal.acquirer_id,
                 holder_id,
                 "common",
             )
-            row = self.economy.ventures.cap_table.get(key)
-            if row is None:
-                self.economy.ventures.cap_table[key] = CapTableState(
+            cap_row = self.economy.ventures.cap_table.get(key)
+            before = cap_row.shares if cap_row is not None else 0
+            if cap_row is None:
+                cap_row = CapTableState(
                     firm_id=deal.acquirer_id,
                     holder_id=holder_id,
                     share_class="common",
                     shares=shares,
                 )
+                self.economy.ventures.cap_table[key] = cap_row
             else:
-                row.shares += shares
+                cap_row.shares += shares
+            events.append(self._cap_event(cap_row, before, "acquisition", emit))
+        return tuple(events)
+
+    def _transfer_target_equity(
+        self,
+        deal: AcquisitionState,
+        acquired_rows: Sequence[CapTableState],
+        emit: Emit,
+    ) -> tuple[Event, ...]:
+        symbol = self._listed_symbol(deal.target_id)
+        if symbol is not None:
+            transferred = 0
+            for acquired in acquired_rows:
+                holding = self.economy.exchange.holding(acquired.holder_id, symbol)
+                holding.qty -= acquired.shares
+                holding.locked_qty = min(holding.locked_qty, holding.qty)
+                transferred += acquired.shares
+            acquirer_holding = self.economy.exchange.holding(deal.acquirer_id, symbol)
+            acquirer_holding.qty += transferred
+            return ()
+        events: list[Event] = []
+        transferred = 0
+        for acquired in acquired_rows:
+            key = self.economy.ventures.cap_key(
+                deal.target_id,
+                acquired.holder_id,
+                acquired.share_class,
+            )
+            row = self.economy.ventures.cap_table[key]
+            before = row.shares
+            row.shares -= acquired.shares
+            transferred += acquired.shares
+            events.append(self._cap_event(row, before, "acquisition", emit))
+        if deal.drag_along_applied:
+            option_key = self.economy.ventures.cap_key(
+                deal.target_id,
+                "option_pool",
+                "common",
+            )
+            option_row = self.economy.ventures.cap_table.get(option_key)
+            if option_row is not None and option_row.shares:
+                before = option_row.shares
+                option_row.shares = 0
+                events.append(self._cap_event(option_row, before, "acquisition", emit))
+        target_key = self.economy.ventures.cap_key(
+            deal.target_id,
+            deal.acquirer_id,
+            "common",
+        )
+        target_row = self.economy.ventures.cap_table.get(target_key)
+        before = target_row.shares if target_row is not None else 0
+        if target_row is None:
+            target_row = CapTableState(
+                firm_id=deal.target_id,
+                holder_id=deal.acquirer_id,
+                share_class="common",
+                shares=transferred,
+            )
+            self.economy.ventures.cap_table[target_key] = target_row
+        else:
+            target_row.shares += transferred
+        events.append(self._cap_event(target_row, before, "acquisition", emit))
+        return tuple(events)
+
+    def _asset_manifest(self, firm_id: str) -> dict[str, Any]:
+        inventory = {
+            row.sku: row.quantity
+            for row in sorted(
+                self.economy.inventory.values(),
+                key=lambda item: item.sku,
+            )
+            if row.firm_id == firm_id and row.quantity > 0
+        }
+        firm = self.economy.firms[firm_id]
+        return {
+            "inventory": inventory,
+            "capital": firm.capital_cents,
+            "skus": sorted(inventory),
+            "places": [firm.place_id],
+        }
+
+    def _transfer_inventory(self, target_id: str, acquirer_id: str) -> list[str]:
+        transferred: list[str] = []
+        for row in sorted(
+            self.economy.inventory.values(),
+            key=lambda item: (item.sku, item.firm_id),
+        ):
+            if row.firm_id != target_id or row.quantity <= 0:
+                continue
+            key = f"{acquirer_id}:{row.sku}"
+            destination = self.economy.inventory.get(key)
+            if destination is None:
+                destination = InventoryState(
+                    firm_id=acquirer_id,
+                    sku=row.sku,
+                    unit_cost_cents=row.unit_cost_cents,
+                    price_cents=row.price_cents,
+                    markup_bp=row.markup_bp,
+                )
+                self.economy.inventory[key] = destination
+            total_cost = (
+                destination.quantity * destination.unit_cost_cents
+                + row.quantity * row.unit_cost_cents
+            )
+            destination.quantity += row.quantity
+            destination.unit_cost_cents = total_cost // max(1, destination.quantity)
+            destination.carry_micro += row.carry_micro
+            row.quantity = 0
+            row.carry_micro = 0
+            transferred.append(row.sku)
+        return transferred
+
+    def _transfer_productive_assets(
+        self,
+        target: FirmState,
+        acquirer: FirmState,
+        *,
+        apply_synergy: bool,
+    ) -> int:
+        acquirer_capital = acquirer.capital_cents
+        target_capital = target.capital_cents
+        total_capital = acquirer_capital + target_capital
+        if total_capital <= 0:
+            return 0
+        blended = (
+            acquirer.productivity_bp * acquirer_capital + target.productivity_bp * target_capital
+        ) // total_capital
+        configured_delta = self.settings.ventures.integration_synergy_bp if apply_synergy else 0
+        acquirer.productivity_bp = max(1, blended + configured_delta)
+        acquirer.capital_cents = total_capital
+        target.capital_cents = 0
+        return acquirer.productivity_bp - blended
+
+    def _ensure_lender_deposit(
+        self,
+        borrower_id: str,
+        lender_id: str,
+        tick: int,
+    ) -> str | None:
+        if lender_id not in self.economy.banks:
+            return None
+        deposits = [
+            account_id
+            for account_id in self.economy.ledger.accounts_of(borrower_id)
+            if parse_account_id(account_id)[0] == "dep"
+            and parse_account_id(account_id)[2] == lender_id
+        ]
+        if deposits:
+            return sorted(deposits)[0]
+        return self.economy.ledger.open_account(
+            "dep",
+            borrower_id,
+            "firm",
+            bank_id=lender_id,
+            tick=tick,
+        )
+
+    def _transfer_loans(
+        self,
+        target_id: str,
+        acquirer_id: str,
+        tick: int,
+        cause: Event,
+    ) -> list[str]:
+        transferred: list[str] = []
+        for loan in sorted(self.economy.loans.values(), key=lambda row: row.loan_id):
+            if loan.borrower_id != target_id or loan.status not in {"current", "delinquent"}:
+                continue
+            old_payable = loan.borrower_payable_account_id
+            liability = max(0, -self.economy.ledger.balance(old_payable))
+            new_payable = self.economy.ledger.open_account(
+                "lnp",
+                acquirer_id,
+                "firm",
+                ref=loan.loan_id,
+                tick=tick,
+            )
+            if liability:
+                self.economy.ledger.post_transaction(
+                    (
+                        Leg(old_payable, 1, liability, "transfer"),
+                        Leg(new_payable, -1, liability, "transfer"),
+                    ),
+                    tick=tick,
+                    cause=cause,
+                )
+            self.economy.ledger.close_account(old_payable, tick=tick)
+            self._ensure_lender_deposit(acquirer_id, loan.lender_id, tick)
+            loan.borrower_id = acquirer_id
+            loan.borrower_payable_account_id = new_payable
+            transferred.append(loan.loan_id)
+        return transferred
 
     def _integrate(
         self,
         deal: AcquisitionState,
         tick: int,
         emit: Emit,
+        cause: Event,
     ) -> tuple[Event, ...]:
         target = self.economy.firms[deal.target_id]
         acquirer = self.economy.firms[deal.acquirer_id]
         transferred = 0
+        redundancies = 0
+        sku_transfers: list[str] = []
+        productivity_delta_bp = 0
+        loans_transferred: list[str] = []
+        events: list[Event] = []
         if deal.integration_mode == "absorb":
-            for employment in self.economy.employments.values():
-                if employment.firm_id == target.firm_id and employment.ended_tick is None:
+            active_target = [
+                row
+                for row in self.economy.employments.values()
+                if row.firm_id == target.firm_id and row.ended_tick is None
+            ]
+            acquirer_roles = {
+                row.occupation
+                for row in self.economy.employments.values()
+                if row.firm_id == acquirer.firm_id and row.ended_tick is None
+            }
+            overlapping = [row for row in active_target if row.occupation in acquirer_roles]
+            redundancy_n = bp(len(overlapping), self.settings.ventures.redundancy_bp)
+            redundant_ids = {
+                row.employment_id for row in redundancy_order(overlapping, tick=tick)[:redundancy_n]
+            }
+            for employment in sorted(active_target, key=lambda row: row.employment_id):
+                if employment.employment_id not in redundant_ids:
                     employment.firm_id = acquirer.firm_id
                     transferred += 1
-            acquirer.capital_cents += target.capital_cents
-            total_capital = max(1, acquirer.capital_cents)
-            acquirer.productivity_bp = (
-                acquirer.productivity_bp * (total_capital - target.capital_cents)
-                + target.productivity_bp * target.capital_cents
-            ) // total_capital
+                    continue
+                severance = bp(
+                    employment.wage_cents,
+                    self.settings.labour.severance_periods_bp,
+                )
+                fired = emit(
+                    NewEvent(
+                        FIRED,
+                        {
+                            "employment_id": employment.employment_id,
+                            "agent_id": employment.agent_id,
+                            "firm_id": target.firm_id,
+                            "reason": "acquisition",
+                            "severance_cents": severance,
+                            "notice_ticks": self.settings.labour.notice_ticks,
+                        },
+                        actor_id=acquirer.firm_id,
+                        subject_ids=(employment.agent_id,),
+                    )
+                )
+                if severance:
+                    self.economy.ledger.post_transaction(
+                        self.economy.ledger.transfer(
+                            self._deposit(acquirer.firm_id),
+                            self._deposit(employment.agent_id),
+                            severance,
+                            "wage",
+                        ),
+                        tick=tick,
+                        cause=fired,
+                    )
+                employment.ended_tick = tick + self.settings.labour.notice_ticks
+                self.population[employment.agent_id].employment_status = "unemployed"
+                redundancies += 1
+                events.append(fired)
+            target.headcount = 0
+            acquirer.headcount += transferred
+            sku_transfers = self._transfer_inventory(target.firm_id, acquirer.firm_id)
+            productivity_delta_bp = self._transfer_productive_assets(
+                target,
+                acquirer,
+                apply_synergy=True,
+            )
+            loans_transferred = self._transfer_loans(
+                target.firm_id,
+                acquirer.firm_id,
+                tick,
+                cause,
+            )
             target.status = "acquired"
-            if any(
-                row.issuer_firm_id == target.firm_id and row.status == "listed"
-                for row in self.economy.exchange.securities.values()
-            ):
-                symbol = next(
-                    row.symbol
-                    for row in self.economy.exchange.securities.values()
-                    if row.issuer_firm_id == target.firm_id and row.status == "listed"
-                )
-                return (
-                    *self.exchange.delist(symbol, "acquisition", tick, emit),
-                    emit(
-                        NewEvent(
-                            INTEGRATION_COMPLETED,
-                            {
-                                "deal_id": deal.deal_id,
-                                "headcount_retained": transferred,
-                                "redundancies": 0,
-                                "sku_transfers": [],
-                                "productivity_delta_bp": 0,
-                                "loans_transferred": [],
-                            },
-                            subject_ids=(deal.acquirer_id, deal.target_id),
-                        )
-                    ),
-                )
+            target.dissolved_tick = tick
         elif deal.integration_mode == "standalone":
             target.status = "subsidiary"
-        return (
+            transferred = sum(
+                row.firm_id == target.firm_id and row.ended_tick is None
+                for row in self.economy.employments.values()
+            )
+        elif deal.integration_mode == "asset_sale":
+            transferred = sum(
+                row.firm_id == target.firm_id and row.ended_tick is None
+                for row in self.economy.employments.values()
+            )
+            sku_transfers = self._transfer_inventory(target.firm_id, acquirer.firm_id)
+            productivity_delta_bp = self._transfer_productive_assets(
+                target,
+                acquirer,
+                apply_synergy=False,
+            )
+        symbol = self._listed_symbol(target.firm_id)
+        if symbol is not None and (deal.integration_mode == "absorb" or deal.squeeze_out_applied):
+            events.extend(self.exchange.delist(symbol, "acquisition", tick, emit))
+        events.append(
             emit(
                 NewEvent(
                     INTEGRATION_COMPLETED,
                     {
                         "deal_id": deal.deal_id,
                         "headcount_retained": transferred,
-                        "redundancies": 0,
-                        "sku_transfers": [],
-                        "productivity_delta_bp": 0,
-                        "loans_transferred": [],
+                        "redundancies": redundancies,
+                        "sku_transfers": sku_transfers,
+                        "productivity_delta_bp": productivity_delta_bp,
+                        "loans_transferred": loans_transferred,
                     },
                     subject_ids=(deal.acquirer_id, deal.target_id),
                 )
-            ),
+            )
         )
+        return tuple(events)
 
     def _file_action(self, action: Action, tick: int, emit: Emit) -> tuple[Event, ...]:
         if not self.settings.bankruptcy.enabled:
@@ -2352,7 +2759,7 @@ class VentureEngine:
             if firm.status != "active" or firm.firm_id == "fm_broker":
                 self.economy.ventures.insolvency_since_tick.pop(firm.firm_id, None)
                 continue
-            if self.economy.ledger.net_worth(firm.firm_id) < 0:
+            if self._firm_balance_sheet_net_worth(firm.firm_id) < 0:
                 since = self.economy.ventures.insolvency_since_tick.setdefault(
                     firm.firm_id,
                     tick,
@@ -2369,6 +2776,41 @@ class VentureEngine:
             else:
                 self.economy.ventures.insolvency_since_tick.pop(firm.firm_id, None)
         return tuple(events)
+
+    def _firm_balance_sheet_net_worth(self, firm_id: str) -> int:
+        listed = sum(
+            holding.qty * security.last_price_cents
+            for holding in self.economy.exchange.holdings.values()
+            if holding.holder_id == firm_id
+            and holding.qty > 0
+            and (security := self.economy.exchange.securities.get(holding.symbol)) is not None
+            and security.status == "listed"
+        )
+        inventory = sum(
+            row.quantity * row.unit_cost_cents
+            for row in self.economy.inventory.values()
+            if row.firm_id == firm_id and row.quantity > 0
+        )
+        unlisted = sum(
+            max(0, row.invested_cents)
+            for row in self.economy.ventures.cap_table.values()
+            if row.holder_id == firm_id
+            and row.firm_id != firm_id
+            and self._listed_symbol(row.firm_id) is None
+        )
+        assets = (
+            max(0, self.economy.ledger.liquid(firm_id))
+            + listed
+            + inventory
+            + max(0, self.economy.firms[firm_id].capital_cents)
+            + unlisted
+        )
+        liabilities = sum(
+            row.outstanding_cents
+            for row in self.economy.loans.values()
+            if row.borrower_id == firm_id and row.status not in {"repaid", "written_off"}
+        )
+        return assets - liabilities
 
     def _fund_step(self, tick: int, emit: Emit) -> tuple[Event, ...]:
         if not self.settings.ventures.enabled:

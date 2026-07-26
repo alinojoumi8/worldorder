@@ -6,20 +6,28 @@ from pathlib import Path
 
 from polis.agents.actions.types import ActionType, make_action
 from polis.agents.genesis import generate_agents
+from polis.agents.state import AgentPopulation
 from polis.config.settings import Settings, load_settings
 from polis.economy.banking import BankingEngine
+from polis.economy.credit import LoanDecision, LoanRequest, originate
 from polis.economy.exchange.engine import ExchangeEngine
 from polis.economy.genesis import create_economy
-from polis.economy.state import EmploymentState
+from polis.economy.ledger import parse_account_id
+from polis.economy.state import EconomyState, EmploymentState, InventoryState
 from polis.economy.venture_state import CapTableState, ClaimState, FundingRoundState
 from polis.economy.ventures import VentureEngine, venture_waterfall
 from polis.events.kinds import (
+    ACQUISITION_APPROVED,
     ACQUISITION_COMPLETED,
+    ASSET_SALE,
     ASSETS_LIQUIDATED,
     BANKRUPTCY_DISCHARGED,
+    BANKRUPTCY_FILED,
     DIVIDEND_PAID,
     FIRED,
+    INTEGRATION_COMPLETED,
     ROUND_CLOSED,
+    SECURITY_DELISTED,
     TRADE_EXECUTED,
 )
 from polis.events.log import EventLog, MemoryEventSink
@@ -40,16 +48,18 @@ def configured() -> Settings:
                 "enabled": True,
                 "term_sheet_days": 3,
             },
+            "labour": {"severance_periods_bp": 10_000},
             "bankruptcy": {
                 "enabled": True,
                 "liquidation_days": 3,
                 "stay_max_days": 5,
+                "insolvency_persist_days": 2,
             },
         },
     )
 
 
-def build() -> tuple[Settings, object, object, VentureEngine, EventLog]:
+def build() -> tuple[Settings, AgentPopulation, EconomyState, VentureEngine, EventLog]:
     settings = configured()
     rng = RngRegistry(settings.run.seed)
     world = generate_world(settings.world, rng)
@@ -87,6 +97,35 @@ def emit_at(log: EventLog, tick: int):
         draft,
         tick=tick,
         sim_time=datetime(2025, 1, 1) + timedelta(days=tick),
+    )
+
+
+async def found_startup(
+    engine: VentureEngine,
+    economy: EconomyState,
+    log: EventLog,
+    *,
+    actor_id: str,
+    tick: int,
+    name: str,
+) -> str:
+    action = make_action(
+        actor_id=actor_id,
+        tick=tick,
+        action_type=ActionType.FOUND_COMPANY,
+        params={
+            "name": name,
+            "sector": "services",
+            "place_id": "pl_test",
+            "initial_capital_cents": 30_000,
+            "is_startup": True,
+            "is_fund": False,
+            "thesis": name,
+        },
+    )
+    await engine.resolve((action,), tick, emit_at(log, tick))
+    return next(
+        row.firm_id for row in economy.ventures.startups.values() if row.founder_id == actor_id
     )
 
 
@@ -305,6 +344,344 @@ def test_cash_acquisition_and_bankruptcy_reach_terminal_states() -> None:
     assert economy.firms[acquirer_id].dissolved_tick == discharge_tick
     assert employment.ended_tick == discharge_tick
     assert employee.employment_status == "unemployed"
+    assert economy.ledger.global_balance_cents() == 0
+
+
+def test_absorb_integration_pays_redundancy_and_transfers_loan_obligor() -> None:
+    settings, population, economy, engine, log = build()
+    agents = list(population)
+    acquirer_founder, target_founder = agents[:2]
+    acquirer_id = asyncio.run(
+        found_startup(
+            engine,
+            economy,
+            log,
+            actor_id=acquirer_founder.agent_id,
+            tick=1,
+            name="Integration Acquirer",
+        )
+    )
+    target_id = asyncio.run(
+        found_startup(
+            engine,
+            economy,
+            log,
+            actor_id=target_founder.agent_id,
+            tick=2,
+            name="Integration Target",
+        )
+    )
+    employment_rows = [
+        EmploymentState(
+            "emp_acquirer_engineer",
+            agents[2].agent_id,
+            acquirer_id,
+            "engineer",
+            1_000,
+            1,
+            9_000,
+        ),
+        *[
+            EmploymentState(
+                f"emp_target_engineer_{index}",
+                agents[index + 3].agent_id,
+                target_id,
+                "engineer",
+                1_000,
+                index + 1,
+                5_000 + index * 500,
+            )
+            for index in range(4)
+        ],
+        EmploymentState(
+            "emp_target_designer",
+            agents[7].agent_id,
+            target_id,
+            "designer",
+            1_000,
+            1,
+            8_000,
+        ),
+    ]
+    for row in employment_rows:
+        economy.employments[row.employment_id] = row
+        population[row.agent_id].employment_status = "employed"
+    economy.firms[acquirer_id].headcount = 1
+    economy.firms[target_id].headcount = 5
+    target_inventory = InventoryState(
+        target_id,
+        "integration-sku",
+        quantity=7,
+        unit_cost_cents=25,
+        price_cents=40,
+    )
+    economy.inventory[f"{target_id}:integration-sku"] = target_inventory
+    target_capital = economy.firms[target_id].capital_cents
+    acquirer_capital = economy.firms[acquirer_id].capital_cents
+
+    lender_id = next(iter(economy.banks))
+    loan_request = LoanRequest(
+        target_id,
+        lender_id,
+        5_000,
+        "corporate",
+        360,
+        {},
+        5_000,
+        "integration fixture",
+    )
+    originate(
+        loan_request,
+        LoanDecision(True, 8_000, {}, 5_000, 500, 360, ()),
+        2,
+        ctx=engine.credit_context,
+        emit=emit_at(log, 2),
+    )
+    loan = next(row for row in economy.loans.values() if row.borrower_id == target_id)
+    old_payable = loan.borrower_payable_account_id
+
+    proposal = make_action(
+        actor_id=acquirer_founder.agent_id,
+        tick=3,
+        action_type=ActionType.ACQUIRE,
+        params={
+            "acquirer_id": acquirer_id,
+            "target_id": target_id,
+            "offer_cents": 20_000,
+            "consideration": "cash",
+            "stock_ratio_bp": 0,
+            "integration_mode": "absorb",
+            "financing": "cash",
+        },
+    )
+    asyncio.run(engine.resolve((proposal,), 3, emit_at(log, 3)))
+    deal = next(iter(economy.ventures.acquisitions.values()))
+    tender = make_action(
+        actor_id=target_founder.agent_id,
+        tick=4,
+        action_type=ActionType.SELL_STAKE,
+        params={
+            "firm_id": target_id,
+            "qty": settings.ventures.founder_shares,
+            "deal_id": deal.deal_id,
+        },
+    )
+    events = asyncio.run(engine.resolve((tender,), 4, emit_at(log, 4)))
+
+    fired = [event for event in events if event.kind == FIRED]
+    assert len(fired) == 1
+    assert fired[0].payload["reason"] == "acquisition"
+    assert fired[0].payload["severance_cents"] == 1_000
+    assert deal.drag_along_applied is True
+    assert economy.firms[target_id].headcount == 0
+    assert economy.firms[acquirer_id].headcount == 5
+    retained = [
+        row
+        for row in employment_rows
+        if row.employment_id != fired[0].payload["employment_id"] and row.firm_id == acquirer_id
+    ]
+    assert len(retained) == 5
+    assert all(row.wage_cents == 1_000 for row in retained)
+    assert target_inventory.quantity == 0
+    assert economy.inventory[f"{acquirer_id}:integration-sku"].quantity == 7
+    assert economy.firms[target_id].capital_cents == 0
+    assert economy.firms[acquirer_id].capital_cents == acquirer_capital + target_capital
+
+    integration = next(event for event in events if event.kind == INTEGRATION_COMPLETED)
+    assert integration.payload["headcount_retained"] == 4
+    assert integration.payload["redundancies"] == 1
+    assert integration.payload["loans_transferred"] == [loan.loan_id]
+    assert loan.borrower_id == acquirer_id
+    assert loan.borrower_payable_account_id != old_payable
+    assert economy.ledger.balance(old_payable) == 0
+    old_account = next(
+        account for account in economy.ledger.accounts() if account.account_id == old_payable
+    )
+    assert old_account.closed_tick == 4
+    assert economy.ledger.balance(loan.borrower_payable_account_id) == -5_000
+    assert any(entry.reason == "transfer" for entry in economy.ledger.entries())
+    assert economy.ledger.global_balance_cents() == 0
+
+
+def test_asset_sale_leaves_loan_with_insolvent_target_shell() -> None:
+    settings, population, economy, engine, log = build()
+    acquirer_founder, target_founder = list(population)[:2]
+    acquirer_id = asyncio.run(
+        found_startup(
+            engine,
+            economy,
+            log,
+            actor_id=acquirer_founder.agent_id,
+            tick=1,
+            name="Asset Buyer",
+        )
+    )
+    target_id = asyncio.run(
+        found_startup(
+            engine,
+            economy,
+            log,
+            actor_id=target_founder.agent_id,
+            tick=2,
+            name="Asset Seller",
+        )
+    )
+    economy.inventory[f"{target_id}:shell-sku"] = InventoryState(
+        target_id,
+        "shell-sku",
+        quantity=3,
+        unit_cost_cents=50,
+        price_cents=75,
+    )
+    target_deposit = economy.firms[target_id].ledger_account_id
+    lender_id = parse_account_id(target_deposit)[2]
+    assert lender_id is not None
+    originate(
+        LoanRequest(
+            target_id,
+            lender_id,
+            20_000,
+            "corporate",
+            360,
+            {},
+            20_000,
+            "asset sale fixture",
+        ),
+        LoanDecision(True, 8_000, {}, 20_000, 500, 360, ()),
+        2,
+        ctx=engine.credit_context,
+        emit=emit_at(log, 2),
+    )
+    dividend = make_action(
+        actor_id=target_founder.agent_id,
+        tick=3,
+        action_type=ActionType.DECLARE_DIVIDEND,
+        params={"firm_id": target_id, "total_cents": 45_000},
+    )
+    dividend_events = asyncio.run(engine.resolve((dividend,), 3, emit_at(log, 3)))
+    assert any(event.kind == DIVIDEND_PAID for event in dividend_events)
+
+    proposal = make_action(
+        actor_id=acquirer_founder.agent_id,
+        tick=4,
+        action_type=ActionType.ACQUIRE,
+        params={
+            "acquirer_id": acquirer_id,
+            "target_id": target_id,
+            "offer_cents": 5_000,
+            "consideration": "cash",
+            "stock_ratio_bp": 0,
+            "integration_mode": "asset_sale",
+            "financing": "cash",
+        },
+    )
+    asyncio.run(engine.resolve((proposal,), 4, emit_at(log, 4)))
+    deal = next(iter(economy.ventures.acquisitions.values()))
+    tender = make_action(
+        actor_id=target_founder.agent_id,
+        tick=5,
+        action_type=ActionType.SELL_STAKE,
+        params={
+            "firm_id": target_id,
+            "qty": settings.ventures.founder_shares,
+            "deal_id": deal.deal_id,
+        },
+    )
+    events = asyncio.run(engine.resolve((tender,), 5, emit_at(log, 5)))
+    asset_sale = next(event for event in events if event.kind == ASSET_SALE)
+    assert asset_sale.payload["seller_id"] == target_id
+    assert asset_sale.payload["cents"] == 5_000
+    assert asset_sale.payload["txn_id"]
+    assert economy.inventory[f"{target_id}:shell-sku"].quantity == 0
+    assert economy.inventory[f"{acquirer_id}:shell-sku"].quantity == 3
+    loan = next(row for row in economy.loans.values() if row.borrower_id == target_id)
+    assert loan.borrower_id == target_id
+    assert economy.firms[target_id].status == "active"
+    assert economy.firms[target_id].capital_cents == 0
+    assert economy.ledger.net_worth(target_id) < 0
+
+    filing_tick = 5 + (
+        settings.bankruptcy.insolvency_persist_days * settings.clock.ticks_per_sim_day
+    )
+    filed = asyncio.run(engine.resolve((), filing_tick, emit_at(log, filing_tick)))
+    assert any(event.kind == BANKRUPTCY_FILED for event in filed)
+    case = next(row for row in economy.ventures.bankruptcies.values() if row.entity_id == target_id)
+    assert case.trigger == "balance_sheet"
+    assert case.status == "open"
+    assert economy.ledger.global_balance_cents() == 0
+
+
+def test_public_squeeze_out_transfers_all_holdings_and_delists() -> None:
+    _settings, population, economy, engine, log = build()
+    acquirer_founder, target_founder, minority = list(population)[:3]
+    acquirer_id = asyncio.run(
+        found_startup(
+            engine,
+            economy,
+            log,
+            actor_id=acquirer_founder.agent_id,
+            tick=1,
+            name="Public Buyer",
+        )
+    )
+    target_id = asyncio.run(
+        found_startup(
+            engine,
+            economy,
+            log,
+            actor_id=target_founder.agent_id,
+            tick=2,
+            name="Public Target",
+        )
+    )
+    engine.exchange.list_security(
+        symbol="SQZ",
+        issuer_firm_id=target_id,
+        shares_outstanding=1_000,
+        listing_price_cents=10,
+        tick=2,
+        emit=emit_at(log, 2),
+        holders={
+            target_founder.agent_id: 900,
+            minority.agent_id: 100,
+        },
+    )
+    proposal = make_action(
+        actor_id=acquirer_founder.agent_id,
+        tick=3,
+        action_type=ActionType.ACQUIRE,
+        params={
+            "acquirer_id": acquirer_id,
+            "target_id": target_id,
+            "offer_cents": 10_000,
+            "consideration": "cash",
+            "stock_ratio_bp": 0,
+            "integration_mode": "standalone",
+            "financing": "cash",
+        },
+    )
+    asyncio.run(engine.resolve((proposal,), 3, emit_at(log, 3)))
+    deal = next(iter(economy.ventures.acquisitions.values()))
+    tender = make_action(
+        actor_id=target_founder.agent_id,
+        tick=4,
+        action_type=ActionType.SELL_STAKE,
+        params={
+            "firm_id": target_id,
+            "qty": 900,
+            "deal_id": deal.deal_id,
+        },
+    )
+    events = asyncio.run(engine.resolve((tender,), 4, emit_at(log, 4)))
+
+    approval = next(event for event in events if event.kind == ACQUISITION_APPROVED)
+    assert approval.payload["squeeze_out_applied"] is True
+    assert deal.squeeze_out_applied is True
+    assert engine.exchange.state.holding(acquirer_id, "SQZ").qty == 1_000
+    assert engine.exchange.state.holding(target_founder.agent_id, "SQZ").qty == 0
+    assert engine.exchange.state.holding(minority.agent_id, "SQZ").qty == 0
+    assert engine.exchange.state.securities["SQZ"].status == "delisted"
+    assert any(event.kind == SECURITY_DELISTED for event in events)
     assert economy.ledger.global_balance_cents() == 0
 
 

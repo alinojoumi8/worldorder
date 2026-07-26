@@ -121,6 +121,9 @@ class AcquisitionState:
     proposed_tick: int
     expires_tick: int
     accepting_holders: dict[str, int] = field(default_factory=dict)
+    accepting_bp: int = 0
+    drag_along_applied: bool = False
+    squeeze_out_applied: bool = False
     status: str = "proposed"
 
 
