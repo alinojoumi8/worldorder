@@ -45,6 +45,10 @@ KIND_RANGES: Final = (
     KindRange(4000, 4099, "cognition", "polis.agents", Persistence.SAMPLED),
     KindRange(4100, 4199, "llm", "polis.llm", Persistence.PERSISTED),
     KindRange(4200, 4999, "agent_aux", "polis.agents", Persistence.PERSISTED),
+    KindRange(5000, 5999, "labour", "polis.economy", Persistence.PERSISTED),
+    KindRange(6000, 6999, "firms_goods", "polis.economy", Persistence.PERSISTED),
+    KindRange(7000, 7999, "exchange", "polis.economy", Persistence.PERSISTED),
+    KindRange(8000, 8999, "banking", "polis.economy", Persistence.PERSISTED),
     KindRange(14000, 14999, "education", "polis.agents", Persistence.PERSISTED),
     KindRange(90000, 90999, "ephemeral", "*", Persistence.EPHEMERAL),
     KindRange(99000, 99999, "research", "polis.research", Persistence.PERSISTED),
@@ -273,6 +277,61 @@ ACTION_REJECTED = register_kind(
     owner="polis.agents",
     persistence=Persistence.PERSISTED,
     schema=_schema("action_id", "agent_id", "reason"),
+)
+FIRM_FOUNDED = register_kind(
+    6001,
+    "FIRM_FOUNDED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "founder_id",
+        "name",
+        "sector",
+        "place_id",
+        "initial_capital_cents",
+        "ledger_account_id",
+    ),
+)
+BANK_FOUNDED = register_kind(
+    8001,
+    "BANK_FOUNDED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "bank_id",
+        "name",
+        "place_id",
+        "capital_cents",
+        "reserve_ratio_bp",
+        "is_central",
+    ),
+)
+ACCOUNT_OPENED = register_kind(
+    8002,
+    "ACCOUNT_OPENED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "account_id",
+        "owner_id",
+        "owner_type",
+        "account_type",
+        "code",
+    ),
+)
+MONEY_ISSUED = register_kind(
+    8032,
+    "MONEY_ISSUED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "amount_cents",
+        "recipient_account_id",
+        "instrument",
+        "purpose",
+        "txn_id",
+    ),
 )
 SKILL_ACCRUED = register_kind(
     14001,

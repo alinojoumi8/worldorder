@@ -18,6 +18,18 @@ from polis.store.engine import Database, StoreError
 from polis.store.repositories.events import EventRepository
 from polis.store.repositories.runs import RunRecord, RunRepository
 
+_ACCOUNT_TYPES = {
+    "cash": "cash",
+    "dep": "deposit",
+    "esc": "escrow",
+    "res": "reserve",
+    "lnr": "loan_receivable",
+    "txr": "tax_receivable",
+    "dpl": "deposit",
+    "lnp": "loan_payable",
+    "iss": "issuance",
+}
+
 
 def _prompt_manifest(settings: Settings) -> dict[str, str]:
     return {
@@ -40,6 +52,10 @@ def _model_manifest(settings: Settings) -> dict[str, dict[str, str | None]]:
 
 async def _clear_projections(db: Database, run_id: Any) -> None:
     for table in (
+        "ledger_entries",
+        "ledger_accounts",
+        "banks",
+        "firms",
         "cognition_traces",
         "metrics",
         "beliefs",
@@ -64,7 +80,7 @@ async def write_living_city_projections(
     run_id = result.report.run_id
     if replace:
         await _clear_projections(db, run_id)
-    as_of_seq = result.report.events + len(result.population) + 3
+    as_of_seq = result.as_of_seq
     place_at = {(place.x, place.y): place.place_id for place in result.world.places}
     async with db.txn() as connection, connection.cursor() as cursor:
         await cursor.executemany(
@@ -183,6 +199,105 @@ async def write_living_city_projections(
                 for agent in result.population
             ],
         )
+        if result.economy is not None:
+            await cursor.executemany(
+                """
+                INSERT INTO ledger_accounts(
+                    run_id,account_id,owner_id,owner_type,account_type,currency,
+                    balance_cents,opened_tick,closed_tick
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        account.account_id,
+                        account.owner_id,
+                        account.owner_type,
+                        _ACCOUNT_TYPES[account.code],
+                        account.currency,
+                        account.balance_cents,
+                        account.opened_tick,
+                        account.closed_tick,
+                    )
+                    for account in result.economy.ledger.accounts()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO ledger_entries(
+                    run_id,txn_id,tick,account_id,direction,amount_cents,reason,event_seq
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        entry.txn_id,
+                        entry.tick,
+                        entry.account_id,
+                        entry.direction,
+                        entry.amount_cents,
+                        entry.reason,
+                        entry.event_seq,
+                    )
+                    for entry in result.economy.ledger.entries()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO firms(
+                    run_id,firm_id,name,founded_tick,dissolved_tick,sector,place_id,
+                    founder_id,ledger_account_id,productivity_bp,capital_cents,
+                    headcount,is_public,symbol,status
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        firm.firm_id,
+                        firm.name,
+                        0,
+                        None,
+                        firm.sector,
+                        firm.place_id,
+                        firm.founder_id,
+                        firm.ledger_account_id,
+                        firm.productivity_bp,
+                        firm.capital_cents,
+                        firm.headcount,
+                        False,
+                        None,
+                        firm.status,
+                    )
+                    for firm in result.economy.firms.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO banks(
+                    run_id,bank_id,name,place_id,ledger_account_id,reserve_account_id,
+                    deposit_liability_account_id,capital_cents,reserve_ratio_bp,
+                    is_central,status,founded_tick,failed_tick
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        bank.bank_id,
+                        bank.name,
+                        bank.place_id,
+                        bank.deposit_liability_account_id,
+                        bank.reserve_account_id,
+                        bank.deposit_liability_account_id,
+                        bank.capital_cents,
+                        bank.reserve_ratio_bp,
+                        bank.is_central,
+                        bank.status,
+                        0,
+                        None,
+                    )
+                    for bank in result.economy.banks.values()
+                ],
+            )
         memories = [
             row
             for agent in result.population

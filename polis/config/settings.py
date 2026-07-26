@@ -174,6 +174,132 @@ class SocietySettings(FrozenModel):
     outlets: int = 4
 
 
+class EconomySettings(FrozenModel):
+    enabled: bool = False
+    currency: Literal["POL"] = "POL"
+    initial_firms: int = 0
+    initial_banks: int = 3
+    m0_cents_per_capita: int = 1_800_000
+    household_share_bp: int = 7_000
+    firm_share_bp: int = 2_000
+    bank_share_bp: int = 1_000
+    median_wage_cents: int = 3_600_000
+
+    @model_validator(mode="after")
+    def validate_genesis_shares(self) -> EconomySettings:
+        if self.household_share_bp + self.firm_share_bp + self.bank_share_bp != 10_000:
+            raise ValueError("economy genesis shares must sum to 10,000 bp")
+        if self.initial_banks < 1:
+            raise ValueError("economy.initial_banks must be positive")
+        return self
+
+
+class LabourPayrollSettings(FrozenModel):
+    days: tuple[int, ...] = (1, 15)
+    hour: int = 17
+
+
+class LabourSettings(FrozenModel):
+    vacancy_ttl_days: int = 30
+    vacancy_visibility_k: int = 8
+    max_open_vacancies_per_firm: int = 5
+    max_open_applications: int = 6
+    min_match_score_bp: int = 5_500
+    shortlist_multiple: int = 3
+    max_bargaining_rounds: int = 2
+    offer_stale_days: int = 3
+    offer_ttl_days: int = 5
+    search_window_days: int = 28
+    retirement_age: int = 65
+    minimum_wage_cents: int = 0
+    payroll: LabourPayrollSettings = LabourPayrollSettings()
+
+
+class FirmMarkupSettings(FrozenModel):
+    initial_bp: int = 2_500
+    step_bp: int = 200
+    max_bp: int = 8_000
+    target_low_bp: int = 70_000
+    target_high_bp: int = 300_000
+
+
+class FirmSettings(FrozenModel):
+    beta_capital_bp: int = 3_000
+    depreciation_bp_per_year: int = 1_000
+    learning_bp_per_day: int = 3
+    productivity_sigma_bp: int = 40
+    productivity_bounds_bp: tuple[int, int] = (2_000, 40_000)
+    spoilage_bp_per_day: int = 2_000
+    payout_ratio_bp: int = 3_000
+    working_capital_months: int = 3
+    markup: FirmMarkupSettings = FirmMarkupSettings()
+
+
+class ConsumptionSettings(FrozenModel):
+    subsistence_gamma_bp: int = 4_000
+    max_sellers_considered: int = 6
+    sales_tax_bp: int = 800
+
+
+class GoodsSettings(FrozenModel):
+    cpi_base_bp: int = 10_000
+    initial_inventory_days: int = 30
+    consumption: ConsumptionSettings = ConsumptionSettings()
+
+
+class BankingSettings(FrozenModel):
+    reserve_ratio_bp: int = 1_000
+    capital_ratio_min_bp: int = 800
+    capital_buffer_bp: int = 1_050
+    deposit_rate_bp: int = 50
+    policy_rate_bp: int = 400
+    discount_penalty_bp: int = 200
+    insurance_cap_months: int = 6
+    fire_sale_bp: int = 7_000
+    cb_backstop: bool = False
+    resolution: Literal["assume", "liquidate"] = "assume"
+    underwriting: Literal["scorecard", "llm"] = "scorecard"
+    policy_rate_rule: Literal["taylor", "fixed", "political"] = "fixed"
+
+
+class CreditSettings(FrozenModel):
+    min_score_bp: int = 4_500
+    risk_spread_k: int = 6_000
+    base_spread_bp: int = 150
+    term_premium_bp_per_year: int = 25
+    concentration_bp: int = 2_500
+    max_loan_income_multiple_bp: int = 40_000
+    grace_days: int = 14
+    delinquency_days: int = 30
+    default_days: int = 90
+    writeoff_after_days: int = 180
+
+
+class TaxSettings(FrozenModel):
+    income_brackets: tuple[tuple[int, int], ...] = (
+        (0, 0),
+        (2_000_000, 1_500),
+        (6_000_000, 2_500),
+        (15_000_000, 3_500),
+    )
+    payroll_employer_bp: int = 500
+    corporate_bp: int = 2_000
+    sales_bp: int = 800
+    arrears_penalty_bp: int = 800
+
+
+class SpendSettings(FrozenModel):
+    benefit_replacement_bp: int = 4_000
+    benefit_max_days: int = 182
+
+
+class TreasurySettings(FrozenModel):
+    floor_cents: int = 0
+    initial_spending_quarters: int = 1
+    tax: TaxSettings = TaxSettings()
+    spend: SpendSettings = SpendSettings()
+
+
 class AblationSettings(FrozenModel):
     reflex_only: bool = False
     obfuscate_domain: bool = False
@@ -224,6 +350,13 @@ class Settings(FrozenModel):
     memory: MemorySettings = MemorySettings()
     mechanisms: dict[str, str] = {}
     society: SocietySettings = SocietySettings()
+    economy: EconomySettings = EconomySettings()
+    labour: LabourSettings = LabourSettings()
+    firms: FirmSettings = FirmSettings()
+    goods: GoodsSettings = GoodsSettings()
+    banking: BankingSettings = BankingSettings()
+    credit: CreditSettings = CreditSettings()
+    treasury: TreasurySettings = TreasurySettings()
     ablations: AblationSettings = AblationSettings()
     store: StoreSettings
     telemetry: TelemetrySettings = TelemetrySettings()
@@ -300,15 +433,28 @@ def load_settings(
         raise ConfigError(str(exc)) from exc
 
 
+_M2_CONFIG_FIELDS = frozenset(
+    {"economy", "labour", "firms", "goods", "banking", "credit", "treasury"}
+)
+
+
+def _config_payload(settings: Settings, *, by_alias: bool = False) -> dict[str, Any]:
+    payload = settings.model_dump(mode="json", by_alias=by_alias)
+    if not settings.economy.enabled:
+        for field in _M2_CONFIG_FIELDS:
+            payload.pop(field, None)
+    return payload
+
+
 def config_yaml(settings: Settings) -> str:
     return cast(
         str,
-        yaml.safe_dump(settings.model_dump(mode="json", by_alias=True), sort_keys=True),
+        yaml.safe_dump(_config_payload(settings, by_alias=True), sort_keys=True),
     )
 
 
 def config_hash(settings: Settings) -> str:
-    return sha256_hex(canonical_bytes(settings.model_dump(mode="json")))
+    return sha256_hex(canonical_bytes(_config_payload(settings)))
 
 
 def reproducibility_tuple(

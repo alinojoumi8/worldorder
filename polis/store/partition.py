@@ -39,6 +39,7 @@ class PartitionManager:
         async with self.db.txn() as connection:
             event_parent = partition_name("events", run_id)
             memory_partition = partition_name("memories", run_id)
+            ledger_partition = partition_name("ledger_entries", run_id)
             statements = [
                 sql.SQL(
                     "CREATE TABLE IF NOT EXISTS {} PARTITION OF events "
@@ -47,8 +48,15 @@ class PartitionManager:
                 sql.SQL(
                     "CREATE TABLE IF NOT EXISTS {} PARTITION OF memories FOR VALUES IN ({})"
                 ).format(sql.Identifier(memory_partition), sql.Literal(run_id)),
+                sql.SQL(
+                    "CREATE TABLE IF NOT EXISTS {} PARTITION OF ledger_entries FOR VALUES IN ({})"
+                ).format(sql.Identifier(ledger_partition), sql.Literal(run_id)),
             ]
-            for name, statement in zip((event_parent, memory_partition), statements, strict=True):
+            for name, statement in zip(
+                (event_parent, memory_partition, ledger_partition),
+                statements,
+                strict=True,
+            ):
                 if name not in self._known:
                     await connection.execute(statement)
                     await connection.execute(

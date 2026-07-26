@@ -36,3 +36,10 @@ forbidden_modules =
     polis.agents
     polis.research
 
+[importlinter:contract:economy-boundary]
+name = Economy institutions never import agent cognition
+type = forbidden
+source_modules =
+    polis.economy
+forbidden_modules =
+    polis.agents.cognition
