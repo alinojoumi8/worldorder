@@ -40,7 +40,7 @@ from polis.events.kinds import (
     SKILL_ACCRUED,
     WORLD_GENERATED,
 )
-from polis.events.log import EventLog, EventSink, MemoryEventSink
+from polis.events.log import EphemeralSink, EventLog, EventSink, MemoryEventSink
 from polis.events.sampling import CognitionSampler
 from polis.events.types import Event, NewEvent
 from polis.kernel.clock import Clock, profile_from_settings
@@ -559,6 +559,7 @@ async def run_living_city(
     *,
     ticks: int | None = None,
     sink: EventSink | None = None,
+    ephemeral_sink: EphemeralSink | None = None,
     collect_events: bool = True,
 ) -> LivingCityResult:
     run_id = run_id_for(settings)
@@ -578,7 +579,12 @@ async def run_living_city(
         settings.salience.cognition_sample_rate,
         lambda namespace, entity_id, tick: rng.seed_for(namespace, entity_id, tick),
     )
-    log = EventLog(run_id, actual_sink, sampler=sampler)
+    log = EventLog(
+        run_id,
+        actual_sink,
+        ephemeral_sink=ephemeral_sink,
+        sampler=sampler,
+    )
     clock = Clock(profile_from_settings(settings.clock))
     scheduler = Scheduler(clock)
     router = LLMRouter(settings=settings, run_id=run_id)

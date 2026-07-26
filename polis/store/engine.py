@@ -54,15 +54,20 @@ class Database:
         application_name: str = "polis-engine",
     ) -> Database:
         dsn = settings.reader_dsn if role == "reader" and settings.reader_dsn else settings.dsn
+        connection_kwargs: dict[str, Any] = {
+            "autocommit": False,
+            "row_factory": dict_row,
+            "application_name": application_name,
+        }
+        if role == "reader":
+            connection_kwargs["options"] = (
+                "-c default_transaction_read_only=on -c statement_timeout=5000"
+            )
         pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool(
             conninfo=dsn,
             min_size=settings.pool_min,
             max_size=settings.pool_max,
-            kwargs={
-                "autocommit": False,
-                "row_factory": dict_row,
-                "application_name": application_name,
-            },
+            kwargs=connection_kwargs,
             open=False,
         )
         await pool.open(wait=True)

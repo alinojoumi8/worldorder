@@ -57,6 +57,7 @@ class Observation:
 
     def as_dict(self) -> dict[str, object]:
         row = asdict(self)
+        row["sim_time"] = self.sim_time.isoformat()
         row["digest_features"] = sorted(self.digest_features)
         return row
 

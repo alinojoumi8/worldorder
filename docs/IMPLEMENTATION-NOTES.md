@@ -25,3 +25,12 @@ schema contains only M0/M1 core, agent, world, and research tables. Later tables
 introduced and exercised by their owning milestones rather than remaining unvalidated,
 unused schema.
 
+## M1 / C23a
+
+### Inspector trace projection
+
+`03-DATA-MODEL.md` defines the authoritative event, LLM-call, agent, memory and world
+tables but does not name a materialized inspector table. M1 adds `cognition_traces` as a
+strictly derived read model so C23a can answer the end-to-end inspector route without
+reconstructing every phase on each request. It is not simulation truth and may be deleted
+and rebuilt from deterministic replay.

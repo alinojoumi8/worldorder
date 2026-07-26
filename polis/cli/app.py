@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, cast
+from uuid import UUID
 
 import typer
 
 from polis.config.mechanisms import mechanism_manifest
 from polis.config.paths import repo_git_sha
-from polis.config.settings import config_hash, load_settings
+from polis.config.settings import Settings, config_hash, load_settings
 
 app = typer.Typer(no_args_is_help=True, help="POLIS deterministic city simulation")
 
@@ -41,6 +43,7 @@ def run(
     set_: Annotated[list[str] | None, typer.Option("--set")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    memory_only: Annotated[bool, typer.Option("--memory-only")] = False,
 ) -> None:
     """Resolve and execute a deterministic POLIS run."""
     settings = load_settings(
@@ -59,9 +62,14 @@ def run(
     if dry_run:
         typer.echo(json.dumps(result, sort_keys=True) if json_output else yaml_like(result))
         return
-    from polis.simulation import run_empty
+    if memory_only:
+        from polis.living_city import run_living_city
 
-    simulation = asyncio.run(run_empty(settings))
+        simulation = asyncio.run(run_living_city(settings))
+    else:
+        from polis.store.living_city import run_persistent
+
+        simulation = asyncio.run(run_persistent(settings))
     output = {**result, "report": asdict(simulation.report)}
     typer.echo(
         json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
@@ -74,29 +82,96 @@ def yaml_like(value: dict[str, object]) -> str:
     return cast(str, yaml.safe_dump(value, sort_keys=True)).strip()
 
 
+async def _stored_settings(base: Settings, run_id: UUID) -> Settings:
+    from polis.store.engine import Database
+    from polis.store.operations import load_run_settings
+
+    database = await Database.open(base.store, role="reader")
+    try:
+        return await load_run_settings(database, run_id)
+    finally:
+        await database.close()
+
+
+@app.command()
+def resume(
+    run_id: UUID,
+    config: Annotated[Path, typer.Option(exists=True)] = Path("configs/baseline.yaml"),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Resume a stored run after verifying its deterministic replay prefix."""
+    from polis.store.operations import resume_stored_run
+
+    base = load_settings(config)
+    settings = asyncio.run(_stored_settings(base, run_id))
+    report = asyncio.run(resume_stored_run(settings, run_id))
+    output = asdict(report)
+    typer.echo(
+        json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
+    )
+
+
+@app.command()
+def verify(
+    run_id: UUID,
+    config: Annotated[Path, typer.Option(exists=True)] = Path("configs/baseline.yaml"),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Verify every stored event hash, sequence, tick and payload schema."""
+    from polis.store.operations import verify_stored_run
+
+    base = load_settings(config)
+    settings = asyncio.run(_stored_settings(base, run_id))
+    report = asyncio.run(verify_stored_run(settings, run_id))
+    output = asdict(report)
+    typer.echo(
+        json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
+    )
+    if not report.ok:
+        raise typer.Exit(1)
+
+
+@app.command()
+def rebuild(
+    run_id: UUID,
+    config: Annotated[Path, typer.Option(exists=True)] = Path("configs/baseline.yaml"),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Rebuild all M1 read models after an exact deterministic replay."""
+    from polis.store.operations import rebuild_stored_run
+
+    base = load_settings(config)
+    settings = asyncio.run(_stored_settings(base, run_id))
+    report = asyncio.run(rebuild_stored_run(settings, run_id))
+    output = asdict(report)
+    typer.echo(
+        json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
+    )
+
+
+@app.command()
+def replay(
+    run_id: UUID,
+    config: Annotated[Path, typer.Option(exists=True)] = Path("configs/baseline.yaml"),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Replay a stored run and compare its count and terminal chain hash."""
+    from polis.store.operations import replay_stored_run
+
+    base = load_settings(config)
+    settings = asyncio.run(_stored_settings(base, run_id))
+    report = asyncio.run(replay_stored_run(settings, run_id))
+    output = asdict(report)
+    typer.echo(
+        json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
+    )
+    if not report.exact:
+        raise typer.Exit(1)
+
+
 def _stub(owner: str) -> None:
     typer.echo(f"not implemented yet; owner: {owner}", err=True)
     raise typer.Exit(2)
-
-
-@app.command()
-def resume() -> None:
-    _stub("C04")
-
-
-@app.command()
-def verify() -> None:
-    _stub("C02")
-
-
-@app.command()
-def rebuild() -> None:
-    _stub("C03")
-
-
-@app.command()
-def replay() -> None:
-    _stub("C24")
 
 
 @app.command()
@@ -110,13 +185,37 @@ def gateway() -> None:
 
 
 @app.command()
-def observe() -> None:
-    _stub("C23")
+def observe(
+    config: Annotated[Path, typer.Option(exists=True)] = Path("configs/baseline.yaml"),
+) -> None:
+    """Serve the read-only Observatory API and built frontend."""
+    import uvicorn
+
+    from polis.observatory.api import create_app
+
+    settings = load_settings(config)
+    host, raw_port = settings.observatory.bind.rsplit(":", 1)
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_app(settings),
+            host=host,
+            port=int(raw_port),
+            log_level="info",
+        )
+    )
+    if sys.platform == "win32":
+        import selectors
+
+        def loop_factory() -> asyncio.AbstractEventLoop:
+            return asyncio.SelectorEventLoop(selectors.SelectSelector())
+
+        with asyncio.Runner(loop_factory=loop_factory) as runner:
+            runner.run(server.serve())
+        return
+    server.run()
 
 
 def main() -> None:
-    import sys
-
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     app()

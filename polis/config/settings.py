@@ -301,7 +301,10 @@ def load_settings(
 
 
 def config_yaml(settings: Settings) -> str:
-    return cast(str, yaml.safe_dump(settings.model_dump(mode="json"), sort_keys=True))
+    return cast(
+        str,
+        yaml.safe_dump(settings.model_dump(mode="json", by_alias=True), sort_keys=True),
+    )
 
 
 def config_hash(settings: Settings) -> str:
