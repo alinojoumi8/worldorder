@@ -1,0 +1,76 @@
+{
+  "accepted_code_git_sha": "0b5a9266467b9061304381202ee9ebd59a70c9aa",
+  "accepted_on": "2026-07-26",
+  "branch": "build/m2-economy",
+  "deterministic_repeat": {
+    "agents": 50,
+    "economy_equal": true,
+    "events_equal": true,
+    "hash": "81c7051233293a2b10c71deba3128a38ea11cf00e3d679cdf37703900ff1c7e7",
+    "metrics_equal": true,
+    "ticks": 100
+  },
+  "five_year_run": {
+    "agents": 50,
+    "bonds": 0,
+    "elapsed_s": 110.244,
+    "employment_statuses": {
+      "child": 11,
+      "employed": 20,
+      "retired": 11,
+      "student": 6,
+      "unemployed": 2
+    },
+    "events": 400568,
+    "global_closure_cents": 0,
+    "goods_transactions": 39530,
+    "hash": "42abea44ec6037983abea8d1cc94079a3f4d27766c2b209d796914ac77915f45",
+    "latest_metrics": {
+      "bank_capital_ratio": 10000,
+      "cpi": 14524,
+      "gdp_nominal": 9169825,
+      "m1": 45125403,
+      "unemployment_rate": 476
+    },
+    "ledger_entries": 404465,
+    "loan_statuses": {
+      "repaid": 10
+    },
+    "materialisation_closure_cents": 0,
+    "max_deposit_imbalance_cents": 0,
+    "sim_years": 5,
+    "status": "completed",
+    "tax_statuses": {
+      "paid": 46
+    },
+    "ticks": 1800,
+    "ticks_per_s": 16.327
+  },
+  "persistent_run": {
+    "checkpoint_appended_events": 0,
+    "code_git_sha": "0b5a9266467b9061304381202ee9ebd59a70c9aa",
+    "exact_projection_rebuild": true,
+    "exact_replay": true,
+    "run_id": "84e520a2-1a28-5dc5-aa8f-35434bd1ef22",
+    "stored_events": 29616,
+    "terminal_hash": "44cfda657b3552938a5fa342ad4ccaf9628e9087bbd8a28a2c273eef189326bf",
+    "verified": true
+  },
+  "quality": {
+    "frontend_build": "passed",
+    "import_linter_contracts": 4,
+    "mypy_source_files": 105,
+    "pytest_passed": 126,
+    "ruff_format_source_files": 155
+  },
+  "scale_run": {
+    "agents": 1000,
+    "closure_cents": 0,
+    "elapsed_s": 43.242,
+    "hash": "226bdfee73d34c17c4447774949033527cd8674f7a96b132692694d401ab6978",
+    "matches_first_run": true,
+    "profile": "microscope",
+    "ticks": 100,
+    "ticks_per_s": 2.313
+  }
+}
