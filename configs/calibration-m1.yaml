@@ -39,6 +39,7 @@ llm:
   routing:
     DELIBERATE: {lane: stub, model: stub-v1, temperature: 0.8, template: deliberate/user.v1.jinja}
     REFLECT: {lane: stub, model: stub-v1, temperature: 0.9, template: reflect/questions.v1.jinja}
+    CREDIT_EVAL: {lane: stub, model: stub-v1, temperature: 0.2, max_tokens: 400, template: credit/eval.v1.jinja}
     IMPORTANCE: {lane: stub, model: stub-v1, temperature: 0.0, template: importance/user.v1.jinja}
     EMBED: {lane: stub, model: stub-v1, temperature: 0.0, template: embedding/user.v1.jinja}
   fallback_policy: permissive

@@ -6,6 +6,7 @@ from polis.agents.actions.types import Action, ActionType, make_action
 from polis.agents.state import AgentPopulation
 from polis.config.mechanisms import mechanism
 from polis.config.settings import Settings
+from polis.economy.banking import BankingEngine
 from polis.economy.firms import FirmEngine
 from polis.economy.goods import GoodsEngine
 from polis.economy.labour import (
@@ -18,6 +19,7 @@ from polis.economy.labour import (
 from polis.economy.state import EconomyState, FirmState
 from polis.events.types import Event, NewEvent
 from polis.kernel.rng import RngRegistry
+from polis.llm.router import LLMRouter
 from polis.world.api import World
 
 Emit = Callable[[NewEvent], Event]
@@ -61,6 +63,7 @@ class MechanicalPolicy:
         economy: EconomyState,
         rng: RngRegistry,
         occupations: Mapping[str, Occupation],
+        router: LLMRouter,
     ) -> None:
         self.settings = settings
         self.population = population
@@ -71,8 +74,9 @@ class MechanicalPolicy:
         self.labour = LabourMarket(settings, population, world, economy, rng, occupations)
         self.firms = FirmEngine(settings, economy, rng)
         self.goods = GoodsEngine(settings, population, world, economy, rng)
+        self.banking = BankingEngine(settings, population, economy, rng, router)
 
-    def step(self, tick: int, emit: Emit) -> tuple[Event, ...]:
+    async def step(self, tick: int, emit: Emit) -> tuple[Event, ...]:
         events: list[Event] = list(self.labour.expire(tick, emit))
         first_actions = self._first_actions(tick)
         events.extend(self.labour.resolve(first_actions, tick, emit))
@@ -85,6 +89,7 @@ class MechanicalPolicy:
         events.extend(self.labour.decay_unused_skills(tick, emit))
         events.extend(self.firms.run_daily(tick, emit))
         events.extend(self.goods.compute_cpi(tick, emit))
+        events.extend(await self.banking.step(tick, emit))
         events.append(self.labour.emit_summary(tick, emit))
         self.economy.sync_denormalised(self.population)
         self.economy.ledger.commit_tick(tick)

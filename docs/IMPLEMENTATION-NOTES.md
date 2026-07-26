@@ -131,3 +131,46 @@ entity; households, family formation and shared budgets belong to M5. C12's line
 expenditure plan and consumption loop therefore operate per agent in M2. Rent payment and
 household pooling remain visibly unavailable until the M5 household projection exists,
 rather than fabricating one-person households and later changing the unit of analysis.
+
+## M2 / C14
+
+### Bootstrap issuance boundary
+
+C14's static acceptance text says the literal `iss:` should appear only in the ledger and
+central-bank modules. Genesis must nevertheless open and fund the central-bank issuance
+account before the central-bank engine exists. `polis.economy.genesis` is therefore the
+documented bootstrap exception; after tick zero, only `polis.economy.central` can issue base
+money. Every issuance remains an event-backed balanced ledger transaction.
+
+### Optional underwriting ablation
+
+Scorecard underwriting remains the M2 default. When `banking.underwriting: llm` is selected,
+the economy uses the existing cached `CREDIT_EVAL` route with the complete scorecard and
+the same borrower and bank state as reference. The model can change the approval, amount,
+and rate view but cannot bypass capital, reserve, amount, or concentration constraints.
+The decision event records the stable `llm_call_id`; the network-blocked StubProvider gate
+exercises this route end to end.
+
+### Bank resolution and tax arrears
+
+Both configured bank-resolution modes are implemented. `assume` moves performing loan
+receivables without changing borrower payables. `liquidate` sells performing loans at the
+configured fire-sale rate, pays remaining deposits into cash after insurance and haircut,
+and records base-money issuance if the central bank must buy a loan. Non-performing loans
+are written off first in both modes. Banks are not employers in the M2 entity model, so
+there are no bank employees to dismiss; adding a synthetic employer solely for the failure
+test would conflict with the existing firm and employment projections.
+
+Tax assessments remain cash-basis. Arrears become `txr`/`lnp` claims and use the ordinary
+interest, missed-payment, delinquency, default, and close logic. Repayment transfers real
+deposits to the treasury and closes principal exactly rather than leaving government claims
+outside the amortisation engine.
+
+### Treasury auction bridge
+
+C14 decides when bonds are required, while C13 owns the exchange auction venue in M3.
+For M2, deficit financing uses a deterministic primary allocation among eligible banks and
+records issue and clear/fail events. The `securities.issuer_firm_id` column stores
+`gv_treasury` because the binding shared table has no generic issuer column. C13 will replace
+only the venue and price-discovery portion; the treasury decision, coupons, maturities, and
+ledger settlement remain C14-owned.

@@ -153,6 +153,7 @@ class LivingCityEngine:
                 economy,
                 rng,
                 load_occupations(settings.economy.occupations_path),
+                router,
             )
             if economy is not None
             else None
@@ -178,7 +179,7 @@ class LivingCityEngine:
 
     async def institutions(self, ctx: TickContext) -> None:
         if self.economy_policy is not None:
-            self.economy_policy.step(ctx.tick, ctx.emit)
+            await self.economy_policy.step(ctx.tick, ctx.emit)
 
     def _trace_kept(self, agent_id: str, tick: int, mode: str) -> bool:
         seed = self.rng.seed_for("cognition.sample", agent_id, tick)

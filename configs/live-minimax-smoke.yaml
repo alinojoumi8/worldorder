@@ -43,6 +43,7 @@ llm:
   routing:
     DELIBERATE: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.0, max_tokens: 128, structured: none, template: deliberate/user.v1.jinja}
     REFLECT: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.0, max_tokens: 128, structured: none, template: reflect/questions.v1.jinja}
+    CREDIT_EVAL: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.0, max_tokens: 400, structured: none, template: credit/eval.v1.jinja}
     IMPORTANCE: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.0, max_tokens: 64, structured: none, template: importance/user.v1.jinja}
     EMBED: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.0, max_tokens: 64, structured: none, template: embedding/user.v1.jinja}
   fallback_policy: strict

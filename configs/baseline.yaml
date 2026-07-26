@@ -59,6 +59,7 @@ llm:
   routing:
     DELIBERATE: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.8, template: deliberate/user.v1.jinja}
     REFLECT: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.9, template: reflect/questions.v1.jinja}
+    CREDIT_EVAL: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.2, max_tokens: 400, template: credit/eval.v1.jinja}
     IMPORTANCE: {lane: volume_text, model: qwen3.5:cloud, temperature: 0.0, template: importance/user.v1.jinja}
     EMBED: {lane: volume_embed, model: embeddinggemma:cloud, temperature: 0.0, template: embedding/user.v1.jinja}
   fallback_policy: permissive

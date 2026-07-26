@@ -41,6 +41,9 @@ class AgentPopulation:
     def price_inflation_yoy_bp(self) -> int | None:
         return None
 
+    def interest_imbalance_cents(self) -> int:
+        return 0
+
     def population(self) -> int:
         return len(self.alive())
 

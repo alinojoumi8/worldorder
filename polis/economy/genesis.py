@@ -349,7 +349,12 @@ def create_economy(
         if agent.employment_status == "employed":
             agent.employment_status = "unemployed"
 
-    state = EconomyState(ledger, banks, firms)
+    state = EconomyState(
+        ledger,
+        banks,
+        firms,
+        policy_rate_bp=settings.banking.policy_rate_bp,
+    )
     basket = seed_goods_state(settings, state)
     events.append(
         emit(

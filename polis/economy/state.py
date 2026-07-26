@@ -25,6 +25,107 @@ class BankState:
     capital_cents: int = 0
     reserve_ratio_bp: int = 1_000
     status: str = "active"
+    founded_tick: int = 0
+    failed_tick: int | None = None
+    lending_frozen: bool = False
+    capital_ratio_bp: int = 10_000
+
+
+@dataclass(slots=True)
+class LoanApplicationState:
+    application_id: str
+    borrower_id: str
+    lender_id: str
+    requested_cents: int
+    purpose: str
+    term_ticks: int
+    collateral: dict[str, Any]
+    submitted_tick: int
+    status: str = "submitted"
+    score_bp: int | None = None
+    offered_cents: int = 0
+    offered_rate_bp: int = 0
+    reason_codes: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class LoanState:
+    loan_id: str
+    lender_id: str
+    borrower_id: str
+    purpose: str
+    principal_cents: int
+    outstanding_cents: int
+    annual_rate_bp: int
+    term_ticks: int
+    originated_tick: int
+    matures_tick: int
+    status: str
+    collateral: dict[str, Any]
+    collateral_value_cents: int
+    credit_score_at_origination_bp: int
+    lender_receivable_account_id: str
+    borrower_payable_account_id: str
+    payment_cents: int
+    payments_n: int
+    next_payment_tick: int
+    accrued_interest_cents: int = 0
+    accrual_remainder: int = 0
+    total_interest_paid_cents: int = 0
+    total_interest_scheduled_cents: int = 0
+    total_interest_forgiven_cents: int = 0
+    capitalised_interest_cents: int = 0
+    payments_made: int = 0
+    missed_since_tick: int | None = None
+    defaulted_tick: int | None = None
+
+
+@dataclass(slots=True)
+class LoanPaymentState:
+    payment_id: str
+    loan_id: str
+    tick: int
+    principal_cents: int
+    interest_cents: int
+    missed: bool
+
+
+@dataclass(slots=True)
+class TaxAssessmentState:
+    assessment_id: str
+    taxpayer_id: str
+    tax_type: str
+    base_cents: int
+    rate_bp: int
+    assessed_cents: int
+    assessed_tick: int
+    due_tick: int
+    paid_cents: int = 0
+    status: str = "assessed"
+
+
+@dataclass(slots=True)
+class BondState:
+    symbol: str
+    face_cents: int
+    coupon_bp: int
+    issued_tick: int
+    matures_tick: int
+    holder_id: str
+    status: str = "outstanding"
+    last_coupon_tick: int = 0
+
+
+@dataclass(slots=True)
+class TreasuryState:
+    receipts_cents: int = 0
+    spending_cents: int = 0
+    debt_service_cents: int = 0
+    period_receipts_cents: int = 0
+    period_spending_cents: int = 0
+    period_debt_service_cents: int = 0
+    corporate_revenue_marks: dict[str, int] = field(default_factory=dict)
+    corporate_wage_marks: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -188,6 +289,15 @@ class EconomyState:
     cpi_core_history_bp: dict[int, int] = field(default_factory=dict)
     cpi_fisher_history_bp: dict[int, int] = field(default_factory=dict)
     cpi_category_history_bp: dict[str, dict[int, int]] = field(default_factory=dict)
+    loan_applications: dict[str, LoanApplicationState] = field(default_factory=dict)
+    loans: dict[str, LoanState] = field(default_factory=dict)
+    loan_payments: list[LoanPaymentState] = field(default_factory=list)
+    tax_assessments: dict[str, TaxAssessmentState] = field(default_factory=dict)
+    bonds: dict[str, BondState] = field(default_factory=dict)
+    bond_holdings_cents: dict[str, dict[str, int]] = field(default_factory=dict)
+    treasury: TreasuryState = field(default_factory=TreasuryState)
+    policy_rate_bp: int = 400
+    pending_policy_rate: tuple[int, int] | None = None
 
     def cached_net_worth_cents(self) -> Mapping[str, int]:
         result = {firm_id: firm.liquid_cents for firm_id, firm in sorted(self.firms.items())}
@@ -207,7 +317,8 @@ class EconomyState:
             firm.liquid_cents = self.ledger.net_worth(firm.firm_id)
         for bank in self.banks.values():
             if not bank.is_central:
-                bank.capital_cents = self.ledger.net_worth(bank.bank_id)
+                holdings = sum(self.bond_holdings_cents.get(bank.bank_id, {}).values())
+                bank.capital_cents = self.ledger.net_worth(bank.bank_id) + holdings
 
     def dump(self) -> Mapping[str, Any]:
         return {
@@ -252,6 +363,22 @@ class EconomyState:
                 category: dict(sorted(values.items()))
                 for category, values in sorted(self.cpi_category_history_bp.items())
             },
+            "loan_applications": {
+                row_id: asdict(row) for row_id, row in sorted(self.loan_applications.items())
+            },
+            "loans": {row_id: asdict(row) for row_id, row in sorted(self.loans.items())},
+            "loan_payments": [asdict(row) for row in self.loan_payments],
+            "tax_assessments": {
+                row_id: asdict(row) for row_id, row in sorted(self.tax_assessments.items())
+            },
+            "bonds": {symbol: asdict(row) for symbol, row in sorted(self.bonds.items())},
+            "bond_holdings_cents": {
+                holder_id: dict(sorted(values.items()))
+                for holder_id, values in sorted(self.bond_holdings_cents.items())
+            },
+            "treasury": asdict(self.treasury),
+            "policy_rate_bp": self.policy_rate_bp,
+            "pending_policy_rate": self.pending_policy_rate,
         }
 
     def load(self, state: Mapping[str, Any]) -> None:
@@ -273,6 +400,14 @@ class EconomyState:
         cpi_core_history_bp = state.get("cpi_core_history_bp", {})
         cpi_fisher_history_bp = state.get("cpi_fisher_history_bp", {})
         cpi_category_history_bp = state.get("cpi_category_history_bp", {})
+        loan_applications = state.get("loan_applications", {})
+        loans = state.get("loans", {})
+        loan_payments = state.get("loan_payments", ())
+        tax_assessments = state.get("tax_assessments", {})
+        bonds = state.get("bonds", {})
+        bond_holdings_cents = state.get("bond_holdings_cents", {})
+        treasury = state.get("treasury", {})
+        pending_policy_rate = state.get("pending_policy_rate")
         if not isinstance(ledger, Mapping):
             raise ValueError("economy checkpoint ledger must be a mapping")
         if not isinstance(banks, Mapping) or not isinstance(firms, Mapping):
@@ -291,6 +426,12 @@ class EconomyState:
             cpi_core_history_bp,
             cpi_fisher_history_bp,
             cpi_category_history_bp,
+            loan_applications,
+            loans,
+            tax_assessments,
+            bonds,
+            bond_holdings_cents,
+            treasury,
         )
         if any(not isinstance(item, Mapping) for item in projections):
             raise ValueError("economy checkpoint projections must be mappings")
@@ -336,7 +477,12 @@ class EconomyState:
             if isinstance(row, Mapping)
         }
         self.skus = {
-            str(sku): SkuState(**dict(row))
+            str(sku): SkuState(
+                **{
+                    **dict(row),
+                    "sectors": tuple(cast(Any, row).get("sectors", ())),
+                }
+            )
             for sku, row in sorted(skus.items())
             if isinstance(row, Mapping)
         }
@@ -366,6 +512,48 @@ class EconomyState:
             for category, values in sorted(cpi_category_history_bp.items())
             if isinstance(values, Mapping)
         }
+        self.loan_applications = {
+            str(row_id): LoanApplicationState(
+                **{
+                    **dict(row),
+                    "reason_codes": tuple(cast(Any, row).get("reason_codes", ())),
+                }
+            )
+            for row_id, row in sorted(loan_applications.items())
+            if isinstance(row, Mapping)
+        }
+        self.loans = {
+            str(row_id): LoanState(**dict(row))
+            for row_id, row in sorted(loans.items())
+            if isinstance(row, Mapping)
+        }
+        if not isinstance(loan_payments, list | tuple):
+            raise ValueError("economy loan payments must be a sequence")
+        self.loan_payments = [
+            LoanPaymentState(**dict(row)) for row in loan_payments if isinstance(row, Mapping)
+        ]
+        self.tax_assessments = {
+            str(row_id): TaxAssessmentState(**dict(row))
+            for row_id, row in sorted(tax_assessments.items())
+            if isinstance(row, Mapping)
+        }
+        self.bonds = {
+            str(symbol): BondState(**dict(row))
+            for symbol, row in sorted(bonds.items())
+            if isinstance(row, Mapping)
+        }
+        self.bond_holdings_cents = {
+            str(holder_id): {str(symbol): int(value) for symbol, value in row.items()}
+            for holder_id, row in sorted(bond_holdings_cents.items())
+            if isinstance(row, Mapping)
+        }
+        self.treasury = TreasuryState(**dict(treasury))
+        self.policy_rate_bp = int(state.get("policy_rate_bp", 400))
+        self.pending_policy_rate = (
+            (int(pending_policy_rate[0]), int(pending_policy_rate[1]))
+            if isinstance(pending_policy_rate, list | tuple) and len(pending_policy_rate) == 2
+            else None
+        )
 
 
 class EconomyWorldState:
@@ -413,6 +601,17 @@ class EconomyWorldState:
         if current is None or prior is None or prior <= 0:
             return None
         return 10_000 * (current - prior) // prior
+
+    def interest_imbalance_cents(self) -> int:
+        return sum(
+            abs(
+                loan.total_interest_scheduled_cents
+                - loan.total_interest_paid_cents
+                - loan.total_interest_forgiven_cents
+            )
+            for loan in self.economy.loans.values()
+            if loan.status in {"repaid", "written_off"}
+        )
 
     def cached_net_worth_cents(self) -> Mapping[str, int]:
         values = dict(self.economy.cached_net_worth_cents())

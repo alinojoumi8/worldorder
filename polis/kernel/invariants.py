@@ -42,6 +42,8 @@ class WorldStateView(Protocol):
 
     def price_inflation_yoy_bp(self) -> int | None: ...
 
+    def interest_imbalance_cents(self) -> int: ...
+
     def population(self) -> int: ...
 
     def initial_population(self) -> int: ...
@@ -66,6 +68,9 @@ class NullWorldState:
 
     def price_inflation_yoy_bp(self) -> int | None:
         return None
+
+    def interest_imbalance_cents(self) -> int:
+        return 0
 
     def population(self) -> int:
         return 0
@@ -136,6 +141,15 @@ def _price(state: WorldStateView) -> Result:
     )
 
 
+def _interest(state: WorldStateView) -> Result:
+    actual = state.interest_imbalance_cents()
+    return (
+        Ok("INV-INTEREST")
+        if actual == 0
+        else Violation("INV-INTEREST", "0", str(actual), {}, Severity.HALT)
+    )
+
+
 def _population(state: WorldStateView) -> Result:
     initial = state.initial_population()
     population = state.population()
@@ -176,6 +190,7 @@ INVARIANT_REGISTRY: Final[dict[str, Invariant]] = {
     for item in (
         _FunctionInvariant("INV-MONEY", Severity.HALT, "tick", _money),
         _FunctionInvariant("INV-LEDGER", Severity.HALT, "tick", _ledger),
+        _FunctionInvariant("INV-INTEREST", Severity.HALT, "tick", _interest),
         _FunctionInvariant("INV-PRICE", Severity.HALT, "sim_day", _price),
         _FunctionInvariant("INV-POP", Severity.WARN, "sim_day", _population),
         _FunctionInvariant("INV-ENTROPY", Severity.WARN, "sim_day", _entropy),

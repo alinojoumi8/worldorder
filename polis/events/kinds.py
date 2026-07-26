@@ -818,6 +818,197 @@ ACCOUNT_OPENED = register_kind(
         "code",
     ),
 )
+ACCOUNT_CLOSED = register_kind(
+    8003,
+    "ACCOUNT_CLOSED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("account_id", "final_balance_cents", "reason"),
+)
+DEPOSIT_MADE = register_kind(
+    8004,
+    "DEPOSIT_MADE",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("owner_id", "bank_id", "cents", "source", "txn_id"),
+)
+WITHDRAWAL_MADE = register_kind(
+    8005,
+    "WITHDRAWAL_MADE",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("owner_id", "bank_id", "cents", "txn_id"),
+)
+WITHDRAWAL_REFUSED = register_kind(
+    8006,
+    "WITHDRAWAL_REFUSED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "owner_id",
+        "bank_id",
+        "requested_cents",
+        "available_cents",
+        "queue_position",
+    ),
+)
+LOAN_ORIGINATED = register_kind(
+    8010,
+    "LOAN_ORIGINATED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "loan_id",
+        "lender_id",
+        "borrower_id",
+        "principal_cents",
+        "annual_rate_bp",
+        "term_ticks",
+        "payment_cents",
+        "payments_n",
+        "collateral",
+        "credit_score_bp",
+        "txn_id",
+    ),
+)
+LOAN_APPLICATION_SUBMITTED = register_kind(
+    8011,
+    "LOAN_APPLICATION_SUBMITTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "application_id",
+        "borrower_id",
+        "lender_id",
+        "requested_cents",
+        "purpose",
+        "term_ticks",
+        "collateral",
+    ),
+)
+LOAN_APPLICATION_DECIDED = register_kind(
+    8012,
+    "LOAN_APPLICATION_DECIDED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "application_id",
+        "approved",
+        "credit_score_bp",
+        "score_components",
+        "offered_rate_bp",
+        "offered_cents",
+        "reason_codes",
+    ),
+)
+LOAN_PAYMENT_MADE = register_kind(
+    8013,
+    "LOAN_PAYMENT_MADE",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "loan_id",
+        "payment_no",
+        "principal_cents",
+        "interest_cents",
+        "outstanding_after_cents",
+        "txn_id",
+    ),
+)
+LOAN_PAYMENT_MISSED = register_kind(
+    8014,
+    "LOAN_PAYMENT_MISSED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("loan_id", "due_cents", "available_cents", "days_past_due"),
+)
+LOAN_DELINQUENT = register_kind(
+    8015,
+    "LOAN_DELINQUENT",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("loan_id", "days_past_due", "capitalised_interest_cents", "txn_id"),
+)
+LOAN_DEFAULTED = register_kind(
+    8016,
+    "LOAN_DEFAULTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("loan_id", "outstanding_cents", "trigger"),
+)
+LOAN_WRITTEN_OFF = register_kind(
+    8017,
+    "LOAN_WRITTEN_OFF",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "loan_id",
+        "written_off_cents",
+        "recovery_cents",
+        "loss_given_default_bp",
+        "txn_id",
+    ),
+)
+LOAN_REPAID = register_kind(
+    8018,
+    "LOAN_REPAID",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("loan_id", "total_interest_cents", "ticks_to_repay", "early"),
+)
+COLLATERAL_SEIZED = register_kind(
+    8019,
+    "COLLATERAL_SEIZED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "loan_id",
+        "asset_ref",
+        "appraised_cents",
+        "realised_cents",
+        "txn_id",
+    ),
+)
+INTEREST_ACCRUED = register_kind(
+    8020,
+    "INTEREST_ACCRUED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "loan_id",
+        "cents",
+        "annual_rate_bp",
+        "period_ticks",
+        "accrued_total_cents",
+    ),
+)
+DEPOSIT_INTEREST_PAID = register_kind(
+    8021,
+    "DEPOSIT_INTEREST_PAID",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("bank_id", "total_cents", "accounts_n", "rate_bp", "txn_id"),
+)
+POLICY_RATE_SET = register_kind(
+    8030,
+    "POLICY_RATE_SET",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "rate_bp",
+        "prev_rate_bp",
+        "setter",
+        "inflation_bp",
+        "output_gap_bp",
+    ),
+)
+RESERVE_REQUIREMENT_SET = register_kind(
+    8031,
+    "RESERVE_REQUIREMENT_SET",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("ratio_bp", "prev_bp", "setter"),
+)
 MONEY_ISSUED = register_kind(
     8032,
     "MONEY_ISSUED",
@@ -829,6 +1020,234 @@ MONEY_ISSUED = register_kind(
         "instrument",
         "purpose",
         "txn_id",
+    ),
+)
+MONEY_WITHDRAWN = register_kind(
+    8033,
+    "MONEY_WITHDRAWN",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "amount_cents",
+        "source_account_id",
+        "instrument",
+        "purpose",
+        "txn_id",
+    ),
+)
+OPEN_MARKET_OPERATION = register_kind(
+    8034,
+    "OPEN_MARKET_OPERATION",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "direction",
+        "amount_cents",
+        "counterparty_bank_id",
+        "symbol",
+        "qty",
+        "price_cents",
+        "txn_id",
+    ),
+)
+INTERBANK_LOAN = register_kind(
+    8040,
+    "INTERBANK_LOAN",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "loan_id",
+        "lender_bank_id",
+        "borrower_bank_id",
+        "cents",
+        "rate_bp",
+        "term_ticks",
+    ),
+)
+DISCOUNT_WINDOW_BORROWED = register_kind(
+    8041,
+    "DISCOUNT_WINDOW_BORROWED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("bank_id", "cents", "penalty_rate_bp", "reserve_shortfall_cents"),
+)
+INTERBANK_REFUSED = register_kind(
+    8042,
+    "INTERBANK_REFUSED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "borrower_bank_id",
+        "lender_bank_id",
+        "cents",
+        "reason",
+    ),
+)
+BANK_RATIOS_COMPUTED = register_kind(
+    8050,
+    "BANK_RATIOS_COMPUTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "bank_id",
+        "capital_cents",
+        "rwa_cents",
+        "capital_ratio_bp",
+        "reserve_ratio_bp",
+        "ldr_bp",
+        "npl_bp",
+    ),
+)
+BANK_UNDERCAPITALISED = register_kind(
+    8051,
+    "BANK_UNDERCAPITALISED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "bank_id",
+        "capital_ratio_bp",
+        "threshold_bp",
+        "new_lending_frozen",
+    ),
+)
+BANK_RUN_DETECTED = register_kind(
+    8052,
+    "BANK_RUN_DETECTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "bank_id",
+        "requested_cents",
+        "served_cents",
+        "refused_n",
+        "deposits_before_cents",
+        "deposits_after_cents",
+    ),
+)
+BANK_FAILED = register_kind(
+    8053,
+    "BANK_FAILED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "bank_id",
+        "capital_cents",
+        "deposits_cents",
+        "shortfall_cents",
+        "resolution",
+    ),
+)
+DEPOSIT_INSURANCE_PAID = register_kind(
+    8054,
+    "DEPOSIT_INSURANCE_PAID",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("bank_id", "covered_cents", "depositors_n", "txn_id"),
+)
+DEPOSIT_HAIRCUT = register_kind(
+    8055,
+    "DEPOSIT_HAIRCUT",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "bank_id",
+        "depositor_id",
+        "haircut_cents",
+        "recovery_bp",
+        "txn_id",
+    ),
+)
+BOND_ISSUED = register_kind(
+    8060,
+    "BOND_ISSUED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("symbol", "face_cents", "coupon_bp", "matures_tick", "auction_id"),
+)
+BOND_AUCTION_CLEARED = register_kind(
+    8061,
+    "BOND_AUCTION_CLEARED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "auction_id",
+        "offered_cents",
+        "bid_cents",
+        "clearing_yield_bp",
+        "allocations",
+        "txn_id",
+    ),
+)
+BOND_AUCTION_FAILED = register_kind(
+    8062,
+    "BOND_AUCTION_FAILED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("auction_id", "offered_cents", "bid_cents", "shortfall_cents"),
+)
+COUPON_PAID = register_kind(
+    8063,
+    "COUPON_PAID",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("symbol", "holders_n", "total_cents", "txn_id"),
+)
+BOND_MATURED = register_kind(
+    8064,
+    "BOND_MATURED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("symbol", "face_cents", "holders_n", "txn_id"),
+)
+TAX_ASSESSED = register_kind(
+    8070,
+    "TAX_ASSESSED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "taxpayer_id",
+        "tax_type",
+        "base_cents",
+        "rate_bp",
+        "assessed_cents",
+        "period",
+        "due_tick",
+    ),
+)
+TAX_COLLECTED = register_kind(
+    8071,
+    "TAX_COLLECTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("taxpayer_id", "tax_type", "cents", "txn_id"),
+)
+TAX_ARREARS = register_kind(
+    8072,
+    "TAX_ARREARS",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("taxpayer_id", "cents", "loan_id", "penalty_rate_bp"),
+)
+TRANSFER_PAID = register_kind(
+    8073,
+    "TRANSFER_PAID",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("recipient_id", "programme", "cents", "txn_id"),
+)
+GOV_BUDGET_CLOSED = register_kind(
+    8074,
+    "GOV_BUDGET_CLOSED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "period",
+        "receipts_cents",
+        "spending_cents",
+        "debt_service_cents",
+        "balance_cents",
+        "debt_cents",
+        "debt_to_gdp_bp",
     ),
 )
 SKILL_ACCRUED = register_kind(

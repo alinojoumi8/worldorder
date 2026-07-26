@@ -271,19 +271,34 @@ class GoodsSettings(FrozenModel):
     consumption: ConsumptionSettings = ConsumptionSettings()
 
 
+class TaylorRuleSettings(FrozenModel):
+    neutral_bp: int = 250
+    target_bp: int = 200
+    phi_pi_bp: int = 15_000
+    phi_y_bp: int = 5_000
+    bounds_bp: tuple[int, int] = (0, 4_000)
+
+
 class BankingSettings(FrozenModel):
     reserve_ratio_bp: int = 1_000
     capital_ratio_min_bp: int = 800
     capital_buffer_bp: int = 1_050
+    stress_score_bump_bp: int = 500
+    interbank_min_ratio_bp: int = 900
+    interbank_spread_bp: int = 50
+    interbank_concentration_bp: int = 2_500
     deposit_rate_bp: int = 50
     policy_rate_bp: int = 400
     discount_penalty_bp: int = 200
+    insurance_premium_bp: int = 5
     insurance_cap_months: int = 6
     fire_sale_bp: int = 7_000
+    policy_review_days: int = 42
     cb_backstop: bool = False
     resolution: Literal["assume", "liquidate"] = "assume"
     underwriting: Literal["scorecard", "llm"] = "scorecard"
     policy_rate_rule: Literal["taylor", "fixed", "political"] = "fixed"
+    taylor: TaylorRuleSettings = TaylorRuleSettings()
 
 
 class CreditSettings(FrozenModel):
@@ -297,6 +312,24 @@ class CreditSettings(FrozenModel):
     delinquency_days: int = 30
     default_days: int = 90
     writeoff_after_days: int = 180
+    delinquency_penalty_bp: int = 300
+    payment_interval_days: int = 30
+    max_term_days: dict[str, int] = {
+        "consumer": 1_080,
+        "mortgage": 9_000,
+        "corporate": 2_520,
+        "interbank": 1,
+        "sovereign": 3_600,
+        "tax_arrears": 1_080,
+    }
+    risk_weight_bp: dict[str, int] = {
+        "sovereign": 0,
+        "mortgage": 5_000,
+        "corporate": 10_000,
+        "consumer": 10_000,
+        "interbank": 2_000,
+        "tax_arrears": 10_000,
+    }
 
 
 class TaxSettings(FrozenModel):
@@ -322,6 +355,9 @@ class SpendSettings(FrozenModel):
 class TreasurySettings(FrozenModel):
     floor_cents: int = 0
     initial_spending_quarters: int = 1
+    bond_denomination_cents: int = 100_000
+    bond_terms_days: tuple[int, ...] = (360, 1_800, 3_600)
+    sovereign_spread_bp: int = 100
     tax: TaxSettings = TaxSettings()
     spend: SpendSettings = SpendSettings()
 

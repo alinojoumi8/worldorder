@@ -432,7 +432,9 @@ class Ledger:
 
     def deposit_imbalances(self) -> dict[str, int]:
         banks = sorted(
-            account.owner_id for account in self._accounts.values() if account.code == "dpl"
+            account.owner_id
+            for account in self._accounts.values()
+            if account.code == "dpl" and account.owner_id != "bk_cb"
         )
         return {
             bank_id: sum(
