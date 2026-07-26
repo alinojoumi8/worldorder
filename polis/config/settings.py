@@ -362,6 +362,86 @@ class TreasurySettings(FrozenModel):
     spend: SpendSettings = SpendSettings()
 
 
+class ExchangeSettings(FrozenModel):
+    enabled: bool = False
+    tick_size_cents: int = 1
+    commission_bp: int = 20
+    commission_floor_cents: int = 1
+    max_order_qty_bp: int = 1_000
+    band_bp: int = 2_000
+    halt_bp: int = 3_000
+    halt_ticks: int = 2
+    max_halts_per_session: int = 2
+    max_short_bp: int = 1_000
+    initial_margin_bp: int = 15_000
+    maintenance_margin_bp: int = 3_000
+    borrow_fee_bp: int = 200
+    ipo_min_age_days: int = 720
+    ipo_min_revenue_cents: int = 0
+    ipo_book_days: int = 3
+    underwriter_discount_bp: int = 500
+    underwriting_fee_bp: int = 500
+    listing_fee_cents: int = 10_000
+    lockup_days: int = 180
+    equity_risk_premium_bp: int = 500
+    bootstrap_listing_day: int | None = None
+    bootstrap_shares: int = 100_000
+    bootstrap_price_cents: int = 1_000
+
+    @model_validator(mode="after")
+    def validate_exchange(self) -> ExchangeSettings:
+        if self.tick_size_cents <= 0:
+            raise ValueError("exchange.tick_size_cents must be positive")
+        if not 0 <= self.commission_bp <= 10_000:
+            raise ValueError("exchange.commission_bp must be between 0 and 10,000")
+        if not 0 < self.max_order_qty_bp <= 10_000:
+            raise ValueError("exchange.max_order_qty_bp must be between 1 and 10,000")
+        if self.bootstrap_shares <= 0 or self.bootstrap_price_cents <= 0:
+            raise ValueError("exchange bootstrap shares and price must be positive")
+        return self
+
+
+class VentureSettings(FrozenModel):
+    enabled: bool = False
+    acceptance_fixture: bool = False
+    founder_shares: int = 1_000_000
+    option_pool_bp: int = 1_000
+    liq_pref_bp: int = 10_000
+    term_sheet_days: int = 14
+    fundraise_trigger_days: int = 180
+    max_open_pitches: int = 5
+    comparable_window: int = 8
+    seed_default_pre_money_cents: int = 100_000_000
+    valuation_llm_weight_bp: int = 5_000
+    management_fee_bp: int = 200
+    carry_bp: int = 2_000
+    hurdle_bp: int = 800
+    lp_unit_cents: int = 10_000
+    call_grace_days: int = 14
+    acquisition_premium_bp: int = 2_500
+    acquisition_threshold_bp: int = 5_001
+    drag_along_bp: int = 7_500
+    squeeze_out_bp: int = 9_000
+    redundancy_bp: int = 3_000
+    integration_synergy_bp: int = 0
+
+
+class BankruptcySettings(FrozenModel):
+    enabled: bool = False
+    grace_days: int = 14
+    insolvency_persist_days: int = 30
+    petition_min_cents: int = 100_000
+    stay_max_days: int = 60
+    liquidation_days: int = 5
+    unlisted_haircut_bp: int = 5_000
+    inventory_haircut_bp: int = 5_000
+    capital_haircut_bp: int = 4_000
+    admin_fee_bp: int = 300
+    wage_priority_days: int = 90
+    exempt_months: int = 1
+    credit_flag_years: int = 7
+
+
 class AblationSettings(FrozenModel):
     reflex_only: bool = False
     obfuscate_domain: bool = False
@@ -419,6 +499,9 @@ class Settings(FrozenModel):
     banking: BankingSettings = BankingSettings()
     credit: CreditSettings = CreditSettings()
     treasury: TreasurySettings = TreasurySettings()
+    exchange: ExchangeSettings = ExchangeSettings()
+    ventures: VentureSettings = VentureSettings()
+    bankruptcy: BankruptcySettings = BankruptcySettings()
     ablations: AblationSettings = AblationSettings()
     store: StoreSettings
     telemetry: TelemetrySettings = TelemetrySettings()
@@ -495,16 +578,34 @@ def load_settings(
         raise ConfigError(str(exc)) from exc
 
 
-_M2_CONFIG_FIELDS = frozenset(
-    {"economy", "labour", "firms", "goods", "banking", "credit", "treasury"}
+_ECONOMY_CONFIG_FIELDS = frozenset(
+    {
+        "economy",
+        "labour",
+        "firms",
+        "goods",
+        "banking",
+        "credit",
+        "treasury",
+        "exchange",
+        "ventures",
+        "bankruptcy",
+    }
 )
 
 
 def _config_payload(settings: Settings, *, by_alias: bool = False) -> dict[str, Any]:
     payload = settings.model_dump(mode="json", by_alias=by_alias)
     if not settings.economy.enabled:
-        for field in _M2_CONFIG_FIELDS:
+        for field in _ECONOMY_CONFIG_FIELDS:
             payload.pop(field, None)
+    else:
+        if not settings.exchange.enabled:
+            payload.pop("exchange", None)
+        if not settings.ventures.enabled:
+            payload.pop("ventures", None)
+        if not settings.bankruptcy.enabled:
+            payload.pop("bankruptcy", None)
     return payload
 
 

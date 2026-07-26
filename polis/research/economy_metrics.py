@@ -121,6 +121,39 @@ def _income_by_agent(
     return dict(result)
 
 
+def _price_fair_value_gap_bp(
+    settings: Settings,
+    economy: EconomyState,
+    *,
+    tick: int,
+    year_ticks: int,
+) -> int | None:
+    period_start = max(0, tick - year_ticks + 1)
+    dividends: dict[str, int] = defaultdict(int)
+    for dividend_tick, rows in economy.ventures.dividends_by_tick.items():
+        if period_start <= dividend_tick <= tick:
+            for firm_id, cents in rows.items():
+                dividends[firm_id] += cents
+    market_value = 0
+    fair_value = 0
+    discount_bp = economy.policy_rate_bp + settings.exchange.equity_risk_premium_bp
+    for security in economy.exchange.securities.values():
+        if (
+            security.status != "listed"
+            or security.security_class != "common"
+            or security.shares_outstanding <= 0
+        ):
+            continue
+        annual_dividend = dividends.get(security.issuer_firm_id, 0)
+        dividend_per_share = annual_dividend // security.shares_outstanding
+        per_share_fair = dividend_per_share * 10_000 // max(1, discount_bp)
+        market_value += security.last_price_cents * security.shares_outstanding
+        fair_value += per_share_fair * security.shares_outstanding
+    if market_value <= 0 or fair_value <= 0:
+        return None
+    return 10_000 * market_value // fair_value - 10_000
+
+
 def economy_metric_values(
     settings: Settings,
     population: AgentPopulation,
@@ -176,6 +209,9 @@ def economy_metric_values(
                 "policy_rate_bp": float(economy.policy_rate_bp),
             }
         )
+        market_index = economy.exchange.index_history_bp.get(tick)
+        if market_index is not None:
+            values["market_index"] = float(market_index)
 
     live_loans = [
         loan
@@ -287,6 +323,14 @@ def economy_metric_values(
             values.update({key: float(value) for key, value in shares.items()})
         if hhi is not None:
             values["hhi_sector"] = float(hhi)
+        fair_value_gap = _price_fair_value_gap_bp(
+            settings,
+            economy,
+            tick=tick,
+            year_ticks=year,
+        )
+        if fair_value_gap is not None:
+            values["price_fair_value_gap_bp"] = float(fair_value_gap)
         cpi_year_ago = economy.cpi_history_bp.get(tick - year)
         if cpi_year_ago is not None:
             values["inflation_yoy"] = float(10_000 * current_cpi // max(1, cpi_year_ago) - 10_000)
@@ -303,4 +347,9 @@ def economy_metric_values(
                 values["credit_to_gdp_bp"] = float(10_000 * outstanding // gdp_ttm)
                 if values["m1"] > 0:
                     values["velocity"] = float(10_000 * gdp_ttm // int(values["m1"]))
+    if _due(tick, year):
+        called = sum(fund.called_cents for fund in economy.ventures.funds.values())
+        distributed = sum(economy.ventures.fund_distributions_cents.values())
+        if called > 0:
+            values["venture_moic_bp"] = float(10_000 * distributed // called)
     return values

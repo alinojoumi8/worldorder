@@ -50,6 +50,12 @@ class WorldStateView(Protocol):
 
     def action_type_counts(self) -> Mapping[str, int]: ...
 
+    def order_invariant_failures(self) -> Mapping[str, object]: ...
+
+    def share_invariant_failures(self) -> Mapping[str, object]: ...
+
+    def cap_table_invariant_failures(self) -> Mapping[str, object]: ...
+
     def chain_ok(self) -> bool: ...
 
 
@@ -79,6 +85,15 @@ class NullWorldState:
         return 0
 
     def action_type_counts(self) -> Mapping[str, int]:
+        return {}
+
+    def order_invariant_failures(self) -> Mapping[str, object]:
+        return {}
+
+    def share_invariant_failures(self) -> Mapping[str, object]:
+        return {}
+
+    def cap_table_invariant_failures(self) -> Mapping[str, object]:
         return {}
 
     def chain_ok(self) -> bool:
@@ -185,6 +200,33 @@ def _chain(state: WorldStateView) -> Result:
     )
 
 
+def _capital_result(
+    invariant_id: str,
+    failures: Mapping[str, object],
+) -> Result:
+    if not failures:
+        return Ok(invariant_id)
+    return Violation(
+        invariant_id,
+        "no failures",
+        next(iter(failures)),
+        failures,
+        Severity.HALT,
+    )
+
+
+def _orders(state: WorldStateView) -> Result:
+    return _capital_result("INV-ORDERS", state.order_invariant_failures())
+
+
+def _shares(state: WorldStateView) -> Result:
+    return _capital_result("INV-SHARES", state.share_invariant_failures())
+
+
+def _cap_table(state: WorldStateView) -> Result:
+    return _capital_result("INV-CAPTABLE", state.cap_table_invariant_failures())
+
+
 INVARIANT_REGISTRY: Final[dict[str, Invariant]] = {
     item.id: item
     for item in (
@@ -194,6 +236,9 @@ INVARIANT_REGISTRY: Final[dict[str, Invariant]] = {
         _FunctionInvariant("INV-PRICE", Severity.HALT, "sim_day", _price),
         _FunctionInvariant("INV-POP", Severity.WARN, "sim_day", _population),
         _FunctionInvariant("INV-ENTROPY", Severity.WARN, "sim_day", _entropy),
+        _FunctionInvariant("INV-ORDERS", Severity.HALT, "tick", _orders),
+        _FunctionInvariant("INV-SHARES", Severity.HALT, "tick", _shares),
+        _FunctionInvariant("INV-CAPTABLE", Severity.HALT, "tick", _cap_table),
         _FunctionInvariant("INV-CHAIN", Severity.HALT, "checkpoint", _chain),
     )
 }

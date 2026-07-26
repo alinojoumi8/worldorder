@@ -96,6 +96,103 @@ class LoanParams(_Params):
     amount_cents: int = Field(ge=1)
 
 
+class SubmitOrderParams(_Params):
+    symbol: str
+    side: Literal["buy", "sell"]
+    order_type: Literal["limit", "market"] = "limit"
+    qty: int = Field(ge=1)
+    limit_price_cents: int | None = Field(default=None, ge=1)
+    flags: tuple[str, ...] = ()
+
+
+class CancelOrderParams(_Params):
+    order_id: str
+
+
+class ShortParams(_Params):
+    symbol: str
+    qty: int = Field(ge=1)
+    limit_price_cents: int = Field(ge=1)
+    collateral_cents: int = Field(ge=1)
+
+
+class IpoListParams(_Params):
+    firm_id: str
+    symbol: str
+    shares_offered: int = Field(ge=1)
+    primary_shares: int = Field(ge=0)
+    secondary_shares: int = Field(ge=0)
+    price_low_cents: int = Field(ge=1)
+    price_high_cents: int = Field(ge=1)
+    underwriter_bank_id: str
+
+
+class FoundCompanyParams(_Params):
+    name: str
+    sector: str
+    place_id: str
+    initial_capital_cents: int = Field(ge=1)
+    is_startup: bool = False
+    is_fund: bool = False
+    thesis: str = ""
+
+
+class PitchParams(_Params):
+    startup_id: str
+    investor_id: str
+    ask_cents: int = Field(ge=1)
+    pre_money_ask_cents: int = Field(ge=1)
+    deck_text: str
+
+
+class TermSheetParams(_Params):
+    startup_id: str
+    investor_id: str
+    pre_money_cents: int = Field(ge=1)
+    amount_cents: int = Field(ge=1)
+    security: Literal["common", "preferred"] = "preferred"
+    liq_pref_bp: int = Field(default=10_000, ge=0)
+    participating: bool = False
+    pro_rata: bool = True
+    board_seat: bool = False
+    option_pool_bp: int = Field(default=1_000, ge=0, lt=10_000)
+    anti_dilution: Literal["none", "broad_weighted", "full_ratchet"] = "broad_weighted"
+
+
+class InvestParams(_Params):
+    target_id: str
+    cents: int = Field(ge=1)
+    instrument: Literal["round", "lp_commitment", "bond"] = "round"
+    term_sheet_id: str | None = None
+
+
+class AcquireParams(_Params):
+    acquirer_id: str
+    target_id: str
+    offer_cents: int = Field(ge=1)
+    consideration: Literal["cash", "stock", "mixed"] = "cash"
+    stock_ratio_bp: int = Field(default=0, ge=0, le=10_000)
+    integration_mode: Literal["absorb", "standalone", "asset_sale"] = "absorb"
+    financing: str = "cash"
+
+
+class SellStakeParams(_Params):
+    firm_id: str
+    qty: int = Field(ge=1)
+    price_cents: int | None = Field(default=None, ge=1)
+    deal_id: str | None = None
+
+
+class BankruptcyParams(_Params):
+    entity_id: str | None = None
+    reason: str = "voluntary"
+
+
+class DividendParams(_Params):
+    firm_id: str
+    total_cents: int = Field(ge=1)
+
+
 _PARAM_MODELS: dict[ActionType, type[_Params]] = {
     ActionType.MOVE_TO: MoveParams,
     ActionType.IDLE: EmptyParams,
@@ -121,6 +218,18 @@ _PARAM_MODELS: dict[ActionType, type[_Params]] = {
     ActionType.APPLY_FOR_LOAN: LoanParams,
     ActionType.REPAY_LOAN: LoanParams,
     ActionType.DEFAULT: LoanParams,
+    ActionType.SUBMIT_ORDER: SubmitOrderParams,
+    ActionType.CANCEL_ORDER: CancelOrderParams,
+    ActionType.SHORT: ShortParams,
+    ActionType.IPO_LIST: IpoListParams,
+    ActionType.FOUND_COMPANY: FoundCompanyParams,
+    ActionType.PITCH: PitchParams,
+    ActionType.ISSUE_TERM_SHEET: TermSheetParams,
+    ActionType.INVEST: InvestParams,
+    ActionType.ACQUIRE: AcquireParams,
+    ActionType.SELL_STAKE: SellStakeParams,
+    ActionType.FILE_BANKRUPTCY: BankruptcyParams,
+    ActionType.DECLARE_DIVIDEND: DividendParams,
     ActionType.NULL_ACTION: EmptyParams,
 }
 
@@ -145,6 +254,18 @@ _ECONOMIC_ACTIONS = frozenset(
         ActionType.APPLY_FOR_LOAN,
         ActionType.REPAY_LOAN,
         ActionType.DEFAULT,
+        ActionType.SUBMIT_ORDER,
+        ActionType.CANCEL_ORDER,
+        ActionType.SHORT,
+        ActionType.IPO_LIST,
+        ActionType.FOUND_COMPANY,
+        ActionType.PITCH,
+        ActionType.ISSUE_TERM_SHEET,
+        ActionType.INVEST,
+        ActionType.ACQUIRE,
+        ActionType.SELL_STAKE,
+        ActionType.FILE_BANKRUPTCY,
+        ActionType.DECLARE_DIVIDEND,
     }
 )
 

@@ -69,7 +69,7 @@ async def test_observatory_is_read_only_fresh_and_marks_future_views_unavailable
 
         assert health.status_code == 200
         assert health.json()["database"]["role"] == "reader"
-        assert health.json()["database"]["alembic_head"] == "0011_loan_close_tick"
+        assert health.json()["database"]["alembic_head"] == "0012_m3_capital"
         assert runs.status_code == 200
         assert runs.json()["as_of_seq"] > 0
         assert "engine" in runs.json()
@@ -135,6 +135,53 @@ async def test_observatory_serves_m2_economy_metrics_for_economy_runs() -> None:
         assert unemployment.json()["points"]
         assert money.status_code == 200
         assert money.json()["points"][-1]["value"] > 0
+    finally:
+        engine_db = await Database.open(settings.store, role="engine")
+        await engine_db.execute("DELETE FROM runs WHERE run_id=%s", (run_id,))
+        await engine_db.close()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_observatory_serves_m3_capital_projections() -> None:
+    settings = load_settings(
+        Path("configs/m3-smoke.yaml"),
+        overrides={"run": {"name": "observatory-m3-test"}},
+    )
+    run_id = run_id_for(settings)
+    engine_db = await Database.open(settings.store, role="engine")
+    await engine_db.execute("DELETE FROM runs WHERE run_id=%s", (run_id,))
+    await engine_db.close()
+    try:
+        await run_persistent(settings)
+        app = create_app(settings)
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+            ) as client:
+                catalogue = await client.get(f"/api/v1/runs/{run_id}/metrics/catalogue")
+                index = await client.get(
+                    f"/api/v1/runs/{run_id}/metrics",
+                    params={"metric": "market_index"},
+                )
+                securities = await client.get(f"/api/v1/runs/{run_id}/market/securities")
+                trades = await client.get(f"/api/v1/runs/{run_id}/market/trades")
+                startups = await client.get(f"/api/v1/runs/{run_id}/capital/startups")
+                acquisitions = await client.get(f"/api/v1/runs/{run_id}/capital/acquisitions")
+                bankruptcies = await client.get(f"/api/v1/runs/{run_id}/capital/bankruptcies")
+
+        assert catalogue.status_code == 200
+        assert catalogue.json()["capital_available"]
+        assert index.status_code == 200
+        assert index.json()["points"]
+        assert len(securities.json()["items"]) == 1
+        assert len(trades.json()["items"]) == 1
+        assert len(startups.json()["items"]) == 2
+        assert len(acquisitions.json()["items"]) == 1
+        assert len(bankruptcies.json()["items"]) == 1
+        assert bankruptcies.json()["items"][0]["status"] == "discharged"
     finally:
         engine_db = await Database.open(settings.store, role="engine")
         await engine_db.execute("DELETE FROM runs WHERE run_id=%s", (run_id,))

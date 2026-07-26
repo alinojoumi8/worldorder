@@ -248,6 +248,29 @@ METRICS: Final[dict[str, MetricDefinition]] = {
             research_questions=("A6",),
         ),
         _definition(
+            "market_index",
+            "index_bp",
+            "Divisor-adjusted capitalisation-weighted index of listed common equity, "
+            "with the first valid observation based at 10,000.",
+            cadence="sim_day",
+            research_questions=("A3", "A6"),
+        ),
+        _definition(
+            "price_fair_value_gap_bp",
+            "bp",
+            "Capitalisation-weighted listed-equity price divided by dividend-discount "
+            "fair value, less one, in basis points; omitted when fair value is undefined.",
+            cadence="sim_quarter",
+            research_questions=("A3",),
+        ),
+        _definition(
+            "venture_moic_bp",
+            "bp",
+            "10,000 times cumulative fund distributions divided by cumulative LP capital called.",
+            cadence="sim_year",
+            research_questions=("A6",),
+        ),
+        _definition(
             "inventory_value_cents",
             "cents",
             "Firm inventory quantity valued at its current integer unit cost; retained "
@@ -359,10 +382,19 @@ UNAVAILABLE_M1_METRICS: Final = frozenset(
         "lending_rate_bp",
         "term_spread_bp",
         "market_index",
+        "price_fair_value_gap_bp",
+        "venture_moic_bp",
     }
 )
-FUTURE_METRICS: Final = frozenset({"market_index"})
-M2_METRICS: Final = UNAVAILABLE_M1_METRICS - FUTURE_METRICS
+M3_METRICS: Final = frozenset(
+    {
+        "market_index",
+        "price_fair_value_gap_bp",
+        "venture_moic_bp",
+    }
+)
+FUTURE_METRICS: Final[frozenset[str]] = frozenset()
+M2_METRICS: Final = UNAVAILABLE_M1_METRICS - M3_METRICS
 
 
 def catalogue_manifest() -> dict[str, str]:

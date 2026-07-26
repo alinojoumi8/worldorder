@@ -827,6 +827,11 @@ class LabourMarket:
         events: list[Event] = []
         treasury = "dep:gv_treasury@bk_cb"
         for firm in sorted(self.economy.firms.values(), key=lambda row: row.firm_id):
+            if any(
+                case.entity_id == firm.firm_id and case.status == "open"
+                for case in self.economy.ventures.bankruptcies.values()
+            ):
+                continue
             employments = [
                 row
                 for row in self.economy.employments.values()

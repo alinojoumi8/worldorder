@@ -203,6 +203,56 @@ def create_economy(
             )
         )
 
+    if settings.exchange.enabled:
+        broker_id = "fm_broker"
+        broker_bank_id = commercial_bank_ids[0]
+        broker_place = _firm_place(world, "finance", firm_count)
+        broker_founder = adult_ids[firm_count % len(adult_ids)]
+        broker_deposit = ledger.open_account(
+            "dep",
+            broker_id,
+            "firm",
+            bank_id=broker_bank_id,
+            tick=0,
+        )
+        firms[broker_id] = FirmState(
+            broker_id,
+            "Polis Securities Broker",
+            "finance",
+            broker_place.place_id,
+            broker_founder,
+            broker_deposit,
+            10_000,
+        )
+        events.append(
+            emit(
+                NewEvent(
+                    FIRM_FOUNDED,
+                    {
+                        "firm_id": broker_id,
+                        "founder_id": broker_founder,
+                        "name": firms[broker_id].name,
+                        "sector": "finance",
+                        "place_id": broker_place.place_id,
+                        "initial_capital_cents": 0,
+                        "ledger_account_id": broker_deposit,
+                        "is_startup": False,
+                        "registration_fee_cents": 0,
+                    },
+                    actor_id=broker_founder,
+                    subject_ids=(broker_id,),
+                )
+            )
+        )
+        for bank_id in commercial_bank_ids:
+            ledger.open_account(
+                "dep",
+                bank_id,
+                "bank",
+                bank_id=bank_id,
+                tick=0,
+            )
+
     agent_deposits: dict[str, str] = {}
     for ordinal, agent in enumerate(population):
         bank_id = commercial_bank_ids[ordinal % len(commercial_bank_ids)]
