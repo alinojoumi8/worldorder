@@ -1,16 +1,16 @@
 # Graph Report - worldorder  (2026-07-26)
 
 ## Corpus Check
-- 251 files · ~577,909 words
+- 261 files · ~588,808 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3124 nodes · 8328 edges · 200 communities (189 shown, 11 thin omitted)
-- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 1061 edges (avg confidence: 0.53)
+- 3192 nodes · 8606 edges · 185 communities (174 shown, 11 thin omitted)
+- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 1061 edges (avg confidence: 0.53)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `fd2e312a`
+- Built from commit: `e2fc5762`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -39,7 +39,6 @@
 - Community 21
 - Community 22
 - Community 23
-- Community 24
 - Community 25
 - Community 26
 - invariants.py
@@ -50,8 +49,6 @@
 - Community 32
 - Community 33
 - EventRepository
-- operations.py
-- Community 36
 - Community 37
 - Community 38
 - Community 39
@@ -72,7 +69,6 @@
 - C23 — Observatory: live map, agent inspector, causal explorer, run comparison
 - POLIS — Product Requirements Document
 - POLIS — Agent Specification
-- kinds.py
 - C25 — Scenario / shock DSL, signed researcher injection
 - C08 — Memory stream, retrieval, reflection, embeddings
 - C16 — Communication, social graph, social media, feed algorithms
@@ -85,8 +81,6 @@
 - POLIS implementation notes
 - 1.6 Worked examples — the legs
 - Components
-- fiscal.py
-- NullWorldState
 - EventReader
 - C02 — Event log, kind registry, hash chain
 - C03 — Postgres schema, migrations, repositories, partitioning
@@ -105,7 +99,6 @@
 - 6. Exchange
 - 7. Banking and credit
 - 8. Law and crime
-- test_ledger_post.py
 - POLIS — World Specification
 - 3. Labour market
 - 4. Firms and production
@@ -121,14 +114,12 @@
 - Product
 - useUrlParam
 - POLIS — Society Specification
-- test_labour_firms.py
 - POLIS — Implementation Chunks
 - 5. Belief dynamics
 - 9. Demographics
 - 2. Identity, registration, and lifecycle
 - POLIS — Model Routing, Caching, and Cost Control
 - POLIS — Research and Observability
-- hashing.py
 - 10. Bankruptcy
 - 0. Scope, ownership, and conventions
 - 6. Politics
@@ -181,33 +172,27 @@
 - 11. Rendering contract
 - ExchangeEngine
 - Ledger
-- engine.py
 - load_settings
-- api.py
 - Scheduler
 - rebuild.py
 - EconomyWorldState
 - stream.py
-- partition.py
-- EventQuery
 - MechanicalPolicy
 - test_exchange_properties.py
 - test_stub.py
-- RuntimeOverlay
-- test_ventures.py
 - __init__.py
 
 ## God Nodes (most connected - your core abstractions)
-1. `Event` - 177 edges
-2. `Settings` - 136 edges
+1. `Event` - 180 edges
+2. `Settings` - 139 edges
 3. `NewEvent` - 126 edges
 4. `RngRegistry` - 125 edges
-5. `AgentPopulation` - 116 edges
+5. `AgentPopulation` - 118 edges
 6. `World` - 110 edges
 7. `Action` - 108 edges
-8. `load_settings()` - 83 edges
-9. `ExchangeEngine` - 69 edges
-10. `Leg` - 69 edges
+8. `load_settings()` - 87 edges
+9. `VentureEngine` - 78 edges
+10. `Leg` - 70 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `test_production_carry_preserves_fractional_output()` --calls--> `production_output_micro()`  [INFERRED]
@@ -216,95 +201,91 @@
   tests/unit/config/test_canon.py → polis/config/errors.py
 - `test_unknown_key_is_rejected()` --indirect_call--> `ConfigError`  [INFERRED]
   tests/unit/config/test_settings.py → polis/config/errors.py
-- `test_genesis_shares_must_sum_exactly()` --calls--> `EconomySettings`  [EXTRACTED]
+- `test_economy_is_disabled_by_default_for_frozen_m1_runs()` --calls--> `load_settings()`  [EXTRACTED]
   tests/unit/config/test_economy_settings.py → polis/config/settings.py
-- `test_post_rejects_unknown_closed_overdrawn_and_wrong_tick()` --indirect_call--> `LedgerError`  [INFERRED]
-  tests/unit/economy/test_ledger_post.py → polis/economy/ledger.py
+- `PriceState` --uses--> `Leg`  [INFERRED]
+  tests/unit/economy/test_invariants.py → polis/economy/ledger.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (200 total, 11 thin omitted)
+## Communities (185 total, 11 thin omitted)
 
 ### Community 0 - "Community 0"
-Cohesion: 0.36
-Nodes (10): build(), configured(), order(), test_call_auction_cancels_newer_self_cross(), test_call_auction_obeys_price_time_priority_and_prevents_self_trade(), test_exchange_reserves_settles_and_releases_exactly(), test_margin_deadline_forces_market_cover_at_next_session(), test_uncross_prefers_volume_then_imbalance_proximity_and_low_price() (+2 more)
+Cohesion: 0.16
+Nodes (19): ClaimState, FundingRoundState, acquisition_offer_cents(), integrated_productivity_bp(), _monotone_pro_rata(), priority_waterfall(), Allocate acquisition/liquidation proceeds exactly and deterministically., Use capped highest averages so a larger pool never reduces a recovery. (+11 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.10
-Nodes (50): ConfigError, ProfileNotFound, A requested configuration profile does not exist., Configuration cannot be loaded or validated., AblationSettings, BankingSettings, BankruptcySettings, CacheSettings (+42 more)
+Cohesion: 0.06
+Nodes (59): ConfigError, MechanismError, ProfileNotFound, A requested configuration profile does not exist., A mechanism registration is invalid., A runtime policy overlay violates temporal rules., Configuration cannot be loaded or validated., RuntimeOverlayError (+51 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.21
-Nodes (8): BlobStore, Checkpoint, Checkpointable, CheckpointManager, Any, Protocol, UUID, test_checkpoint_roundtrip_restores_component_state()
+Cohesion: 0.39
+Nodes (3): BudgetGuard, Decimal, _Usage
 
 ### Community 3 - "Community 3"
 Cohesion: 0.08
 Nodes (20): buildingSeeds, choroplethPalettes, choroplethRanges, districtAgentPositions, districtPolygons, layerOptions, navItems, PrototypeApp() (+12 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.17
-Nodes (24): dtype, PlaceType, generate_agents(), catalogue_manifest(), PopulationSettings, WorldSettings, compute_world_hash(), int8 (+16 more)
+Cohesion: 0.09
+Nodes (43): dtype, PlaceType, Resolution, resolve_actions(), _age(), generate_agents(), PopulationSettings, WorldSettings (+35 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.11
-Nodes (29): F, MechanismError, A mechanism registration is invalid., active_mechanisms(), mechanism(), MechanismSpec, markup_price(), update_productivity_bp() (+21 more)
+Nodes (22): F, mechanism(), add_inventory(), FirmEngine, markup_price(), Emit, split_labour_by_revenue(), update_productivity_bp() (+14 more)
 
 ### Community 6 - "Community 6"
-Cohesion: 0.09
-Nodes (9): _cap_table(), _capital_result(), _FunctionInvariant, Invariant, _orders(), Protocol, Result, _shares() (+1 more)
+Cohesion: 0.29
+Nodes (4): LedgerRepository, Any, UUID, Exclusive persistence path for ledger accounts and entries.
 
 ### Community 7 - "Community 7"
-Cohesion: 0.21
-Nodes (23): exists, Option, gateway(), main(), observe(), _parse_overrides(), Path, UUID (+15 more)
+Cohesion: 0.20
+Nodes (24): exists, Option, gateway(), main(), observe(), _parse_overrides(), Path, UUID (+16 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.20
-Nodes (15): RedisEphemeralPublisher, benchmark(), client_process(), drain_client(), main(), Any, Path, UUID (+7 more)
-
-### Community 9 - "Community 9"
-Cohesion: 0.15
-Nodes (19): ActionOrigin, GateResult, make_action(), null_action(), Any, ActionBudget, Any, _reject() (+11 more)
+Cohesion: 0.44
+Nodes (10): benchmark(), client_process(), drain_client(), main(), Any, Path, UUID, run_clients() (+2 more)
 
 ### Community 10 - "Community 10"
 Cohesion: 0.06
 Nodes (31): additionalProperties, properties, required, type, additionalProperties, maximum, minimum, type (+23 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.12
-Nodes (18): HealthReport, Provider, ProviderError, ProviderPermanent, ProviderRateLimited, ProviderTimeout, ProviderTransient, Decimal (+10 more)
+Cohesion: 0.14
+Nodes (19): Exception, PolisError, Base exception for expected POLIS failures., HealthReport, ProviderError, ProviderPermanent, ProviderRateLimited, ProviderTimeout (+11 more)
 
 ### Community 12 - "Community 12"
-Cohesion: 0.13
-Nodes (50): MonkeyPatch, BankingEngine, WithdrawalRequest, apply_pending_policy(), CentralContext, _credit_context(), discount_window(), _originate_interbank() (+42 more)
+Cohesion: 0.10
+Nodes (68): ActionOrigin, MonkeyPatch, make_action(), Any, BankingEngine, WithdrawalRequest, apply_pending_policy(), CentralContext (+60 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.17
-Nodes (38): Action, ActionType, StrEnum, AccountParams, AcquireParams, ApplyForJobParams, BankruptcyParams, BuyGoodParams (+30 more)
+Cohesion: 0.12
+Nodes (48): Action, ActionType, null_action(), StrEnum, AccountParams, AcquireParams, ActionBudget, ApplyForJobParams (+40 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.11
-Nodes (19): EducationLevel, EmploymentStatus, _age(), _education(), _employment(), _reflex(), _traits(), Agent state and cognition. (+11 more)
+Cohesion: 0.13
+Nodes (21): EducationLevel, EmploymentStatus, reflect_decide(), _candidates(), reflex_decide(), _education(), _employment(), _reflex() (+13 more)
 
 ### Community 15 - "Community 15"
 Cohesion: 0.07
 Nodes (26): lucide-react, react, react-dom, @types/react, @types/react-dom, typescript, vite, @vitejs/plugin-react (+18 more)
 
 ### Community 16 - "Community 16"
-Cohesion: 0.16
-Nodes (13): Admission, BudgetGuard, Decimal, StrEnum, _Usage, CallRequest, CallResult, dataclass_replace() (+5 more)
+Cohesion: 0.13
+Nodes (23): CacheSettings, Admission, StrEnum, Provider-neutral LLM routing., Purpose, StrEnum, CallRequest, CallResult (+15 more)
 
 ### Community 17 - "Community 17"
-Cohesion: 0.11
-Nodes (30): IntEnum, Validation, Deliberation, Reflection, EphemeralSink, EventLog, EventSink, MemoryEventSink (+22 more)
+Cohesion: 0.14
+Nodes (7): TickContext, _call_payload(), LivingCityEngine, Any, sha256_text(), MetricCollector, Any
 
 ### Community 18 - "Community 18"
 Cohesion: 0.18
-Nodes (18): Exception, PolisError, Base exception for expected POLIS failures., cache_key(), CacheMissInReplay, CacheRecord, CacheRenderMismatch, CacheVersionMismatch (+10 more)
+Nodes (15): cache_key(), CacheMissInReplay, CacheRecord, CacheRenderMismatch, CacheVersionMismatch, CompletionCache, Any, Cached content was rendered from different prompt text. (+7 more)
 
 ### Community 19 - "Community 19"
 Cohesion: 0.10
-Nodes (29): FastAPI, mechanism_manifest(), repo_git_sha(), datetime, Return wall time for operational metadata, never simulation state., utc_now_naive(), create_app(), _freshness() (+21 more)
+Nodes (21): FastAPI, datetime, Return wall time for operational metadata, never simulation state., utc_now_naive(), _freshness(), _json_row(), Any, UUID (+13 more)
 
 ### Community 20 - "Community 20"
 Cohesion: 0.13
@@ -319,60 +300,48 @@ Cohesion: 0.09
 Nodes (21): DOM, DOM.Iterable, ES2022, src, compilerOptions, allowJs, allowSyntheticDefaultImports, esModuleInterop (+13 more)
 
 ### Community 23 - "Community 23"
-Cohesion: 0.09
-Nodes (21): AsyncConnectionPool, StoreSettings, Database, HealthReport, MigrationMismatch, Any, AsyncConnection, The database migration head does not match the application. (+13 more)
-
-### Community 24 - "Community 24"
 Cohesion: 0.21
-Nodes (14): ask_priority(), bid_priority(), call_auction(), continuous_matches(), crosses(), Fill, uncross(), HoldingState (+6 more)
+Nodes (9): HealthReport, A reader or unauthorized module attempted a write., WriteForbidden, datetime, Decimal, UUID, RunRecord, RunRepository (+1 more)
 
 ### Community 25 - "Community 25"
-Cohesion: 0.26
-Nodes (15): calibrate(), main(), percentile(), ProgressSink, Any, Path, sample_rate(), write_json() (+7 more)
+Cohesion: 0.10
+Nodes (44): render_prompt(), Observation, _annual_difference_sign_changes(), _annual_means(), _annual_terminal_values(), evaluate_v1(), evaluate_v2(), evaluate_v3() (+36 more)
 
 ### Community 26 - "Community 26"
-Cohesion: 0.40
-Nodes (4): Delivered, Engineering evidence, Gates still open, M3 Capital acceptance
+Cohesion: 0.33
+Nodes (5): Delivered, Engineering evidence, Gates still open, M3 Capital acceptance, Stage 3 diagnostic
 
 ### Community 27 - "invariants.py"
-Cohesion: 0.18
-Nodes (23): check_ledger(), check_money(), EconomyView, issued_base_money_cents(), m0_cents(), m1_cents(), Protocol, Result (+15 more)
+Cohesion: 0.06
+Nodes (36): check_ledger(), check_money(), EconomyView, issued_base_money_cents(), m0_cents(), m1_cents(), Protocol, Result (+28 more)
 
 ### Community 28 - "Community 28"
-Cohesion: 0.14
-Nodes (8): Emit, Emit, Emit, LabourMarket, Emit, _skill_bp(), skill_value_bp(), NewEvent
+Cohesion: 0.10
+Nodes (29): Emit, discount_window(), _originate_interbank(), Emit, set_policy_rate(), Emit, assess_taxes(), close_budget() (+21 more)
 
 ### Community 29 - "goods.py"
 Cohesion: 0.17
-Nodes (27): BudgetPlan, _combine_legs(), cpi_bp(), _deposit_account(), _district_distance(), GoodsContext, _index_for(), load_skus() (+19 more)
+Nodes (26): create_economy(), _firm_place(), GenesisResult, UUID, _weighted_ids(), _combine_legs(), cpi_bp(), _deposit_account() (+18 more)
 
 ### Community 30 - "Community 30"
-Cohesion: 0.26
-Nodes (6): LocalBlobStore, open_blobs(), Path, Path, test_blob_key_cannot_escape_root(), test_local_blob_round_trip()
+Cohesion: 0.13
+Nodes (18): LocalBlobStore, open_blobs(), Path, MigrationMismatch, Persistence layer failure., The database migration head does not match the application., StoreError, partition_name() (+10 more)
 
 ### Community 31 - "Community 31"
 Cohesion: 0.18
 Nodes (6): UUID, Repository, CheckpointRepository, Any, datetime, MetricRepository
 
 ### Community 32 - "Community 32"
-Cohesion: 0.12
-Nodes (24): K, canonical_bytes(), canonical_json(), Any, T, round6(), round_floats(), sha256_hex() (+16 more)
+Cohesion: 0.05
+Nodes (60): K, canonical_bytes(), canonical_json(), Any, T, round6(), round_floats(), sha256_hex() (+52 more)
 
 ### Community 33 - "Community 33"
-Cohesion: 0.09
-Nodes (27): _jaccard_distance(), route_cognition(), RoutingResult, SalienceScore, _score(), Settings, GoodsEngine, labour_force() (+19 more)
+Cohesion: 0.06
+Nodes (18): AgentPopulation, GoodsEngine, labour_force(), EconomyState, _due(), economy_metric_values(), _gini_bp(), _hhi_sector_bp() (+10 more)
 
 ### Community 34 - "EventRepository"
 Cohesion: 0.19
-Nodes (9): EventQuery, UUID, rebuild(), RebuildReport, snapshot_projections(), _event(), EventRepository, Any (+1 more)
-
-### Community 35 - "operations.py"
-Cohesion: 0.31
-Nodes (15): ChainReport, verify_run(), Persistence layer failure., StoreError, write_living_city_projections(), load_run_settings(), UUID, rebuild_stored_run() (+7 more)
-
-### Community 36 - "Community 36"
-Cohesion: 0.13
-Nodes (14): A runtime policy overlay violates temporal rules., RuntimeOverlayError, Enactment, LayeredOverlay, Any, Protocol, Settings-backed overlay with deterministic tick-keyed enactments., RuntimeConfig (+6 more)
+Nodes (14): write_living_city_projections(), UUID, rebuild_stored_run(), replay_stored_run(), ReplayReport, resume_stored_run(), ResumeReport, verify_stored_run() (+6 more)
 
 ### Community 37 - "Community 37"
 Cohesion: 0.06
@@ -387,8 +356,8 @@ Cohesion: 0.20
 Nodes (9): vite.config.ts, compilerOptions, allowImportingTsExtensions, composite, module, moduleResolution, noEmit, skipLibCheck (+1 more)
 
 ### Community 41 - "Community 41"
-Cohesion: 0.11
-Nodes (22): allocate(), Split an integer pool exactly with the deterministic largest-remainder rule., AcquisitionState, BankruptcyCaseState, CapTableState, ClaimState, FundingRoundState, PitchState (+14 more)
+Cohesion: 0.12
+Nodes (11): AcquisitionState, BankruptcyCaseState, CapTableState, PitchState, StartupState, TermSheetState, VCFundState, _coalesce() (+3 more)
 
 ### Community 42 - "Community 42"
 Cohesion: 0.60
@@ -399,8 +368,8 @@ Cohesion: 0.83
 Nodes (3): main(), Path, violations()
 
 ### Community 53 - "Community 53"
-Cohesion: 0.11
-Nodes (12): AccountCode, Deterministic economic institutions for POLIS., Account, account_id(), Entry, Ledger, LedgerError, LedgerRepository (+4 more)
+Cohesion: 0.09
+Nodes (25): AccountCode, Deterministic economic institutions for POLIS., Account, account_id(), CommitmentLedger, Entry, Ledger, LedgerError (+17 more)
 
 ### Community 63 - "POLIS — Data Model"
 Cohesion: 0.07
@@ -421,10 +390,6 @@ Nodes (27): 10. Key product decisions (locked), 11. Risks and open questions, 12
 ### Community 67 - "POLIS — Agent Specification"
 Cohesion: 0.07
 Nodes (27): 10. Reflect mode, 11. Action validation (PHASE 4), 12.1 Birth, 12.2 Ageing and stages, 12.3 Death, 12. Lifecycle, 13. Prompt asset discipline, 14. M1 calibration decisions (+19 more)
-
-### Community 68 - "kinds.py"
-Cohesion: 0.12
-Nodes (24): is_ephemeral(), KindError, KindRange, KindSpec, Persistence, Any, StrEnum, range_for() (+16 more)
 
 ### Community 69 - "C25 — Scenario / shock DSL, signed researcher injection"
 Cohesion: 0.08
@@ -474,24 +439,16 @@ Nodes (21): 1.1 Units and the fundamental representation, 1.2 Rule L1 — the le
 Cohesion: 0.10
 Nodes (19): Buttons, Colors, Components, Design System: POLIS, Do:, Do's and Don'ts, Don't:, Elevation & Depth (+11 more)
 
-### Community 81 - "fiscal.py"
-Cohesion: 0.28
-Nodes (20): assess_taxes(), close_budget(), collect_taxes(), convert_arrears(), finance_deficit(), fiscal_step(), FiscalContext, government_transfer_legs() (+12 more)
-
-### Community 82 - "NullWorldState"
-Cohesion: 0.13
-Nodes (4): _money(), NullWorldState, _population(), PriceState
-
 ### Community 83 - "EventReader"
-Cohesion: 0.13
-Nodes (7): FirmEngine, Emit, split_labour_by_revenue(), Append-only event log contracts., MemoryEventReader, UUID, Event
+Cohesion: 0.12
+Nodes (20): ancestors(), CausalNode, descendants(), explain(), has_ancestor_in_range(), Any, UUID, EventQuery (+12 more)
 
 ### Community 84 - "C02 — Event log, kind registry, hash chain"
 Cohesion: 0.11
 Nodes (17): 10. Configuration keys, 11. Acceptance criteria, 12. Tests to write, 13. Definition of done, 14. Traps, 1. Context, 2. Required reading, 3. Scope — in (+9 more)
 
 ### Community 85 - "C03 — Postgres schema, migrations, repositories, partitioning"
-Cohesion: 0.12
+Cohesion: 0.11
 Nodes (17): 10. Configuration keys, 11. Acceptance criteria, 12. Tests to write, 13. Definition of done, 14. Traps, 1. Context, 2. Required reading, 3. Scope — in (+9 more)
 
 ### Community 86 - "C04 — Clock, tick loop, RNG registry, scheduler, invariants, checkpoints"
@@ -511,7 +468,7 @@ Cohesion: 0.13
 Nodes (15): 10. Configuration keys, 11. Acceptance criteria, 12. Tests to write, 13. Definition of done, 14. Traps, 1. Context, 2. Required reading, 3. Scope — in (+7 more)
 
 ### Community 90 - "C15 — Startups, VC, funding rounds, M&A, bankruptcy"
-Cohesion: 0.12
+Cohesion: 0.13
 Nodes (15): 10. Configuration keys, 11. Acceptance criteria, 12. Tests to write, 13. Definition of done, 14. Traps, 1. Context, 2. Required reading, 3. Scope — in (+7 more)
 
 ### Community 91 - "C01 — Repo scaffold, config system, CLI"
@@ -519,7 +476,7 @@ Cohesion: 0.13
 Nodes (15): 10. Configuration keys, 11. Acceptance criteria, 12. Tests to write, 13. Definition of done, 14. Traps, 1. Context, 2. Required reading, 3. Scope — in (+7 more)
 
 ### Community 92 - "C06 — Grid generation, places, pathfinding, movement, housing"
-Cohesion: 0.13
+Cohesion: 0.12
 Nodes (15): 10. Configuration keys, 11. Acceptance criteria, 12. Tests to write, 13. Definition of done, 14. Traps, 1. Context, 2. Required reading, 3. Scope — in (+7 more)
 
 ### Community 93 - "C11 — Ledger, labour market, firms and production"
@@ -527,7 +484,7 @@ Cohesion: 0.13
 Nodes (15): 10. Configuration keys, 11. Acceptance criteria, 12. Tests to write, 13. Definition of done, 14. Traps, 1. Context, 2. Required reading, 3. Scope — in (+7 more)
 
 ### Community 94 - "C12 — Goods market, consumption, CPI"
-Cohesion: 0.12
+Cohesion: 0.13
 Nodes (15): 10. Configuration keys, 11. Acceptance criteria, 12. Tests to write, 13. Definition of done, 14. Traps, 1. Context, 2. Required reading, 3. Scope — in (+7 more)
 
 ### Community 95 - "C14 — Banks, credit, central bank, treasury, monetary policy"
@@ -553,10 +510,6 @@ Nodes (13): 7.10 Interbank market, 7.11 Bank failure and resolution, 7.12 How a 
 ### Community 100 - "8. Law and crime"
 Cohesion: 0.15
 Nodes (13): 8.10 Deterrence as the object of study, 8.11 Civil suits, 8.12 Kinds 13000–13999, 8.1 The taxonomy, 8.2 The legality gate flags, it does not block, 8.3 Material non-public information, defined deterministically, 8.4 Detection, 8.5 Reporting (+5 more)
-
-### Community 101 - "test_ledger_post.py"
-Cohesion: 0.24
-Nodes (10): CommitmentLedger, cause(), opened_ledger(), UUID, test_checkpoint_roundtrip_restores_exact_state(), test_commitment_ledger_prevents_intra_tick_double_spend(), test_post_rejects_unknown_closed_overdrawn_and_wrong_tick(), test_post_transaction_is_balanced_and_deterministic() (+2 more)
 
 ### Community 102 - "POLIS — World Specification"
 Cohesion: 0.17
@@ -618,10 +571,6 @@ Nodes (11): AgentsView(), CausalView(), ChartsView(), CompareView(), formatMoney
 Cohesion: 0.20
 Nodes (9): 12. Scheduled steps and their phases, 13. Implementation checklist, 1.1 The three speech actions, 1.2 Attention: who actually hears an utterance, 1.3 From utterance to perception to memory, 1.4 Conversation is turn-based across ticks, 1.5 Kinds 10000–10039, 1. Communication (+1 more)
 
-### Community 117 - "test_labour_firms.py"
-Cohesion: 0.25
-Nodes (10): load_occupations(), Path, _skill_mapping(), Skill, settings(), test_economy_events_and_ledger_are_deterministic(), test_economy_mechanisms_are_declared_and_no_aggregate_match_exists(), test_mechanical_labour_lifecycle_has_three_tick_floor_and_exact_payroll() (+2 more)
-
 ### Community 119 - "POLIS — Implementation Chunks"
 Cohesion: 0.22
 Nodes (9): 0. Before you touch any chunk, 1. Brief format, 2. Milestones, 3. Dependency graph, 4. Chunk index, 5. Handback contract, 6. Working notes for coding agents, Ground rules that apply to every chunk (+1 more)
@@ -645,10 +594,6 @@ Nodes (8): 0.1 What this document owns, 0.2 Requests on the shared specification
 ### Community 124 - "POLIS — Research and Observability"
 Cohesion: 0.22
 Nodes (8): 11. Paper-readiness checklist, 12. Threats and failure modes for this subsystem, 6.1 The ladder, 6.2 Reading a difference, 6.3 LLM-attributable share, 6. Ablations, 7. The MECHANISM reviewer checklist, POLIS — Research and Observability
-
-### Community 125 - "hashing.py"
-Cohesion: 0.47
-Nodes (8): canonical_event_bytes(), event_hash(), Any, datetime, UUID, recompute(), seal(), verify_event()
 
 ### Community 126 - "10. Bankruptcy"
 Cohesion: 0.25
@@ -851,75 +796,55 @@ Cohesion: 0.67
 Nodes (3): 11.1 Static, over HTTP, once per run, 11.2 Live, over WebSocket, ephemeral kinds only, 11. Rendering contract
 
 ### Community 182 - "ExchangeEngine"
-Cohesion: 0.15
-Nodes (7): _bp_ceil(), _coalesce(), ExchangeEngine, Any, Emit, Deterministic, reservation-backed exchange implementation., SecurityState
+Cohesion: 0.17
+Nodes (8): _bp_ceil(), _coalesce(), ExchangeEngine, Any, Emit, Deterministic, reservation-backed exchange implementation., SecurityState, Event
 
 ### Community 183 - "Ledger"
-Cohesion: 0.11
-Nodes (22): AgentPopulation, ExchangeState, add_inventory(), redundancy_order(), ApplicationState, BankState, BasketState, BondState (+14 more)
-
-### Community 184 - "engine.py"
-Cohesion: 0.29
-Nodes (12): AgentBrief, build_observations(), _legal_actions(), PlaceView, datetime, SelfView, _population(), test_chronic_unmet_need_is_not_misclassified_as_event_stakes() (+4 more)
+Cohesion: 0.12
+Nodes (30): ExchangeState, HoldingState, IpoState, OhlcvState, Any, ShortPositionState, TradeState, active_employment() (+22 more)
 
 ### Community 185 - "load_settings"
-Cohesion: 0.16
-Nodes (19): config_hash(), config_yaml(), load_settings(), Path, _read_yaml(), ChainFailure, UUID, verify_batch() (+11 more)
-
-### Community 186 - "api.py"
-Cohesion: 0.21
-Nodes (13): Resolution, resolve_actions(), _firm_place(), District, Location, Place, Deterministic city geometry and movement., BlockedMove (+5 more)
+Cohesion: 0.13
+Nodes (36): active_mechanisms(), mechanism_manifest(), MechanismSpec, repo_git_sha(), config_hash(), _config_payload(), config_yaml(), load_settings() (+28 more)
 
 ### Community 187 - "Scheduler"
-Cohesion: 0.08
-Nodes (17): Clock, profile_from_settings(), Any, datetime, SimDuration, Deterministic tick kernel., InvariantRunner, Cadence (+9 more)
+Cohesion: 0.06
+Nodes (44): IntEnum, Deliberation, Reflection, ClockSettings, Append-only event log contracts., Persistence, StrEnum, CommitResult (+36 more)
 
 ### Community 188 - "rebuild.py"
-Cohesion: 0.23
-Nodes (9): Projection, ProjectionContext, ProjectionRouter, Any, AsyncConnection, Protocol, UUID, register_projection() (+1 more)
+Cohesion: 0.11
+Nodes (20): AsyncConnectionPool, Database, Any, AsyncConnection, Persistence and projection repositories., _clear_projections(), Any, Projection (+12 more)
 
 ### Community 190 - "stream.py"
-Cohesion: 0.18
-Nodes (11): MemoryType, embed_text(), MemoryRecord, MemoryStore, _normalise(), Any, ReflectionInsight, MemorySettings (+3 more)
-
-### Community 191 - "partition.py"
-Cohesion: 0.33
-Nodes (8): partition_name(), PartitionManager, UUID, run_suffix(), validate_ident(), test_accepted_identifiers_match_the_closed_grammar(), test_identifier_gate_rejects_unsafe_names(), test_partition_names_are_stable_and_bounded()
-
-### Community 192 - "EventQuery"
-Cohesion: 0.30
-Nodes (9): ancestors(), CausalNode, descendants(), explain(), has_ancestor_in_range(), Any, UUID, EventReader (+1 more)
+Cohesion: 0.11
+Nodes (27): MemoryType, deliberate_decide(), AgentBrief, build_observations(), _legal_actions(), PlaceView, datetime, SelfView (+19 more)
 
 ### Community 193 - "MechanicalPolicy"
-Cohesion: 0.31
-Nodes (4): MechanicalPolicy, Emit, Deterministic integration fixture; never enabled in research configs., Explicit classical-ABM decisions used by the reflex-only research baseline.
+Cohesion: 0.18
+Nodes (10): load_occupations(), Occupation, Path, visibility_slice(), MechanicalPolicy, Emit, Deterministic integration fixture; never enabled in research configs., Explicit classical-ABM decisions used by the reflex-only research baseline. (+2 more)
 
 ### Community 194 - "test_exchange_properties.py"
-Cohesion: 0.29
-Nodes (17): _build(), _emit(), _order(), Any, test_p10_price_time_priority_fills_earlier_order_first(), test_p11_short_position_never_exceeds_configured_cap(), test_p12_cancel_releases_exact_remaining_reservation(), test_p1_match_cycle_leaves_no_crossed_book() (+9 more)
+Cohesion: 0.15
+Nodes (34): ask_priority(), bid_priority(), call_auction(), continuous_matches(), crosses(), Fill, uncross(), OrderState (+26 more)
 
 ### Community 195 - "test_stub.py"
-Cohesion: 0.13
-Nodes (23): build_lanes(), Lane, AsyncClient, Capabilities, CompletionRequest, legal_actions_from_prompt(), _pick(), Any (+15 more)
-
-### Community 197 - "test_ventures.py"
-Cohesion: 0.46
-Nodes (7): build(), configured(), test_bankruptcy_inventory_and_capital_require_solvent_in_world_buyers(), test_cash_acquisition_and_bankruptcy_reach_terminal_states(), test_listed_bankruptcy_assets_are_sliced_through_the_order_book(), test_startup_round_updates_cap_table_and_moves_exact_cash(), test_unlisted_bankruptcy_stake_is_offered_to_existing_holders()
+Cohesion: 0.11
+Nodes (25): build_lanes(), Lane, AsyncClient, Capabilities, CompletionRequest, Provider, Protocol, legal_actions_from_prompt() (+17 more)
 
 ## Knowledge Gaps
-- **1153 isolated node(s):** `$schema`, `type`, `action`, `reasoning`, `confidence` (+1148 more)
+- **1154 isolated node(s):** `$schema`, `type`, `action`, `reasoning`, `confidence` (+1149 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **11 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Event` connect `EventReader` to `Community 5`, `Community 8`, `Community 12`, `Community 17`, `Community 19`, `Community 24`, `Community 25`, `invariants.py`, `Community 28`, `goods.py`, `EventRepository`, `Community 41`, `Community 53`, `ExchangeEngine`, `load_settings`, `Scheduler`, `rebuild.py`, `EventQuery`, `MechanicalPolicy`, `test_exchange_properties.py`, `kinds.py`, `fiscal.py`, `test_ledger_post.py`, `hashing.py`?**
-  _High betweenness centrality (0.031) - this node is a cross-community bridge._
-- **Why does `Settings` connect `Community 33` to `Community 0`, `Community 1`, `Community 5`, `Community 7`, `Community 12`, `Community 16`, `Community 17`, `Community 19`, `Community 24`, `Community 28`, `goods.py`, `Community 32`, `operations.py`, `Community 36`, `Community 41`, `ExchangeEngine`, `load_settings`, `Scheduler`, `MechanicalPolicy`, `test_exchange_properties.py`, `test_stub.py`, `RuntimeOverlay`, `test_ventures.py`, `fiscal.py`, `EventReader`?**
-  _High betweenness centrality (0.023) - this node is a cross-community bridge._
-- **Why does `PolisError` connect `Community 18` to `Community 32`, `Community 1`, `test_stub.py`, `Community 36`, `Community 5`, `test_ledger_post.py`, `kinds.py`, `operations.py`, `Community 11`, `fiscal.py`, `Community 53`, `Community 23`?**
-  _High betweenness centrality (0.021) - this node is a cross-community bridge._
+- **Why does `Event` connect `ExchangeEngine` to `Community 5`, `Community 8`, `Community 12`, `Community 17`, `Community 19`, `Community 25`, `invariants.py`, `Community 28`, `goods.py`, `Community 32`, `EventRepository`, `Community 41`, `Community 53`, `Ledger`, `Scheduler`, `rebuild.py`, `MechanicalPolicy`, `test_exchange_properties.py`, `EventReader`?**
+  _High betweenness centrality (0.029) - this node is a cross-community bridge._
+- **Why does `Settings` connect `load_settings` to `Community 1`, `Community 5`, `Community 7`, `Community 12`, `Community 13`, `Community 16`, `Community 17`, `Community 19`, `Community 25`, `Community 28`, `goods.py`, `Community 33`, `EventRepository`, `Community 41`, `Community 53`, `ExchangeEngine`, `Ledger`, `Scheduler`, `stream.py`, `MechanicalPolicy`, `test_exchange_properties.py`, `test_stub.py`?**
+  _High betweenness centrality (0.020) - this node is a cross-community bridge._
+- **Why does `AgentPopulation` connect `Community 33` to `MechanicalPolicy`, `Community 4`, `Community 5`, `Community 41`, `Community 12`, `Community 13`, `Community 14`, `Community 17`, `EconomyWorldState`, `Community 53`, `ExchangeEngine`, `Ledger`, `Community 25`, `Scheduler`, `Community 28`, `goods.py`, `stream.py`?**
+  _High betweenness centrality (0.019) - this node is a cross-community bridge._
 - **Are the 53 inferred relationships involving `Settings` (e.g. with `RoutingResult` and `SalienceScore`) actually correct?**
   _`Settings` has 53 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 36 inferred relationships involving `RngRegistry` (e.g. with `Resolution` and `Reflection`) actually correct?**
@@ -927,4 +852,4 @@ _Questions this graph is uniquely positioned to answer:_
 - **Are the 56 inferred relationships involving `AgentPopulation` (e.g. with `Resolution` and `AgentBrief`) actually correct?**
   _`AgentPopulation` has 56 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `$schema`, `type`, `action` to the rest of the system?**
-  _1153 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _1154 weakly-connected nodes found - possible documentation gaps or missing edges._
