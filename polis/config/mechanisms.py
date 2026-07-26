@@ -44,12 +44,15 @@ def active_mechanisms(settings: Settings) -> dict[str, MechanismSpec]:
             "polis.economy.firms",
             "polis.economy.labour",
             "polis.economy.policy",
+            "polis.economy.ventures",
         ):
             importlib.import_module(module)
     disabled = {"off", "false", "disabled", "none"}
     result: dict[str, MechanismSpec] = {}
     for mechanism_id, spec in sorted(MECHANISM_REGISTRY.items()):
         if spec.module.startswith("polis.economy") and not settings.economy.enabled:
+            continue
+        if spec.module == "polis.economy.ventures" and not settings.ventures.enabled:
             continue
         candidates: tuple[str, ...] = (mechanism_id, mechanism_id.replace(".", "_"))
         configured: str | None = None
