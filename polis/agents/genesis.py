@@ -19,6 +19,7 @@ from polis.kernel.rng import RngRegistry
 from polis.world.api import Location, World
 
 _TRAIT_NAMES: Final = tuple(Traits.__dataclass_fields__)
+_TRAIT_DECIMALS: Final = 12
 _CORRELATION: Final = np.array(
     [
         [1.00, 0.12, 0.18, 0.08, -0.10, 0.14, -0.08, 0.05, 0.16, 0.02],
@@ -43,7 +44,11 @@ def _traits(rng: RngRegistry, agent_id: str) -> Traits:
         0.0,
         1.0,
     )
-    return Traits(**dict(zip(_TRAIT_NAMES, (float(value) for value in values), strict=True)))
+    # LAPACK implementations can differ in the final few bits of the decomposition
+    # used by multivariate_normal. Quantise at the simulation boundary so genesis,
+    # event payloads, and downstream decisions remain platform-stable.
+    quantized = (round(float(value), _TRAIT_DECIMALS) for value in values)
+    return Traits(**dict(zip(_TRAIT_NAMES, quantized, strict=True)))
 
 
 def _age(rng: RngRegistry, agent_id: str) -> float:

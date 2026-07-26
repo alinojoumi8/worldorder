@@ -75,8 +75,8 @@ esteem and purpose as their owning systems land.
 
 ## Reproducibility
 
-- Frozen 50-agent/100-tick hash:
-  `aa72d5f6c2e8eed6a696c15b8d5c10c21e5f53c3b144012f13fc2d669da20f79`.
+- Frozen 50-agent/100-tick cross-platform hash:
+  `fb583b89c6d0a34155c3ac422a2c0ed6c0216025fab03c82a40e02113aac9844`.
 - Stabilized persistent demo: `672e6468-c53d-5e1f-bed4-e6b4e1ac2e89`.
 - Stored demo events: 9,673.
 - Demo terminal hash:

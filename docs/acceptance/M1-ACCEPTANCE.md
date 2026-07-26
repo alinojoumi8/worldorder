@@ -29,7 +29,7 @@
 | Clean Compose infrastructure | Postgres 17.10 with pgvector 0.8.5, Redis and MinIO healthy |
 | M0 determinism | Repeated 200-tick chains are byte-identical; 100-tick checkpoint plus resume equals the continuous 200-tick run |
 | Event verification and rebuild | Stabilized persistent demo verifies all 9,673 events; offline replay and projection rebuild reproduce the terminal hash |
-| Frozen M1 golden run | 50 agents, 100 ticks, 10,351 hashed events; hash `aa72d5f6c2e8eed6a696c15b8d5c10c21e5f53c3b144012f13fc2d669da20f79` |
+| Frozen M1 golden run | 50 agents, 100 ticks, 10,404 hashed events; cross-platform hash `fb583b89c6d0a34155c3ac422a2c0ed6c0216025fab03c82a40e02113aac9844` |
 | M1 integration smoke | 50 agents and 500 ticks complete with population, action-diversity, cognition and wellbeing assertions |
 | Formal M1 calibration | 1,000 agents, 2,000 ticks, 4,736,532 hashed events, 3.088 ticks/s under concurrent validation load; all gates passed |
 | Three-seed stability | All three 1,000-agent/2,000-tick seeds passed; throughput 3.088–3.131 ticks/s and late/early ratio 0.932–0.941 |
@@ -73,3 +73,11 @@ stored events terminate at
 
 The event log and cache remain authoritative for replay. The Observatory is a read-only
 derived view, and coalesced live frames can be recovered from projections or exact replay.
+
+### Cross-platform portability update
+
+On 2026-07-26, public Linux CI exposed final-bit differences in NumPy's
+multivariate-normal trait generation relative to Windows. Agent traits are now quantised
+to 12 decimal places at genesis. All 10,404 events in the frozen run were compared
+between Windows Python 3.12 and Linux Python 3.12 and matched exactly, producing the
+cross-platform hash recorded above.
