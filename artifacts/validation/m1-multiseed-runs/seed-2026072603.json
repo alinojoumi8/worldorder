@@ -10,8 +10,8 @@
     "p50": 700.0,
     "p95": 700.0
   },
-  "elapsed_s": 647.766,
-  "events_hashed": 4736532,
+  "elapsed_s": 638.804,
+  "events_hashed": 4554339,
   "gates": {
     "deliberate_share_near_7_percent": true,
     "invariants_and_population": true,
@@ -23,46 +23,46 @@
   "halt_reason": null,
   "memory": {
     "configured_maximum": 3000,
-    "per_agent_maximum": 20,
-    "per_agent_mean": 2.256,
+    "per_agent_maximum": 16,
+    "per_agent_mean": 2.329,
     "per_agent_p95": 9,
-    "projected_mean_cap_tick": 2659574.5,
-    "retained": 2256,
-    "writes_per_agent_tick": 0.001128
+    "projected_mean_cap_tick": 2576213.0,
+    "retained": 2329,
+    "writes_per_agent_tick": 0.001164
   },
   "population": 1000,
-  "run_id": "50d51fb0-50db-5a28-8353-58cf667d6f20",
-  "sampled_cognition_traces": 40096,
-  "seed": 2026072601,
+  "run_id": "34f76d6a-a84d-5e7b-a103-63318465118d",
+  "sampled_cognition_traces": 40182,
+  "seed": 2026072603,
   "status": "passed",
-  "terminal_hash": "cc43e04ed23e0c50ad9232c049ebcdaaf990cf33e0351089b4475d71ada23458",
+  "terminal_hash": "03073b281ac9c203ebb1d1c7aa6d45dcb4d7fba95c74e5b3ce8792c21645a9a6",
   "throughput_profile": {
-    "early_ticks_per_second": 3.229,
-    "late_ticks_per_second": 3.025,
-    "late_to_early_ratio": 0.936952,
+    "early_ticks_per_second": 3.282,
+    "late_ticks_per_second": 3.06,
+    "late_to_early_ratio": 0.932164,
     "window_ticks": 500
   },
   "ticks": 2000,
-  "ticks_per_second": 3.088,
+  "ticks_per_second": 3.131,
   "v4_action_entropy_normalized": {
-    "mean": 0.86405,
-    "minimum": 0.797186,
+    "mean": 0.854824,
+    "minimum": 0.782199,
     "pass_share": 1.0,
     "threshold": 0.35
   },
   "wellbeing": {
-    "final": 44.75657,
+    "final": 44.31561,
     "final_need_means": {
-      "energy": 0.811715,
+      "energy": 0.80492,
       "esteem": 0.0,
-      "hunger": 0.830644,
+      "hunger": 0.817463,
       "purpose": 0.0,
       "security": 0.0,
-      "social": 0.003833
+      "social": 0.00435
     },
-    "initial": 76.86465,
-    "last_200_mean": 44.639619,
-    "last_200_slope_per_1000_ticks": -1.330538,
-    "minimum": 44.24258
+    "initial": 76.977,
+    "last_200_mean": 44.29611,
+    "last_200_slope_per_1000_ticks": -1.254904,
+    "minimum": 43.87118
   }
 }

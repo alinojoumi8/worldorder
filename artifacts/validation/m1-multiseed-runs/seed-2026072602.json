@@ -10,8 +10,8 @@
     "p50": 700.0,
     "p95": 700.0
   },
-  "elapsed_s": 647.766,
-  "events_hashed": 4736532,
+  "elapsed_s": 644.864,
+  "events_hashed": 4719141,
   "gates": {
     "deliberate_share_near_7_percent": true,
     "invariants_and_population": true,
@@ -23,46 +23,46 @@
   "halt_reason": null,
   "memory": {
     "configured_maximum": 3000,
-    "per_agent_maximum": 20,
-    "per_agent_mean": 2.256,
-    "per_agent_p95": 9,
-    "projected_mean_cap_tick": 2659574.5,
-    "retained": 2256,
-    "writes_per_agent_tick": 0.001128
+    "per_agent_maximum": 19,
+    "per_agent_mean": 2.486,
+    "per_agent_p95": 10,
+    "projected_mean_cap_tick": 2413515.7,
+    "retained": 2486,
+    "writes_per_agent_tick": 0.001243
   },
   "population": 1000,
-  "run_id": "50d51fb0-50db-5a28-8353-58cf667d6f20",
-  "sampled_cognition_traces": 40096,
-  "seed": 2026072601,
+  "run_id": "9d155cdf-bb15-5e13-8cf5-03c3863cd433",
+  "sampled_cognition_traces": 39868,
+  "seed": 2026072602,
   "status": "passed",
-  "terminal_hash": "cc43e04ed23e0c50ad9232c049ebcdaaf990cf33e0351089b4475d71ada23458",
+  "terminal_hash": "16f5ca122223a1a80dce6c4585bb0f77aa88a63245aa0ccc9125dfab30183479",
   "throughput_profile": {
-    "early_ticks_per_second": 3.229,
-    "late_ticks_per_second": 3.025,
-    "late_to_early_ratio": 0.936952,
+    "early_ticks_per_second": 3.235,
+    "late_ticks_per_second": 3.043,
+    "late_to_early_ratio": 0.940836,
     "window_ticks": 500
   },
   "ticks": 2000,
-  "ticks_per_second": 3.088,
+  "ticks_per_second": 3.101,
   "v4_action_entropy_normalized": {
-    "mean": 0.86405,
-    "minimum": 0.797186,
+    "mean": 0.862898,
+    "minimum": 0.793238,
     "pass_share": 1.0,
     "threshold": 0.35
   },
   "wellbeing": {
-    "final": 44.75657,
+    "final": 44.55369,
     "final_need_means": {
-      "energy": 0.811715,
+      "energy": 0.81423,
       "esteem": 0.0,
-      "hunger": 0.830644,
+      "hunger": 0.8253,
       "purpose": 0.0,
       "security": 0.0,
-      "social": 0.003833
+      "social": 0.004203
     },
-    "initial": 76.86465,
-    "last_200_mean": 44.639619,
-    "last_200_slope_per_1000_ticks": -1.330538,
-    "minimum": 44.24258
+    "initial": 76.8927,
+    "last_200_mean": 44.421727,
+    "last_200_slope_per_1000_ticks": -1.806715,
+    "minimum": 43.98396
   }
 }
