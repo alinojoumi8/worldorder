@@ -68,6 +68,10 @@ class LLMRouter:
             mode=settings.llm.cache.mode,
             l0_entries=settings.llm.cache.l0_entries,
             verify_render=settings.llm.cache.verify_render,
+            path=settings.llm.cache.path,
+            namespace=str(run_id),
+            schema_version=settings.llm.cache.schema_version,
+            strict_version=settings.llm.cache.strict_version,
         )
         self.budget = budget or BudgetGuard(settings.llm.budget)
 
@@ -104,6 +108,7 @@ class LLMRouter:
     ) -> CallResult:
         route = self.settings.llm.routing[purpose.value]
         lane = self.lanes.get(route.lane)
+        provider_config = self.settings.llm.providers[route.lane]
         provider_name = lane.provider.name if lane is not None else route.lane
         model = route.model
         system = str(variables.get("system", "You are a POLIS agent."))
@@ -117,7 +122,11 @@ class LLMRouter:
         key = cache_key(
             provider=provider_name,
             model=model,
-            model_version=lane.provider.model if lane is not None else None,
+            model_version=(
+                lane.provider.model
+                if lane is not None
+                else provider_config.model_version_pin or route.model
+            ),
             prompt_template_hash=sha256_hex(route.template.encode()),
             prompt_variables=variables,
             sampling=sampling,
@@ -135,7 +144,8 @@ class LLMRouter:
                 key,
                 cached.response,
                 schema,
-                cache_hit=True,
+                cache_hit=self.cache.reported_hit(key),
+                cost=cached.cost_usd,
             )
         if lane is None:
             raise RuntimeError(f"provider lane {route.lane!r} unavailable in replay mode")
@@ -187,7 +197,7 @@ class LLMRouter:
             tokens_out=response.tokens_out,
             usd=cost,
         )
-        await self.cache.put(CacheRecord(key, rendered_hash, response))
+        await self.cache.put(CacheRecord(key, rendered_hash, response, cost))
         return self._result(
             call_id,
             purpose,
@@ -280,6 +290,7 @@ class LLMRouter:
             close = getattr(lane.provider, "close", None)
             if close is not None:
                 await close()
+        await self.cache.close()
 
 
 def dataclass_replace(result: CallResult, **changes: Any) -> CallResult:

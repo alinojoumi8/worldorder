@@ -4,8 +4,8 @@ import pytest
 
 from polis.config.settings import LLMBudgetLine, LLMBudgetSettings
 from polis.llm.budget import Admission, BudgetGuard
-from polis.llm.cache import CacheMissInReplay, CompletionCache, cache_key
-from polis.llm.providers.base import SamplingParams
+from polis.llm.cache import CacheMissInReplay, CacheRecord, CompletionCache, cache_key
+from polis.llm.providers.base import CompletionResponse, SamplingParams
 
 
 def test_cache_key_is_canonical_and_sensitive() -> None:
@@ -31,6 +31,24 @@ async def test_replay_cache_miss_is_structural() -> None:
     cache = CompletionCache(mode="replay")
     with pytest.raises(CacheMissInReplay):
         await cache.get("missing", rendered_hash="rendered")
+
+
+@pytest.mark.asyncio
+async def test_file_cache_survives_for_offline_replay(tmp_path) -> None:
+    path = f"file://{tmp_path.as_posix()}"
+    response = CompletionResponse("{}", 10, 2, 0, "v1", "request", 4, "stop")
+    live = CompletionCache(mode="live", path=path, namespace="run")
+    await live.put(CacheRecord("key", "rendered", response))
+    await live.close()
+
+    replay = CompletionCache(mode="replay", path=path, namespace="run")
+    restored = await replay.get("key", rendered_hash="rendered")
+    assert restored is not None
+    assert restored.response == response
+    assert not replay.reported_hit("key")
+    assert await replay.get("key", rendered_hash="rendered") == restored
+    assert replay.reported_hit("key")
+    await replay.close()
 
 
 def test_budget_ladder_degrades_then_halts() -> None:
