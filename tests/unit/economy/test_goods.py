@@ -14,9 +14,11 @@ from polis.economy.goods import (
     load_skus,
     plan_budget,
     purchase_legs,
+    seed_goods_state,
+    transaction_price_cents,
     visible_sellers,
 )
-from polis.economy.state import EconomyState, GoodsTransactionState
+from polis.economy.state import EconomyState, FirmState, GoodsTransactionState
 from polis.events.kinds import CPI_COMPUTED, GOODS_PURCHASED, PURCHASE_FAILED
 from polis.events.log import EventLog, MemoryEventSink
 from polis.kernel.rng import RngRegistry
@@ -65,6 +67,25 @@ def test_seed_catalogue_has_twenty_three_skus_and_fixed_base_cpi() -> None:
     assert economy.basket is not None
     assert economy.cpi_history_bp[0] == 10_000
     assert economy.basket.version == 1
+
+
+def test_non_goods_sector_does_not_break_goods_genesis() -> None:
+    configured, _world, _population, economy, _rng = economy_fixture()
+    template = next(iter(economy.firms.values()))
+    economy.firms["fm_finance"] = FirmState(
+        "fm_finance",
+        "Finance Cooperative",
+        "finance",
+        template.place_id,
+        template.founder_id,
+        template.ledger_account_id,
+        template.productivity_bp,
+    )
+
+    basket = seed_goods_state(configured, economy)
+
+    assert basket.quantities
+    assert not any(row.firm_id == "fm_finance" for row in economy.inventory.values())
 
 
 def test_visible_sellers_is_bounded_and_purchase_legs_close_with_ceiling_tax() -> None:
@@ -155,6 +176,32 @@ async def test_consumption_loop_purchases_rations_and_keeps_money_closed() -> No
     assert sum(row.qty for row in economy.goods_transactions) == sum(
         int(event.payload["qty"]) for event in purchases
     )
+    for inventory_id, inventory in economy.inventory.items():
+        assert inventory.units_sold_28d == sum(
+            row.qty
+            for row in economy.goods_transactions
+            if f"{row.seller_firm_id}:{row.sku}" == inventory_id and 2 < row.tick <= 30
+        )
+    assert economy.basket is not None
+    for sku in economy.basket.quantities:
+        window_rows = [
+            row for row in economy.goods_transactions if row.sku == sku and 0 < row.tick <= 30
+        ]
+        if not window_rows:
+            continue
+        expected = sum(row.unit_price_cents * row.qty for row in window_rows) // sum(
+            row.qty for row in window_rows
+        )
+        assert transaction_price_cents(sku, 30, 30, economy=economy) == (expected, False)
+        latest_tick = max(row.tick for row in window_rows)
+        latest_rows = [row for row in window_rows if row.tick == latest_tick]
+        carried = sum(row.unit_price_cents * row.qty for row in latest_rows) // sum(
+            row.qty for row in latest_rows
+        )
+        assert transaction_price_cents(sku, 61, 30, economy=economy) == (carried, True)
+    _configured, _world, _population, restored, _rng = economy_fixture()
+    restored.load(economy.dump())
+    assert restored.dump() == economy.dump()
     assert economy.ledger.global_balance_cents() == 0
     assert economy.ledger.materialisation_imbalance_cents() == 0
     assert all(value == 0 for value in economy.ledger.deposit_imbalances().values())

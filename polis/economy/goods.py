@@ -149,6 +149,8 @@ def seed_goods_state(settings: Settings, economy: EconomyState) -> BasketState:
     )
     for firm in sorted(economy.firms.values(), key=lambda row: row.firm_id):
         rows = sector_skus(economy, firm.sector)
+        if not rows:
+            continue
         target_headcount = max(1, firm.target_headcount)
         expected_labour_bp = target_headcount * settings.firms.seed_effective_labour_bp_per_worker
         labour_allocations = allocate(
@@ -248,12 +250,13 @@ def visible_sellers(
     tick: int,
     *,
     ctx: GoodsContext,
+    inventories: Sequence[InventoryState] | None = None,
 ) -> tuple[SellerQuote, ...]:
     location = ctx.world.locations[agent.agent_id]
     place_id = location.place_id or agent.home_place_id
     buyer_district = ctx.world.place(place_id).district_id
     rows: list[SellerQuote] = []
-    for inventory in ctx.economy.inventory.values():
+    for inventory in inventories if inventories is not None else ctx.economy.inventory.values():
         if inventory.sku != sku or inventory.quantity <= 0:
             continue
         firm = ctx.economy.firms[inventory.firm_id]
@@ -449,6 +452,27 @@ def transaction_price_cents(
     *,
     economy: EconomyState,
 ) -> tuple[int, bool]:
+    if economy.goods_price_qty_by_tick or economy.goods_last_price_cents:
+        included_ticks = tuple(
+            row_tick
+            for row_tick in economy.goods_price_qty_by_tick
+            if tick - window_ticks < row_tick <= tick
+        )
+        total_qty = sum(
+            economy.goods_price_qty_by_tick[row_tick].get(sku, 0) for row_tick in included_ticks
+        )
+        if total_qty:
+            total_value = sum(
+                economy.goods_price_value_by_tick[row_tick].get(sku, 0)
+                for row_tick in included_ticks
+            )
+            return total_value // total_qty, False
+        if economy.basket is None:
+            raise RuntimeError("CPI basket is not fixed")
+        return economy.goods_last_price_cents.get(
+            sku,
+            economy.basket.base_prices_cents[sku],
+        ), True
     rows = [
         row
         for row in economy.goods_transactions
@@ -506,6 +530,8 @@ class GoodsEngine:
         rng: RngRegistry,
     ) -> None:
         self.ctx = GoodsContext(settings, population, world, economy, rng)
+        self._transaction_tick = -1
+        self._transaction_ordinal = 0
 
     @property
     def economy(self) -> EconomyState:
@@ -514,6 +540,11 @@ class GoodsEngine:
     def mechanical_actions(self, tick: int) -> tuple[Action, ...]:
         if tick % self.ctx.settings.clock.ticks_per_sim_day != 0:
             return ()
+        self._expire_sales_window(tick)
+        inventories_by_sku: dict[str, list[InventoryState]] = {}
+        for inventory in self.economy.inventory.values():
+            if inventory.quantity > 0:
+                inventories_by_sku.setdefault(inventory.sku, []).append(inventory)
         actions: list[Action] = []
         for agent in self.ctx.population:
             if not agent.alive or agent.employment_status in {"child", "dead"}:
@@ -523,7 +554,13 @@ class GoodsEngine:
                 quantity = self._quantity_due(agent, sku, tick)
                 if quantity <= 0:
                     continue
-                sellers = visible_sellers(agent, sku.sku, tick, ctx=self.ctx)
+                sellers = visible_sellers(
+                    agent,
+                    sku.sku,
+                    tick,
+                    ctx=self.ctx,
+                    inventories=inventories_by_sku.get(sku.sku, ()),
+                )
                 if not sellers:
                     continue
                 seller = sellers[0]
@@ -593,6 +630,9 @@ class GoodsEngine:
         )
 
     def resolve(self, actions: Sequence[Action], tick: int, emit: Emit) -> tuple[Event, ...]:
+        if tick != self._transaction_tick:
+            self._transaction_tick = tick
+            self._transaction_ordinal = 0
         groups: dict[tuple[str, str], list[Action]] = {}
         for action in actions:
             if action.type != ActionType.BUY_GOOD:
@@ -643,7 +683,7 @@ class GoodsEngine:
         goods_txn_id = mint(
             "gds",
             tick,
-            sum(row.tick == tick for row in self.economy.goods_transactions),
+            self._transaction_ordinal,
         )
         expected = self.economy.ledger.next_txn_id(tick)
         purchase_event = emit(
@@ -689,18 +729,45 @@ class GoodsEngine:
                 breakdown.subsidy_cents,
             )
         )
+        self._transaction_ordinal += 1
         firm = self.economy.firms[seller_id]
         firm.cumulative_revenue_cents += breakdown.gross_cents
-        inventory.units_sold_28d = sum(
-            row.qty
-            for row in self.economy.goods_transactions
-            if row.seller_firm_id == seller_id
-            and row.sku == sku
-            and tick - 28 * self.ctx.settings.clock.ticks_per_sim_day < row.tick <= tick
-        )
+        inventory_id = f"{seller_id}:{sku}"
+        sales = self.economy.goods_sales_by_tick.setdefault(tick, {})
+        sales[inventory_id] = sales.get(inventory_id, 0) + fill
+        inventory.units_sold_28d += fill
+        price_qty = self.economy.goods_price_qty_by_tick.setdefault(tick, {})
+        price_value = self.economy.goods_price_value_by_tick.setdefault(tick, {})
+        price_qty[sku] = price_qty.get(sku, 0) + fill
+        price_value[sku] = price_value.get(sku, 0) + effective_unit_price * fill
+        self.economy.goods_last_price_cents[sku] = price_value[sku] // price_qty[sku]
         events: list[Event] = [purchase_event]
         events.extend(self._consume(action.actor_id, sku, fill, tick, emit))
         return tuple(events)
+
+    def _expire_sales_window(self, tick: int) -> None:
+        cutoff = tick - 28 * self.ctx.settings.clock.ticks_per_sim_day
+        expired_ticks = tuple(
+            sold_tick
+            for sold_tick in sorted(self.economy.goods_sales_by_tick)
+            if sold_tick <= cutoff
+        )
+        for sold_tick in expired_ticks:
+            for inventory_id, qty in self.economy.goods_sales_by_tick.pop(sold_tick).items():
+                inventory = self.economy.inventory.get(inventory_id)
+                if inventory is not None:
+                    inventory.units_sold_28d = max(0, inventory.units_sold_28d - qty)
+        price_cutoff = (
+            tick
+            - self.ctx.settings.goods.cpi_window_days * self.ctx.settings.clock.ticks_per_sim_day
+        )
+        for sold_tick in tuple(
+            row_tick
+            for row_tick in sorted(self.economy.goods_price_qty_by_tick)
+            if row_tick <= price_cutoff
+        ):
+            self.economy.goods_price_qty_by_tick.pop(sold_tick, None)
+            self.economy.goods_price_value_by_tick.pop(sold_tick, None)
 
     def _failed(
         self,
@@ -823,9 +890,9 @@ class GoodsEngine:
         core = _index_for(core_skus, prices, basket) if core_skus else index
         quantities = {
             sku: sum(
-                row.qty
-                for row in self.economy.goods_transactions
-                if row.sku == sku and tick - window < row.tick <= tick
+                values.get(sku, 0)
+                for row_tick, values in self.economy.goods_price_qty_by_tick.items()
+                if tick - window < row_tick <= tick
             )
             for sku in basket.quantities
         }

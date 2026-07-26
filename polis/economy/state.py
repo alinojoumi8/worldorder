@@ -283,6 +283,10 @@ class EconomyState:
     skill_last_used_tick: dict[str, dict[str, int]] = field(default_factory=dict)
     skus: dict[str, SkuState] = field(default_factory=dict)
     goods_transactions: list[GoodsTransactionState] = field(default_factory=list)
+    goods_sales_by_tick: dict[int, dict[str, int]] = field(default_factory=dict)
+    goods_price_qty_by_tick: dict[int, dict[str, int]] = field(default_factory=dict)
+    goods_price_value_by_tick: dict[int, dict[str, int]] = field(default_factory=dict)
+    goods_last_price_cents: dict[str, int] = field(default_factory=dict)
     food_on_hand: dict[str, dict[str, int]] = field(default_factory=dict)
     durables: dict[str, DurableState] = field(default_factory=dict)
     basket: BasketState | None = None
@@ -352,6 +356,19 @@ class EconomyState:
             },
             "skus": {sku: asdict(row) for sku, row in sorted(self.skus.items())},
             "goods_transactions": [asdict(row) for row in self.goods_transactions],
+            "goods_sales_by_tick": {
+                tick: dict(sorted(values.items()))
+                for tick, values in sorted(self.goods_sales_by_tick.items())
+            },
+            "goods_price_qty_by_tick": {
+                tick: dict(sorted(values.items()))
+                for tick, values in sorted(self.goods_price_qty_by_tick.items())
+            },
+            "goods_price_value_by_tick": {
+                tick: dict(sorted(values.items()))
+                for tick, values in sorted(self.goods_price_value_by_tick.items())
+            },
+            "goods_last_price_cents": dict(sorted(self.goods_last_price_cents.items())),
             "food_on_hand": {
                 agent_id: dict(sorted(values.items()))
                 for agent_id, values in sorted(self.food_on_hand.items())
@@ -406,6 +423,10 @@ class EconomyState:
         skill_last_used_tick = state.get("skill_last_used_tick", {})
         skus = state.get("skus", {})
         goods_transactions = state.get("goods_transactions", ())
+        goods_sales_by_tick = state.get("goods_sales_by_tick", {})
+        goods_price_qty_by_tick = state.get("goods_price_qty_by_tick", {})
+        goods_price_value_by_tick = state.get("goods_price_value_by_tick", {})
+        goods_last_price_cents = state.get("goods_last_price_cents", {})
         food_on_hand = state.get("food_on_hand", {})
         durables = state.get("durables", {})
         basket = state.get("basket")
@@ -435,6 +456,10 @@ class EconomyState:
             inventory,
             skill_last_used_tick,
             skus,
+            goods_sales_by_tick,
+            goods_price_qty_by_tick,
+            goods_price_value_by_tick,
+            goods_last_price_cents,
             food_on_hand,
             durables,
             cpi_history_bp,
@@ -510,6 +535,37 @@ class EconomyState:
             for row in goods_transactions
             if isinstance(row, Mapping)
         ]
+        self.goods_sales_by_tick = {
+            int(tick): {str(inventory_id): int(qty) for inventory_id, qty in row.items()}
+            for tick, row in sorted(goods_sales_by_tick.items())
+            if isinstance(row, Mapping)
+        }
+        self.goods_price_qty_by_tick = {
+            int(tick): {str(sku): int(qty) for sku, qty in row.items()}
+            for tick, row in sorted(goods_price_qty_by_tick.items())
+            if isinstance(row, Mapping)
+        }
+        self.goods_price_value_by_tick = {
+            int(tick): {str(sku): int(value) for sku, value in row.items()}
+            for tick, row in sorted(goods_price_value_by_tick.items())
+            if isinstance(row, Mapping)
+        }
+        self.goods_last_price_cents = {
+            str(sku): int(price) for sku, price in sorted(goods_last_price_cents.items())
+        }
+        if self.goods_transactions and not self.goods_price_qty_by_tick:
+            for transaction in self.goods_transactions:
+                qty = self.goods_price_qty_by_tick.setdefault(transaction.tick, {})
+                value = self.goods_price_value_by_tick.setdefault(transaction.tick, {})
+                qty[transaction.sku] = qty.get(transaction.sku, 0) + transaction.qty
+                value[transaction.sku] = (
+                    value.get(transaction.sku, 0) + transaction.unit_price_cents * transaction.qty
+                )
+            for tick, qty_by_sku in sorted(self.goods_price_qty_by_tick.items()):
+                for sku, sku_qty in qty_by_sku.items():
+                    self.goods_last_price_cents[sku] = (
+                        self.goods_price_value_by_tick[tick][sku] // sku_qty
+                    )
         self.food_on_hand = {
             str(agent_id): {str(sku): int(qty) for sku, qty in row.items()}
             for agent_id, row in sorted(food_on_hand.items())
