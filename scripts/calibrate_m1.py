@@ -21,6 +21,7 @@ class ProgressSink:
         self.output = output
         self.total_ticks = total_ticks
         self.started_ns = time.perf_counter_ns()
+        self.samples: list[tuple[int, float]] = [(0, 0.0)]
 
     async def publish(self, events: Sequence[Event]) -> None:
         ticks = [event.tick for event in events if event.kind == LIVE_TICK]
@@ -30,6 +31,8 @@ class ProgressSink:
         if tick % 25 != 0 and tick != self.total_ticks:
             return
         elapsed_s = (time.perf_counter_ns() - self.started_ns) / 1_000_000_000
+        if self.samples[-1][0] != tick:
+            self.samples.append((tick, elapsed_s))
         write_json(
             self.output,
             {
@@ -43,11 +46,17 @@ class ProgressSink:
         )
 
 
-def percentile(values: list[float], proportion: float) -> float:
+def percentile(values: Sequence[float], proportion: float) -> float:
     if not values:
         return 0.0
     index = round((len(values) - 1) * proportion)
     return sorted(values)[index]
+
+
+def sample_rate(samples: Sequence[tuple[int, float]], start_tick: int, end_tick: int) -> float:
+    by_tick = dict(samples)
+    elapsed = by_tick[end_tick] - by_tick[start_tick]
+    return (end_tick - start_tick) / elapsed
 
 
 def write_json(path: Path, value: dict[str, Any]) -> None:
@@ -65,10 +74,20 @@ async def calibrate(
     output: Path,
     *,
     ticks: int | None = None,
+    seed: int | None = None,
 ) -> dict[str, Any]:
+    run_overrides = {
+        key: value
+        for key, value in {
+            "ticks": ticks,
+            "seed": seed,
+            "name": f"m1-validation-seed-{seed}" if seed is not None else None,
+        }.items()
+        if value is not None
+    }
     settings = load_settings(
         config,
-        overrides={"run": {"ticks": ticks}} if ticks is not None else None,
+        overrides={"run": run_overrides} if run_overrides else None,
     )
     progress = ProgressSink(output, settings.run.ticks)
     started_ns = time.perf_counter_ns()
@@ -94,12 +113,35 @@ async def calibrate(
     legal_action_types = 6
     normalized_entropy = [value / math.log(legal_action_types) for value in raw_entropy]
     v4_pass_share = sum(value >= 0.35 for value in normalized_entropy) / len(normalized_entropy)
-    wellbeing = [
-        float(point.value)
-        for point in result.metrics.series("city.wellbeing_mean")
-        if point.tick > 1
+    wellbeing_points = [
+        point for point in result.metrics.series("city.wellbeing_mean") if point.tick > 1
     ]
+    wellbeing = [float(point.value) for point in wellbeing_points]
     throughput = settings.run.ticks / elapsed_s
+    profile_window = min(500, settings.run.ticks // 2)
+    early_throughput = sample_rate(progress.samples, 0, profile_window)
+    late_throughput = sample_rate(
+        progress.samples,
+        settings.run.ticks - profile_window,
+        settings.run.ticks,
+    )
+    tail_count = min(200, len(wellbeing_points))
+    wellbeing_tail = wellbeing_points[-tail_count:]
+    wellbeing_tail_slope = statistics.linear_regression(
+        [point.tick for point in wellbeing_tail],
+        [float(point.value) for point in wellbeing_tail],
+    ).slope
+    agents = result.population.alive()
+    need_names = tuple(agents[0].needs.as_dict())
+    need_means = {
+        name: statistics.fmean(agent.needs.as_dict()[name] for agent in agents)
+        for name in need_names
+    }
+    memory_counts = [len(result.memory.for_agent(agent.agent_id)) for agent in agents]
+    memory_write_rate = len(result.memory) / (len(agents) * settings.run.ticks)
+    projected_cap_tick = (
+        settings.memory.max_per_agent / memory_write_rate if memory_write_rate else None
+    )
     invariants_pass = (
         result.report.status == "completed"
         and result.report.halt_reason is None
@@ -145,8 +187,32 @@ async def calibrate(
             "initial": wellbeing[0],
             "final": wellbeing[-1],
             "minimum": min(wellbeing),
+            "last_200_mean": round(
+                statistics.fmean(float(point.value) for point in wellbeing_tail),
+                6,
+            ),
+            "last_200_slope_per_1000_ticks": round(wellbeing_tail_slope * 1_000, 6),
+            "final_need_means": {
+                name: round(value, 6) for name, value in sorted(need_means.items())
+            },
         },
-        "retained_memories": len(result.memory),
+        "memory": {
+            "retained": len(result.memory),
+            "per_agent_mean": round(statistics.fmean(memory_counts), 3),
+            "per_agent_p95": percentile(memory_counts, 0.95),
+            "per_agent_maximum": max(memory_counts),
+            "configured_maximum": settings.memory.max_per_agent,
+            "writes_per_agent_tick": round(memory_write_rate, 6),
+            "projected_mean_cap_tick": (
+                round(projected_cap_tick, 1) if projected_cap_tick is not None else None
+            ),
+        },
+        "throughput_profile": {
+            "window_ticks": profile_window,
+            "early_ticks_per_second": round(early_throughput, 3),
+            "late_ticks_per_second": round(late_throughput, 3),
+            "late_to_early_ratio": round(late_throughput / early_throughput, 6),
+        },
         "sampled_cognition_traces": len(result.traces),
         "gates": gates,
     }
@@ -156,13 +222,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run and report the M1 acceptance calibration")
     parser.add_argument("--config", type=Path, default=Path("configs/calibration-m1.yaml"))
     parser.add_argument("--ticks", type=int)
+    parser.add_argument("--seed", type=int)
     parser.add_argument(
         "--output",
         type=Path,
         default=Path("artifacts/acceptance/m1-calibration.json"),
     )
     args = parser.parse_args()
-    report = asyncio.run(calibrate(args.config, args.output, ticks=args.ticks))
+    report = asyncio.run(
+        calibrate(
+            args.config,
+            args.output,
+            ticks=args.ticks,
+            seed=args.seed,
+        )
+    )
     write_json(args.output, report)
     print(json.dumps(report, sort_keys=True))
     if report["status"] != "passed":
