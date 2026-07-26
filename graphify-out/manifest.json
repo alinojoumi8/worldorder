@@ -1,7 +1,7 @@
 {
   ".codebase-memory/artifact.json": {
-    "mtime": 1785102719.269063,
-    "ast_hash": "787b45dbd0176456b971f0499e4b0937",
+    "mtime": 1785103969.5326374,
+    "ast_hash": "d1b23c884264f03ab5e58eaf3a615feb",
     "semantic_hash": ""
   },
   ".impeccable/composition-options.json": {
@@ -135,12 +135,12 @@
     "semantic_hash": ""
   },
   "polis/agents/actions/types.py": {
-    "mtime": 1785098256.328347,
+    "mtime": 1785102960.8933249,
     "ast_hash": "0955664af97c740c2f2e5c6a77766101",
     "semantic_hash": ""
   },
   "polis/agents/actions/validate.py": {
-    "mtime": 1785098256.329347,
+    "mtime": 1785102960.8943305,
     "ast_hash": "fa83648e238a6817c846399324a0fd0d",
     "semantic_hash": ""
   },
@@ -195,7 +195,7 @@
     "semantic_hash": ""
   },
   "polis/agents/state.py": {
-    "mtime": 1785099475.5870948,
+    "mtime": 1785102960.8953314,
     "ast_hash": "87b3559a3e211ddc21bc1804b9efb947",
     "semantic_hash": ""
   },
@@ -240,7 +240,7 @@
     "semantic_hash": ""
   },
   "polis/config/metric_catalogue.py": {
-    "mtime": 1785100584.885166,
+    "mtime": 1785102960.8963337,
     "ast_hash": "f44adbf39a3d8541778661def159b7d3",
     "semantic_hash": ""
   },
@@ -260,7 +260,7 @@
     "semantic_hash": ""
   },
   "polis/config/settings.py": {
-    "mtime": 1785099598.3801901,
+    "mtime": 1785102960.8973355,
     "ast_hash": "d22c8ea47a548bbaa9a7ebf4288bda36",
     "semantic_hash": ""
   },
@@ -285,7 +285,7 @@
     "semantic_hash": ""
   },
   "polis/events/kinds.py": {
-    "mtime": 1785098310.327078,
+    "mtime": 1785102960.9088535,
     "ast_hash": "be65a9a6af55beecc37501dbd935a266",
     "semantic_hash": ""
   },
@@ -345,7 +345,7 @@
     "semantic_hash": ""
   },
   "polis/kernel/invariants.py": {
-    "mtime": 1785099475.5876007,
+    "mtime": 1785102960.9098592,
     "ast_hash": "592e556f80af22cd236d0ba69c82df6c",
     "semantic_hash": ""
   },
@@ -365,7 +365,7 @@
     "semantic_hash": ""
   },
   "polis/living_city.py": {
-    "mtime": 1785099161.9570718,
+    "mtime": 1785102960.9098592,
     "ast_hash": "71659cacaca28b6a6c6456a58795b513",
     "semantic_hash": ""
   },
@@ -430,7 +430,7 @@
     "semantic_hash": ""
   },
   "polis/observatory/api.py": {
-    "mtime": 1785099475.5896115,
+    "mtime": 1785102960.9113705,
     "ast_hash": "e3413e38027dbc017937a06dc14e3509",
     "semantic_hash": ""
   },
@@ -475,7 +475,7 @@
     "semantic_hash": ""
   },
   "polis/store/living_city.py": {
-    "mtime": 1785101267.9060094,
+    "mtime": 1785102960.9133832,
     "ast_hash": "eedbb6e17f0f527bb4ae406ef1be9688",
     "semantic_hash": ""
   },
@@ -620,7 +620,7 @@
     "semantic_hash": ""
   },
   "tests/integration/observatory/test_api.py": {
-    "mtime": 1785099942.5987647,
+    "mtime": 1785102960.9153764,
     "ast_hash": "4cb832ab3a7c0ee0cc696b1127505afc",
     "semantic_hash": ""
   },
@@ -715,7 +715,7 @@
     "semantic_hash": ""
   },
   "tests/unit/research/test_metrics.py": {
-    "mtime": 1785100584.885166,
+    "mtime": 1785102960.919381,
     "ast_hash": "0c71ccf9b5af1c6e87d1c2151d8a16f8",
     "semantic_hash": ""
   },
@@ -835,7 +835,7 @@
     "semantic_hash": ""
   },
   "polis/economy/credit.py": {
-    "mtime": 1785100467.8058941,
+    "mtime": 1785102960.8983357,
     "ast_hash": "a356321ad2692ceea04a2ce3872b765e",
     "semantic_hash": ""
   },
@@ -850,7 +850,7 @@
     "semantic_hash": ""
   },
   "polis/economy/genesis.py": {
-    "mtime": 1785100120.1500492,
+    "mtime": 1785102960.9028473,
     "ast_hash": "a4e6b2217ea7ecf0ddbfaab89e47f34a",
     "semantic_hash": ""
   },
@@ -865,7 +865,7 @@
     "semantic_hash": ""
   },
   "polis/economy/labour.py": {
-    "mtime": 1785101428.2315557,
+    "mtime": 1785102960.9038534,
     "ast_hash": "b00e440f7e5dfe2aa5a9fa739513f934",
     "semantic_hash": ""
   },
@@ -880,8 +880,8 @@
     "semantic_hash": ""
   },
   "polis/economy/policy.py": {
-    "mtime": 1785101428.2315557,
-    "ast_hash": "38f1f86971dec4b8befbd88ddfdd7f6b",
+    "mtime": 1785103526.9632182,
+    "ast_hash": "687de8c4a288076e8fb57c7889405560",
     "semantic_hash": ""
   },
   "polis/economy/production.py": {
@@ -890,12 +890,12 @@
     "semantic_hash": ""
   },
   "polis/economy/state.py": {
-    "mtime": 1785101267.9060094,
+    "mtime": 1785102960.905855,
     "ast_hash": "cd2c40c1ad4832ed50f37b49166f105c",
     "semantic_hash": ""
   },
   "polis/research/economy_metrics.py": {
-    "mtime": 1785099475.5876007,
+    "mtime": 1785102960.9123807,
     "ast_hash": "81c9f4abbb2485d066a3f0a23f06c550",
     "semantic_hash": ""
   },
@@ -1265,78 +1265,78 @@
     "semantic_hash": ""
   },
   "migrations/versions/0012_m3_capital.py": {
-    "mtime": 1785098975.9504511,
-    "ast_hash": "cd05b8aa8fa4eb74c4c346eaabf43134",
+    "mtime": 1785102960.892326,
+    "ast_hash": "b3e6aecfcd23fbd91f11a0de335ce6bf",
     "semantic_hash": ""
   },
   "polis/economy/exchange/__init__.py": {
-    "mtime": 1785098217.9218843,
-    "ast_hash": "2ce98e02dcb08527a094097fc9bc157d",
+    "mtime": 1785102960.899336,
+    "ast_hash": "74379fd542777872e5a16fa4de1bfa67",
     "semantic_hash": ""
   },
   "polis/economy/exchange/book.py": {
-    "mtime": 1785098256.329347,
-    "ast_hash": "7b59cd2e74b8f74b0d47ef00261f5fc0",
+    "mtime": 1785102960.899336,
+    "ast_hash": "51d468bd4769d1e4d0c999d0f002e697",
     "semantic_hash": ""
   },
   "polis/economy/exchange/engine.py": {
-    "mtime": 1785101389.5401163,
-    "ast_hash": "d101dd875969e7fce484f933ff814760",
+    "mtime": 1785103526.9667373,
+    "ast_hash": "6315813b8937dc3d90bf31be23241bb1",
     "semantic_hash": ""
   },
   "polis/economy/exchange/models.py": {
-    "mtime": 1785098275.5815055,
-    "ast_hash": "c1f28411378810be48a5f336b935b695",
+    "mtime": 1785102960.90184,
+    "ast_hash": "a836150019bc0d7e26bac17b7e81642b",
     "semantic_hash": ""
   },
   "polis/economy/venture_state.py": {
-    "mtime": 1785099369.4268365,
-    "ast_hash": "10ac42cec4054c33b33ba53186b09cb9",
+    "mtime": 1785103526.9632182,
+    "ast_hash": "f1745fb39df11eb92a14fa0e5f2c4bf8",
     "semantic_hash": ""
   },
   "polis/economy/ventures.py": {
-    "mtime": 1785101428.2346013,
-    "ast_hash": "7992e6ecfaff538979fc6baae23ad630",
+    "mtime": 1785103765.075541,
+    "ast_hash": "bf24ade382e3cebde698566212d32c52",
     "semantic_hash": ""
   },
   "tests/integration/living_city/test_m3_capital.py": {
-    "mtime": 1785102209.7754943,
-    "ast_hash": "ebfabf63d3ff5217ce0db78a043966e9",
+    "mtime": 1785103850.0355363,
+    "ast_hash": "e11f9e1b04b8c0e1c3ca52fb1aa0c673",
     "semantic_hash": ""
   },
   "tests/integration/store/test_m3_resume.py": {
-    "mtime": 1785099936.478198,
-    "ast_hash": "852bd82e704de802f48f81a0128f33f1",
+    "mtime": 1785102960.9163764,
+    "ast_hash": "dda4ccac1a70a6f328ce2618112095de",
     "semantic_hash": ""
   },
   "tests/property/test_exchange_properties.py": {
-    "mtime": 1785100209.816715,
-    "ast_hash": "79a50c484cf92967bd0319c2bffc29e7",
+    "mtime": 1785102960.917377,
+    "ast_hash": "f6e3899e8af886525fe43ff403f05205",
     "semantic_hash": ""
   },
   "tests/unit/economy/test_exchange.py": {
-    "mtime": 1785101082.9548113,
-    "ast_hash": "e72197db1977de964826bee8aa235665",
+    "mtime": 1785102960.917377,
+    "ast_hash": "2790cd39f95f167e740ee5cfe31b02c7",
     "semantic_hash": ""
   },
   "tests/unit/economy/test_ventures.py": {
-    "mtime": 1785101313.3010213,
-    "ast_hash": "67156782bf044217e682e1c4980cddca",
+    "mtime": 1785103784.957257,
+    "ast_hash": "4632e62edf893fc72728f75c757f7964",
     "semantic_hash": ""
   },
   "configs/m3-smoke.yaml": {
-    "mtime": 1785101158.1411867,
-    "ast_hash": "3758a697d3dd615005f89c4eb8faad53",
+    "mtime": 1785102960.8704095,
+    "ast_hash": "f5fa965731bd64762cca7d2e9ced8ec1",
     "semantic_hash": ""
   },
   "artifacts/acceptance/m3-acceptance.json": {
-    "mtime": 1785102698.2592082,
-    "ast_hash": "ec1a1eb2012523ae2b793f5e3b493a7b",
+    "mtime": 1785103950.5285015,
+    "ast_hash": "94c3204a1a5f811ec2dcb9f07bf411b7",
     "semantic_hash": ""
   },
   "docs/acceptance/M3-ACCEPTANCE.md": {
-    "mtime": 1785102698.258697,
-    "ast_hash": "5d73c647865a3fe44b6e281721d263a2",
+    "mtime": 1785103950.5275018,
+    "ast_hash": "f5f6a2f1fe8b7fdc4d1c01b40fefcc9c",
     "semantic_hash": ""
   }
 }
