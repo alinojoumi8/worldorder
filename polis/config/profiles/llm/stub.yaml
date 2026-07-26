@@ -1,0 +1,12 @@
+llm:
+  providers:
+    stub:
+      kind: stub
+      max_concurrency: 64
+      billing: free
+  routing:
+    DELIBERATE: {lane: stub, model: stub-v1, template: deliberate/user.v1.jinja}
+    REFLECT: {lane: stub, model: stub-v1, template: reflect/questions.v1.jinja}
+    IMPORTANCE: {lane: stub, model: stub-v1, template: importance/user.v1.jinja}
+    EMBED: {lane: stub, model: stub-v1, template: embedding/user.v1.jinja}
+

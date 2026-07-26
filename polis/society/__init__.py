@@ -1,0 +1,2 @@
+"""Social institutions (M4+)."""
+
