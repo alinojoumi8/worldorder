@@ -13,8 +13,8 @@ END
 $$;
 
 GRANT CONNECT ON DATABASE polis TO polis_engine, polis_reader;
+GRANT CREATE ON DATABASE polis TO polis_engine;
 GRANT CREATE ON SCHEMA public TO polis_engine;
 GRANT USAGE ON SCHEMA public TO polis_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE polis_engine IN SCHEMA public
     GRANT SELECT ON TABLES TO polis_reader;
-
