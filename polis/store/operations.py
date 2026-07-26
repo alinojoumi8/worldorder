@@ -141,7 +141,10 @@ async def resume_stored_run(settings: Settings, run_id: UUID) -> ResumeReport:
             async for event in repository.scan(EventQuery(run_id, to_seq=complete_seq, order="seq"))
         ]
         expected_prefix = replay.events[: len(stored)]
-        if stored != list(expected_prefix):
+        if len(stored) != len(expected_prefix) or any(
+            stored_event.hash != expected_event.hash
+            for stored_event, expected_event in zip(stored, expected_prefix, strict=True)
+        ):
             raise StoreError("resume refused because stored events diverge from replay")
         tail = replay.events[len(stored) :]
         batch_size = 5_000
