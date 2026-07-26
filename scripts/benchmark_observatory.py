@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import gc
 import json
+import multiprocessing as mp
 import statistics
 import time
 from pathlib import Path
@@ -29,7 +30,11 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-async def drain_client(uri: str, ready: asyncio.Event, counts: dict[str, int]) -> None:
+async def drain_client(
+    uri: str,
+    ready: asyncio.Event,
+    counts: dict[str, int],
+) -> None:
     async with connect(uri, max_queue=256) as websocket:
         hello = json.loads(await websocket.recv())
         if hello.get("op") != "hello":
@@ -39,19 +44,48 @@ async def drain_client(uri: str, ready: asyncio.Event, counts: dict[str, int]) -
             ready.set()
         try:
             async for raw in websocket:
-                frame = json.loads(raw)
                 counts["frames"] += 1
-                if frame.get("op") == "lag":
+                if '"op":"lag"' in raw or '"op": "lag"' in raw:
                     counts["lag_frames"] += 1
         except asyncio.CancelledError:
             return
+
+
+async def run_clients(
+    uri: str,
+    ready_signal: Any,
+    stop_signal: Any,
+    result_queue: Any,
+) -> None:
+    counts = {"hello": 0, "frames": 0, "lag_frames": 0}
+    ready = asyncio.Event()
+    clients = [asyncio.create_task(drain_client(uri, ready, counts)) for _ in range(5)]
+    await ready.wait()
+    ready_signal.set()
+    try:
+        while not stop_signal.is_set():
+            await asyncio.sleep(0.02)
+    finally:
+        for client in clients:
+            client.cancel()
+        await asyncio.gather(*clients, return_exceptions=True)
+        result_queue.put(counts)
+
+
+def client_process(
+    uri: str,
+    ready_signal: Any,
+    stop_signal: Any,
+    result_queue: Any,
+) -> None:
+    asyncio.run(run_clients(uri, ready_signal, stop_signal, result_queue))
 
 
 async def timed_run(settings: Any, publish_run_id: UUID) -> float:
     publisher = RedisEphemeralPublisher(
         settings.store.redis_url,
         publish_run_id,
-        max_queue=256,
+        rate_hz=settings.observatory.live.rate_hz,
     )
     await publisher.start()
     started_ns = time.perf_counter_ns()
@@ -85,18 +119,36 @@ async def benchmark(
     connected: list[float] = []
     counts = {"hello": 0, "frames": 0, "lag_frames": 0}
     uri = f"{websocket_base}/api/v1/ws/live?run_id={run_id}"
+    process_context = mp.get_context("spawn")
 
     for _ in range(3):
         gc.collect()
         baseline.append(await timed_run(settings, run_id))
-        ready = asyncio.Event()
-        clients = [asyncio.create_task(drain_client(uri, ready, counts)) for _ in range(5)]
-        await asyncio.wait_for(ready.wait(), timeout=10)
+        ready_signal = process_context.Event()
+        stop_signal = process_context.Event()
+        result_queue = process_context.Queue()
+        process = process_context.Process(
+            target=client_process,
+            args=(uri, ready_signal, stop_signal, result_queue),
+            daemon=True,
+        )
+        process.start()
+        connected_ready = await asyncio.to_thread(ready_signal.wait, 10)
+        if not connected_ready:
+            process.terminate()
+            await asyncio.to_thread(process.join, 10)
+            raise TimeoutError("Five Observatory clients did not connect within 10 seconds")
         gc.collect()
         connected.append(await timed_run(settings, run_id))
-        for client in clients:
-            client.cancel()
-        await asyncio.gather(*clients, return_exceptions=True)
+        stop_signal.set()
+        trial_counts = await asyncio.to_thread(result_queue.get, True, 10)
+        await asyncio.to_thread(process.join, 10)
+        if process.is_alive():
+            process.terminate()
+            await asyncio.to_thread(process.join, 10)
+        result_queue.close()
+        for key in counts:
+            counts[key] += int(trial_counts[key])
 
     baseline_median = statistics.median(baseline)
     connected_median = statistics.median(connected)

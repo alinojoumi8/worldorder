@@ -335,7 +335,11 @@ async def run_persistent(settings: Settings) -> LivingCityResult:
                 tags=settings.run.tags,
             )
         )
-        publisher = RedisEphemeralPublisher(settings.store.redis_url, run_id)
+        publisher = RedisEphemeralPublisher(
+            settings.store.redis_url,
+            run_id,
+            rate_hz=settings.observatory.live.rate_hz,
+        )
         await publisher.start()
         try:
             result = await run_living_city(

@@ -226,20 +226,25 @@ export default function LiveApp() {
     socket.onopen = () => setSocketState("live");
     socket.onclose = () => setSocketState("stored");
     socket.onerror = () => setSocketState("stored");
-    socket.onmessage = (message) => {
-      const frame = JSON.parse(String(message.data)) as {
-        op: string;
-        kind?: number;
-        tick?: number;
-        as_of_seq?: number;
-        dropped?: number;
-        payload?: { agents?: MapAgent[]; metrics?: Record<string, number> };
-      };
+    type LiveFrame = {
+      op: string;
+      kind?: number;
+      tick?: number;
+      as_of_seq?: number;
+      dropped?: number;
+      payload?: { agents?: MapAgent[]; metrics?: Record<string, number> };
+      frames?: LiveFrame[];
+    };
+    const applyFrame = (frame: LiveFrame) => {
       if (frame.op === "lag") {
         setSocketState("lagged");
         return;
       }
       if (frame.op === "hello") return;
+      if (frame.op === "batch") {
+        frame.frames?.forEach(applyFrame);
+        return;
+      }
       if (frame.kind === 90051 && frame.payload?.agents) {
         setData((current) => {
           if (!current) return current;
@@ -273,6 +278,9 @@ export default function LiveApp() {
             : current
         );
       }
+    };
+    socket.onmessage = (message) => {
+      applyFrame(JSON.parse(String(message.data)) as LiveFrame);
     };
     return () => socket.close();
   }, [data?.run.run_id]);

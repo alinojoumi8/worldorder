@@ -23,11 +23,13 @@ class RedisEphemeralPublisher:
         url: str,
         run_id: UUID,
         *,
-        max_queue: int = 256,
+        max_queue: int = 1,
+        rate_hz: int = 10,
     ) -> None:
         self.client = redis.from_url(url, decode_responses=True)
         self.run_id = run_id
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=max_queue)
+        self.publish_interval_s = 1 / max(1, rate_hz)
         self.dropped = 0
         self._task: asyncio.Task[None] | None = None
 
@@ -35,21 +37,30 @@ class RedisEphemeralPublisher:
         self._task = asyncio.create_task(self._drain())
 
     async def publish(self, events: Sequence[Event]) -> None:
-        for event in events:
-            frame = {
+        if not events:
+            return
+        frames = [
+            {
                 "op": "eph",
                 "kind": event.kind,
                 "tick": event.tick,
                 "payload": event.payload,
             }
-            if self.queue.full():
-                try:
-                    self.queue.get_nowait()
-                    self.queue.task_done()
-                except asyncio.QueueEmpty:
-                    pass
-                self.dropped += 1
-            self.queue.put_nowait(frame)
+            for event in events
+        ]
+        if self.queue.full():
+            previous = self.queue.get_nowait()
+            self.queue.task_done()
+            by_kind = {int(item["kind"]): item for item in previous["frames"]}
+            by_kind.update({int(item["kind"]): item for item in frames})
+            frames = list(by_kind.values())
+            self.dropped += 1
+        frame = {
+            "op": "batch",
+            "tick": max(int(item["tick"]) for item in frames),
+            "frames": frames,
+        }
+        self.queue.put_nowait(frame)
 
     async def _drain(self) -> None:
         while True:
@@ -74,6 +85,7 @@ class RedisEphemeralPublisher:
                 )
             finally:
                 self.queue.task_done()
+            await asyncio.sleep(self.publish_interval_s)
 
     async def close(self) -> None:
         await self.queue.join()
