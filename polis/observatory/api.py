@@ -14,7 +14,12 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from polis.config.metric_catalogue import METRICS, UNAVAILABLE_M1_METRICS
+from polis.config.metric_catalogue import (
+    FUTURE_METRICS,
+    M2_METRICS,
+    METRICS,
+    UNAVAILABLE_M1_METRICS,
+)
 from polis.config.runtime_time import utc_now_naive
 from polis.config.settings import Settings, load_settings
 from polis.events.kinds import KIND_REGISTRY
@@ -202,6 +207,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get(f"{API_PREFIX}/runs/{{run_id}}/metrics/catalogue")
     async def metric_catalogue(run_id: UUID, request: Request) -> dict[str, Any]:
         database = db(request)
+        economy_rows = await database.fetch(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM metrics WHERE run_id=%s AND metric='m1'
+            ) AS available
+            """,
+            (run_id,),
+        )
+        economy_available = bool(economy_rows[0]["available"])
+        unavailable = sorted(FUTURE_METRICS | (frozenset() if economy_available else M2_METRICS))
         return _with_freshness(
             {
                 "items": [
@@ -212,10 +227,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "definition": item.definition,
                         "research_questions": item.research_questions,
                         "definition_hash": item.definition_hash,
+                        "available": (
+                            item.metric_id not in UNAVAILABLE_M1_METRICS
+                            or (economy_available and item.metric_id in M2_METRICS)
+                        ),
                     }
                     for item in METRICS.values()
                 ],
                 "unavailable_in_m1": sorted(UNAVAILABLE_M1_METRICS),
+                "unavailable_for_run": unavailable,
+                "economy_available": economy_available,
             },
             await _freshness(database, run_id),
         )
@@ -229,11 +250,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         to_tick: int | None = None,
         points: int = Query(2_000, ge=2, le=10_000),
     ) -> dict[str, Any]:
-        if metric in UNAVAILABLE_M1_METRICS:
+        if metric in FUTURE_METRICS:
             raise HTTPException(501, f"{metric} is unavailable until its owning milestone")
         if metric not in METRICS:
             raise HTTPException(404, "metric not registered")
         database = db(request)
+        if metric in M2_METRICS:
+            economy_rows = await database.fetch(
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM metrics WHERE run_id=%s AND metric='m1'
+                ) AS available
+                """,
+                (run_id,),
+            )
+            if not bool(economy_rows[0]["available"]):
+                raise HTTPException(
+                    501,
+                    f"{metric} is unavailable until the economy milestone",
+                )
         rows = await database.fetch(
             """
             SELECT tick,value,as_of_seq FROM metrics

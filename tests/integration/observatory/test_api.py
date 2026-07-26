@@ -58,13 +58,18 @@ async def test_observatory_is_read_only_fresh_and_marks_future_views_unavailable
                     f"/api/v1/runs/{run_id}/metrics",
                     params={"metric": "city.population"},
                 )
+                catalogue = await client.get(f"/api/v1/runs/{run_id}/metrics/catalogue")
+                economy_metric = await client.get(
+                    f"/api/v1/runs/{run_id}/metrics",
+                    params={"metric": "unemployment_rate"},
+                )
                 inspector = await client.get(f"/api/v1/runs/{run_id}/agents/ag_0000/tick/1")
                 mutation = await client.post("/api/v1/runs", json={})
                 compare = await client.get("/api/v1/compare")
 
         assert health.status_code == 200
         assert health.json()["database"]["role"] == "reader"
-        assert health.json()["database"]["alembic_head"] == "0005_observatory_projections"
+        assert health.json()["database"]["alembic_head"] == "0011_loan_close_tick"
         assert runs.status_code == 200
         assert runs.json()["as_of_seq"] > 0
         assert "engine" in runs.json()
@@ -74,10 +79,62 @@ async def test_observatory_is_read_only_fresh_and_marks_future_views_unavailable
         assert detail.json()["engine"]["projection_lag_ticks"] == 0
         assert len(agents.json()["items"]) == 8
         assert metric.json()["points"][-1]["value"] == 8
+        assert not catalogue.json()["economy_available"]
+        assert economy_metric.status_code == 501
         assert inspector.json()["recording"] in {"sampled", "not recorded"}
         assert mutation.status_code == 405
         assert compare.status_code == 501
         assert not compare.json()["available"]
+    finally:
+        engine_db = await Database.open(settings.store, role="engine")
+        await engine_db.execute("DELETE FROM runs WHERE run_id=%s", (run_id,))
+        await engine_db.close()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_observatory_serves_m2_economy_metrics_for_economy_runs() -> None:
+    settings = load_settings(
+        Path("configs/m2-smoke.yaml"),
+        overrides={
+            "run": {
+                "name": "observatory-m2-test",
+                "seed": 8_100_004,
+                "ticks": 7,
+                "scale": 8,
+            },
+            "population": {"initial_agents": 8},
+        },
+    )
+    run_id = run_id_for(settings)
+    engine_db = await Database.open(settings.store, role="engine")
+    await engine_db.execute("DELETE FROM runs WHERE run_id=%s", (run_id,))
+    await engine_db.close()
+    try:
+        await run_persistent(settings)
+        app = create_app(settings)
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+            ) as client:
+                catalogue = await client.get(f"/api/v1/runs/{run_id}/metrics/catalogue")
+                unemployment = await client.get(
+                    f"/api/v1/runs/{run_id}/metrics",
+                    params={"metric": "unemployment_rate"},
+                )
+                money = await client.get(
+                    f"/api/v1/runs/{run_id}/metrics",
+                    params={"metric": "m1"},
+                )
+
+        assert catalogue.status_code == 200
+        assert catalogue.json()["economy_available"]
+        assert unemployment.status_code == 200
+        assert unemployment.json()["points"]
+        assert money.status_code == 200
+        assert money.json()["points"][-1]["value"] > 0
     finally:
         engine_db = await Database.open(settings.store, role="engine")
         await engine_db.execute("DELETE FROM runs WHERE run_id=%s", (run_id,))

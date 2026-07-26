@@ -19,6 +19,10 @@ from polis.agents.memory import MemoryStore
 from polis.agents.state import AgentPopulation
 from polis.config.runtime import RuntimeConfig
 from polis.config.settings import Settings, config_hash
+from polis.economy.genesis import create_economy
+from polis.economy.labour import load_occupations
+from polis.economy.policy import MechanicalPolicy
+from polis.economy.state import EconomyState, EconomyWorldState
 from polis.events.kinds import (
     ACTION_REJECTED,
     ACTION_VALIDATED,
@@ -87,6 +91,8 @@ class LivingCityResult:
     memory: MemoryStore
     metrics: MetricCollector
     traces: Mapping[tuple[str, int], TraceRecord]
+    as_of_seq: int
+    economy: EconomyState | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +135,7 @@ class LivingCityEngine:
         metrics: MetricCollector,
         router: LLMRouter,
         rng: RngRegistry,
+        economy: EconomyState | None = None,
     ) -> None:
         self.settings = settings
         self.world = world
@@ -137,6 +144,20 @@ class LivingCityEngine:
         self.metrics = metrics
         self.router = router
         self.rng = rng
+        self.economy = economy
+        self.economy_policy = (
+            MechanicalPolicy(
+                settings,
+                population,
+                world,
+                economy,
+                rng,
+                load_occupations(settings.economy.occupations_path),
+                router,
+            )
+            if economy is not None
+            else None
+        )
         self.observations: dict[str, Observation] = {}
         self.routing: RoutingResult | None = None
         self.decisions: dict[str, Action] = {}
@@ -151,9 +172,14 @@ class LivingCityEngine:
             _Handler(Phase.DECIDE, "living.decide", 10, self.decide),
             _Handler(Phase.VALIDATE, "living.validate", 10, self.validate),
             _Handler(Phase.RESOLVE, "living.resolve", 10, self.resolve),
+            _Handler(Phase.INSTITUTIONS, "economy.institutions", 10, self.institutions),
             _Handler(Phase.VITALS, "living.vitals", 10, self.vitals),
             _Handler(Phase.METRICS, "living.metrics", 10, self.measure),
         )
+
+    async def institutions(self, ctx: TickContext) -> None:
+        if self.economy_policy is not None:
+            await self.economy_policy.step(ctx.tick, ctx.emit)
 
     def _trace_kept(self, agent_id: str, tick: int, mode: str) -> bool:
         seed = self.rng.seed_for("cognition.sample", agent_id, tick)
@@ -501,6 +527,8 @@ class LivingCityEngine:
             routing=self.routing,
             memory=self.memory,
             world=self.world,
+            economy=self.economy,
+            settings=self.settings,
         )
         for point in points:
             ctx.metrics[point.metric] = point.value
@@ -609,15 +637,6 @@ async def run_living_city(
         lanes={} if cache_mode == "replay" else None,
         cache=runtime_cache,
     )
-    engine = LivingCityEngine(
-        settings=settings,
-        world=world,
-        population=population,
-        memory=memory,
-        metrics=metrics,
-        router=router,
-        rng=rng,
-    )
     log.stage(
         NewEvent(
             RUN_STARTED,
@@ -674,7 +693,31 @@ async def run_living_city(
             tick=0,
             sim_time=clock.sim_time,
         )
+    economy: EconomyState | None = None
+    if settings.economy.enabled:
+        economy = create_economy(
+            settings,
+            population,
+            world,
+            rng,
+            run_id,
+            emit=lambda draft: log.stage(
+                draft,
+                tick=0,
+                sim_time=clock.sim_time,
+            ),
+        ).state
     await log.commit(0)
+    engine = LivingCityEngine(
+        settings=settings,
+        world=world,
+        population=population,
+        memory=memory,
+        metrics=metrics,
+        router=router,
+        rng=rng,
+        economy=economy,
+    )
     runtime = RuntimeConfig(settings)
     loop = TickLoop(
         run_id=run_id,
@@ -685,7 +728,17 @@ async def run_living_city(
         runtime=runtime,
         settings=settings,
         invariants=InvariantRunner(clock),
-        state=population,
+        state=(
+            EconomyWorldState(
+                population,
+                economy,
+                ticks_per_year=(
+                    settings.clock.days_per_sim_year * settings.clock.ticks_per_sim_day
+                ),
+            )
+            if economy is not None
+            else population
+        ),
     )
     for handler in engine.handlers():
         loop.register(handler)
@@ -703,4 +756,6 @@ async def run_living_city(
         memory,
         metrics,
         engine.traces,
+        log.last_seq,
+        economy,
     )

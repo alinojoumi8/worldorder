@@ -7,7 +7,14 @@ from uuid import UUID
 
 from polis.kernel.det import det_uuid
 
-ActionOrigin = Literal["reflex", "deliberate", "reflect", "external", "fallback"]
+ActionOrigin = Literal[
+    "reflex",
+    "deliberate",
+    "reflect",
+    "external",
+    "scripted",
+    "fallback",
+]
 
 
 class ActionType(StrEnum):
@@ -15,7 +22,26 @@ class ActionType(StrEnum):
     IDLE = "IDLE"
     SLEEP = "SLEEP"
     EAT = "EAT"
+    APPLY_FOR_JOB = "APPLY_FOR_JOB"
+    ACCEPT_OFFER = "ACCEPT_OFFER"
+    DECLINE_OFFER = "DECLINE_OFFER"
+    QUIT_JOB = "QUIT_JOB"
+    NEGOTIATE_WAGE = "NEGOTIATE_WAGE"
+    POST_VACANCY = "POST_VACANCY"
+    MAKE_OFFER = "MAKE_OFFER"
+    FIRE_EMPLOYEE = "FIRE_EMPLOYEE"
+    WORK = "WORK"
     STUDY = "STUDY"
+    BUY_GOOD = "BUY_GOOD"
+    SET_PRICE = "SET_PRICE"
+    PRODUCE = "PRODUCE"
+    RESTOCK = "RESTOCK"
+    OPEN_ACCOUNT = "OPEN_ACCOUNT"
+    DEPOSIT = "DEPOSIT"
+    WITHDRAW = "WITHDRAW"
+    APPLY_FOR_LOAN = "APPLY_FOR_LOAN"
+    REPAY_LOAN = "REPAY_LOAN"
+    DEFAULT = "DEFAULT"
     NULL_ACTION = "NULL_ACTION"
 
 

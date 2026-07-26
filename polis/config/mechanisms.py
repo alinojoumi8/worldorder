@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any, Final, TypeVar
@@ -38,8 +39,29 @@ def mechanism(id: str, *, entails: str, config_key: str | None = None) -> Callab
 
 
 def active_mechanisms(settings: Settings) -> dict[str, MechanismSpec]:
-    active_ids = set(settings.mechanisms.values())
-    return {key: value for key, value in sorted(MECHANISM_REGISTRY.items()) if key in active_ids}
+    if settings.economy.enabled:
+        for module in (
+            "polis.economy.firms",
+            "polis.economy.labour",
+            "polis.economy.policy",
+        ):
+            importlib.import_module(module)
+    disabled = {"off", "false", "disabled", "none"}
+    result: dict[str, MechanismSpec] = {}
+    for mechanism_id, spec in sorted(MECHANISM_REGISTRY.items()):
+        if spec.module.startswith("polis.economy") and not settings.economy.enabled:
+            continue
+        candidates: tuple[str, ...] = (mechanism_id, mechanism_id.replace(".", "_"))
+        configured: str | None = None
+        if spec.config_key is not None and spec.config_key.startswith("mechanisms."):
+            candidates = (spec.config_key.removeprefix("mechanisms."), *candidates)
+        for key in candidates:
+            if key in settings.mechanisms:
+                configured = settings.mechanisms[key]
+                break
+        if configured is None or configured.lower() not in disabled:
+            result[mechanism_id] = spec
+    return result
 
 
 def mechanism_manifest(

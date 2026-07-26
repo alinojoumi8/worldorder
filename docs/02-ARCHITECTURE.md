@@ -195,7 +195,7 @@ Selected kinds (the full table is generated from `kinds.py` into `11-GLOSSARY.md
 | 4020 | `REFLECTION_PRODUCED` | reflection_id, source memory ids, statement |
 | 5001 | `VACANCY_POSTED` | firm, role, skill reqs, wage offer |
 | 5010 | `HIRED` / 5011 `FIRED` / 5012 `QUIT` | agent, firm, wage |
-| 6020 | `GOODS_PURCHASED` | buyer, seller, sku, qty, unit price |
+| 6120 | `GOODS_PURCHASED` | buyer, seller, sku, qty, unit price |
 | 7010 | `ORDER_SUBMITTED` | side, symbol, qty, limit price |
 | 7020 | `TRADE_EXECUTED` | buy order, sell order, price, qty |
 | 8010 | `LOAN_ORIGINATED` | lender, borrower, principal, rate, term |

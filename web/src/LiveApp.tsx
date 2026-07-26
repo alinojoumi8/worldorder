@@ -51,6 +51,7 @@ type LoadedData = {
   agents: AgentRecord[];
   metrics: MetricSeries[];
   unavailable: string[];
+  economyAvailable: boolean;
 };
 
 function formatValue(metric: MetricSeries, value: number): string {
@@ -183,16 +184,34 @@ export default function LiveApp() {
         const runs = await polisApi.runs();
         const run = runs.items[0];
         if (!run) throw new Error("No simulation runs are stored yet.");
-        const [mapStatic, map, agents, catalogue, wellbeing, deliberate, diversity] =
-          await Promise.all([
+        const [mapStatic, map, agents, catalogue] = await Promise.all([
             polisApi.mapStatic(run.run_id),
             polisApi.map(run.run_id),
             allAgents(run.run_id),
-            polisApi.metricCatalogue(run.run_id),
-            polisApi.metric(run.run_id, "city.wellbeing_mean"),
-            polisApi.metric(run.run_id, "sys.cognition.deliberate_share"),
-            polisApi.metric(run.run_id, "sys.actions.unique")
+            polisApi.metricCatalogue(run.run_id)
           ]);
+        const preferredMetrics = catalogue.economy_available
+          ? [
+              "unemployment_rate",
+              "cpi",
+              "median_wage",
+              "bank_capital_ratio",
+              "m1",
+              "gdp_nominal"
+            ]
+          : [
+              "city.wellbeing_mean",
+              "sys.cognition.deliberate_share",
+              "sys.actions.unique"
+            ];
+        const available = new Set(
+          catalogue.items.filter((item) => item.available).map((item) => item.id)
+        );
+        const metrics = await Promise.all(
+          preferredMetrics
+            .filter((metric) => available.has(metric))
+            .map((metric) => polisApi.metric(run.run_id, metric))
+        );
         if (cancelled) return;
         setData({
           run,
@@ -205,8 +224,9 @@ export default function LiveApp() {
           places: mapStatic.places,
           mapAgents: map.agents,
           agents: agents.items,
-          metrics: [wellbeing, deliberate, diversity],
-          unavailable: catalogue.unavailable_in_m1
+          metrics,
+          unavailable: catalogue.unavailable_for_run,
+          economyAvailable: catalogue.economy_available
         });
         setSelected(agents.items[0]?.agent_id ?? null);
         setStatus(`${run.name} loaded from the read-only projection`);
@@ -314,7 +334,9 @@ export default function LiveApp() {
     <div className="live-shell">
       <header className="live-topbar">
         <div>
-          <span className="live-kicker">Living Systems Atlas · M1</span>
+          <span className="live-kicker">
+            Living Systems Atlas · {data?.economyAvailable ? "M2" : "M1"}
+          </span>
           <h1>POLIS Observatory</h1>
         </div>
         <div className="live-run-state">
@@ -429,9 +451,11 @@ export default function LiveApp() {
             <div className="live-chart-grid">
               {data.metrics.map((series) => <Sparkline key={series.metric} series={series} />)}
             </div>
-            <div className="live-unavailable">
-              Economy-only metrics unavailable in M1: {data.unavailable.join(", ")}.
-            </div>
+            {data.unavailable.length ? (
+              <div className="live-unavailable">
+                Later-milestone metrics: {data.unavailable.join(", ")}.
+              </div>
+            ) : null}
           </section>
         ) : null}
 

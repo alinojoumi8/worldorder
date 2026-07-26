@@ -1,0 +1,91 @@
+occupations:
+  labourer:
+    sectors: [industrial, food, retail]
+    requirements: {manual: 5000}
+    intensity: {manual: 10000}
+    weights: {manual: 10000}
+  operator:
+    sectors: [industrial]
+    requirements: {manual: 5000, operations: 5000}
+    intensity: {manual: 6000, operations: 10000}
+    weights: {manual: 5000, operations: 5000}
+  clerk:
+    sectors: [services, finance, retail]
+    requirements: {operations: 5000, writing: 5000}
+    intensity: {operations: 10000, writing: 6000}
+    weights: {operations: 6000, writing: 4000}
+  sales_rep:
+    sectors: [retail, services, media]
+    requirements: {sales: 5000, persuasion: 5000}
+    intensity: {sales: 10000, persuasion: 8000}
+    weights: {sales: 6000, persuasion: 4000}
+  accountant:
+    sectors: [finance, services]
+    requirements: {finance: 5000, operations: 5000}
+    intensity: {finance: 10000, operations: 6000}
+    weights: {finance: 7000, operations: 3000}
+  analyst:
+    sectors: [finance]
+    requirements: {finance: 5000, research: 5000}
+    intensity: {finance: 10000, research: 8000}
+    weights: {finance: 6000, research: 4000}
+  engineer:
+    sectors: [industrial, services]
+    requirements: {engineering: 5000, research: 5000}
+    intensity: {engineering: 10000, research: 7000}
+    weights: {engineering: 7000, research: 3000}
+  researcher:
+    sectors: [health, education, industrial]
+    requirements: {research: 5000, writing: 5000}
+    intensity: {research: 10000, writing: 7000}
+    weights: {research: 7000, writing: 3000}
+  lawyer:
+    sectors: [services]
+    requirements: {law: 5000, negotiation: 5000, persuasion: 5000}
+    intensity: {law: 10000, negotiation: 8000, persuasion: 6000}
+    weights: {law: 5000, negotiation: 3000, persuasion: 2000}
+  physician:
+    sectors: [health]
+    requirements: {medicine: 5000, research: 5000}
+    intensity: {medicine: 10000, research: 6000}
+    weights: {medicine: 8000, research: 2000}
+  nurse:
+    sectors: [health]
+    requirements: {medicine: 5000, manual: 5000}
+    intensity: {medicine: 10000, manual: 6000}
+    weights: {medicine: 7000, manual: 3000}
+  teacher:
+    sectors: [education]
+    requirements: {teaching: 5000, writing: 5000}
+    intensity: {teaching: 10000, writing: 6000}
+    weights: {teaching: 7000, writing: 3000}
+  journalist:
+    sectors: [media]
+    requirements: {writing: 5000, research: 5000, persuasion: 5000}
+    intensity: {writing: 10000, research: 8000, persuasion: 5000}
+    weights: {writing: 5000, research: 3000, persuasion: 2000}
+  designer:
+    sectors: [media, industrial]
+    requirements: {design: 5000, writing: 5000}
+    intensity: {design: 10000, writing: 5000}
+    weights: {design: 8000, writing: 2000}
+  manager:
+    sectors: [industrial, food, retail, services, finance, health, education, media]
+    requirements: {management: 5000, negotiation: 5000, operations: 5000}
+    intensity: {management: 10000, negotiation: 7000, operations: 6000}
+    weights: {management: 5000, negotiation: 2500, operations: 2500}
+  executive:
+    sectors: [industrial, food, retail, services, finance, health, education, media]
+    requirements: {management: 5000, negotiation: 5000, finance: 5000, persuasion: 5000}
+    intensity: {management: 10000, negotiation: 8000, finance: 7000, persuasion: 7000}
+    weights: {management: 4000, negotiation: 2000, finance: 2000, persuasion: 2000}
+  founder:
+    sectors: [industrial, food, retail, services, finance, health, education, media]
+    requirements: {}
+    intensity: {management: 10000, sales: 7000, finance: 6000}
+    weights: {management: 4000, sales: 3000, finance: 3000}
+  officer:
+    sectors: [government]
+    requirements: {manual: 5000, law: 5000}
+    intensity: {manual: 8000, law: 10000}
+    weights: {manual: 4000, law: 6000}

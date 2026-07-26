@@ -18,6 +18,18 @@ from polis.store.engine import Database, StoreError
 from polis.store.repositories.events import EventRepository
 from polis.store.repositories.runs import RunRecord, RunRepository
 
+_ACCOUNT_TYPES = {
+    "cash": "cash",
+    "dep": "deposit",
+    "esc": "escrow",
+    "res": "reserve",
+    "lnr": "loan_receivable",
+    "txr": "tax_receivable",
+    "dpl": "deposit",
+    "lnp": "loan_payable",
+    "iss": "issuance",
+}
+
 
 def _prompt_manifest(settings: Settings) -> dict[str, str]:
     return {
@@ -40,6 +52,26 @@ def _model_manifest(settings: Settings) -> dict[str, dict[str, str | None]]:
 
 async def _clear_projections(db: Database, run_id: Any) -> None:
     for table in (
+        "ledger_entries",
+        "ledger_accounts",
+        "holdings",
+        "securities",
+        "tax_assessments",
+        "loan_payments",
+        "loans",
+        "loan_applications",
+        "banks",
+        "cpi_series",
+        "cpi_baskets",
+        "goods_transactions",
+        "agent_skills",
+        "inventory",
+        "employments",
+        "job_offers",
+        "job_applications",
+        "vacancies",
+        "skus",
+        "firms",
         "cognition_traces",
         "metrics",
         "beliefs",
@@ -64,7 +96,7 @@ async def write_living_city_projections(
     run_id = result.report.run_id
     if replace:
         await _clear_projections(db, run_id)
-    as_of_seq = result.report.events + len(result.population) + 3
+    as_of_seq = result.as_of_seq
     place_at = {(place.x, place.y): place.place_id for place in result.world.places}
     async with db.txn() as connection, connection.cursor() as cursor:
         await cursor.executemany(
@@ -183,6 +215,513 @@ async def write_living_city_projections(
                 for agent in result.population
             ],
         )
+        if result.economy is not None:
+            await cursor.executemany(
+                """
+                INSERT INTO ledger_accounts(
+                    run_id,account_id,owner_id,owner_type,account_type,currency,
+                    balance_cents,opened_tick,closed_tick
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        account.account_id,
+                        account.owner_id,
+                        account.owner_type,
+                        _ACCOUNT_TYPES[account.code],
+                        account.currency,
+                        account.balance_cents,
+                        account.opened_tick,
+                        account.closed_tick,
+                    )
+                    for account in result.economy.ledger.accounts()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO ledger_entries(
+                    run_id,txn_id,tick,account_id,direction,amount_cents,reason,event_seq
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        entry.txn_id,
+                        entry.tick,
+                        entry.account_id,
+                        entry.direction,
+                        entry.amount_cents,
+                        entry.reason,
+                        entry.event_seq,
+                    )
+                    for entry in result.economy.ledger.entries()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO firms(
+                    run_id,firm_id,name,founded_tick,dissolved_tick,sector,place_id,
+                    founder_id,ledger_account_id,productivity_bp,capital_cents,
+                    liquid_cents,headcount,target_headcount,cumulative_output_units,
+                    cumulative_revenue_cents,cumulative_wage_cents,is_public,symbol,status
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                    %s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        firm.firm_id,
+                        firm.name,
+                        0,
+                        None,
+                        firm.sector,
+                        firm.place_id,
+                        firm.founder_id,
+                        firm.ledger_account_id,
+                        firm.productivity_bp,
+                        firm.capital_cents,
+                        firm.liquid_cents,
+                        firm.headcount,
+                        firm.target_headcount,
+                        firm.cumulative_output_units,
+                        firm.cumulative_revenue_cents,
+                        firm.cumulative_wage_cents,
+                        False,
+                        None,
+                        firm.status,
+                    )
+                    for firm in result.economy.firms.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO vacancies(
+                    run_id,vacancy_id,firm_id,posted_tick,closed_tick,expires_tick,
+                    district_id,occupation,skill_reqs,wage_offer_cents,headcount,
+                    min_match_score_bp,applicants_n,status,filled_by
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        vacancy.vacancy_id,
+                        vacancy.firm_id,
+                        vacancy.posted_tick,
+                        (result.report.last_tick if vacancy.status != "open" else None),
+                        vacancy.expires_tick,
+                        vacancy.district_id,
+                        vacancy.occupation,
+                        Jsonb(vacancy.skill_reqs),
+                        vacancy.wage_offer_cents,
+                        vacancy.headcount,
+                        vacancy.min_match_score_bp,
+                        vacancy.applicants_n,
+                        vacancy.status,
+                        None,
+                    )
+                    for vacancy in result.economy.vacancies.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO job_applications(
+                    run_id,application_id,vacancy_id,agent_id,tick,
+                    asked_wage_cents,outcome,match_score_bp,rank
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        application.application_id,
+                        application.vacancy_id,
+                        application.agent_id,
+                        application.submitted_tick,
+                        application.asked_wage_cents,
+                        application.status,
+                        application.match_score_bp,
+                        application.rank,
+                    )
+                    for application in result.economy.applications.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO job_offers(
+                    run_id,offer_id,application_id,vacancy_id,firm_id,agent_id,
+                    wage_cents,occupation,made_tick,expires_tick,status
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        offer.offer_id,
+                        offer.application_id,
+                        offer.vacancy_id,
+                        offer.firm_id,
+                        offer.agent_id,
+                        offer.wage_cents,
+                        offer.occupation,
+                        offer.made_tick,
+                        offer.expires_tick,
+                        offer.status,
+                    )
+                    for offer in result.economy.offers.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO employments(
+                    run_id,employment_id,agent_id,firm_id,occupation,wage_cents,
+                    started_tick,ended_tick,end_reason,match_score_bp,hours_bp,
+                    accrued_wage_cents,accrual_remainder,total_paid_cents,
+                    last_worked_tick,last_effective_labour_bp
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        employment.employment_id,
+                        employment.agent_id,
+                        employment.firm_id,
+                        employment.occupation,
+                        employment.wage_cents,
+                        employment.started_tick,
+                        employment.ended_tick,
+                        None,
+                        employment.match_score_bp,
+                        employment.hours_bp,
+                        employment.accrued_wage_cents,
+                        employment.accrual_remainder,
+                        employment.total_paid_cents,
+                        employment.last_worked_tick,
+                        employment.last_effective_labour_bp,
+                    )
+                    for employment in result.economy.employments.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO skus(
+                    run_id,sku,category,is_necessity,base_utility_bp,
+                    perishable_bp_per_day,durable_life_ticks,is_service,is_capital,
+                    need_restore_bp,gamma_units_per_year,beta_bp,sectors,yield_units
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        sku.sku,
+                        sku.category,
+                        sku.is_necessity,
+                        sku.base_utility_bp,
+                        sku.perishable_bp_per_day,
+                        sku.durable_life_ticks,
+                        sku.is_service,
+                        sku.is_capital,
+                        Jsonb(sku.need_restore_bp),
+                        sku.gamma_units_per_year,
+                        sku.beta_bp,
+                        list(sku.sectors),
+                        sku.yield_units,
+                    )
+                    for sku in result.economy.skus.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO inventory(
+                    run_id,firm_id,sku,qty,unit_cost_cents,price_cents,carry_micro,
+                    markup_bp,units_sold_28d,updated_tick
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        inventory.firm_id,
+                        inventory.sku,
+                        inventory.quantity,
+                        inventory.unit_cost_cents,
+                        inventory.price_cents,
+                        inventory.carry_micro,
+                        inventory.markup_bp,
+                        inventory.units_sold_28d,
+                        result.report.last_tick,
+                    )
+                    for inventory in result.economy.inventory.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO goods_transactions(
+                    run_id,txn_id,ledger_txn_id,tick,buyer_id,seller_firm_id,sku,
+                    qty,unit_price_cents,gross_cents,sales_tax_cents,subsidy_cents
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        transaction.txn_id,
+                        transaction.ledger_txn_id,
+                        transaction.tick,
+                        transaction.buyer_id,
+                        transaction.seller_firm_id,
+                        transaction.sku,
+                        transaction.qty,
+                        transaction.unit_price_cents,
+                        transaction.gross_cents,
+                        transaction.sales_tax_cents,
+                        transaction.subsidy_cents,
+                    )
+                    for transaction in result.economy.goods_transactions
+                ],
+            )
+            if result.economy.basket is not None:
+                await cursor.execute(
+                    """
+                    INSERT INTO cpi_baskets(
+                        run_id,version,fixed_tick,quantities,base_prices_cents
+                    ) VALUES(%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        run_id,
+                        result.economy.basket.version,
+                        result.economy.basket.fixed_tick,
+                        Jsonb(result.economy.basket.quantities),
+                        Jsonb(result.economy.basket.base_prices_cents),
+                    ),
+                )
+            await cursor.executemany(
+                """
+                INSERT INTO cpi_series(
+                    run_id,tick,index_bp,core_bp,fisher_bp,category_index_bp
+                ) VALUES(%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        tick,
+                        index_bp,
+                        result.economy.cpi_core_history_bp.get(tick, index_bp),
+                        result.economy.cpi_fisher_history_bp.get(tick, index_bp),
+                        Jsonb(
+                            {
+                                category: values[tick]
+                                for category, values in (
+                                    result.economy.cpi_category_history_bp.items()
+                                )
+                                if tick in values
+                            }
+                        ),
+                    )
+                    for tick, index_bp in sorted(result.economy.cpi_history_bp.items())
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO agent_skills(
+                    run_id,agent_id,skill,level_bp,last_used_tick
+                ) VALUES(%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        agent.agent_id,
+                        skill,
+                        round(level * 10_000),
+                        result.economy.skill_last_used_tick.get(
+                            agent.agent_id,
+                            {},
+                        ).get(skill, 0),
+                    )
+                    for agent in result.population
+                    for skill, level in sorted(agent.skills.items())
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO banks(
+                    run_id,bank_id,name,place_id,ledger_account_id,reserve_account_id,
+                    deposit_liability_account_id,capital_cents,reserve_ratio_bp,
+                    is_central,status,founded_tick,failed_tick,lending_frozen,
+                    capital_ratio_bp
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        bank.bank_id,
+                        bank.name,
+                        bank.place_id,
+                        bank.deposit_liability_account_id,
+                        bank.reserve_account_id,
+                        bank.deposit_liability_account_id,
+                        bank.capital_cents,
+                        bank.reserve_ratio_bp,
+                        bank.is_central,
+                        bank.status,
+                        bank.founded_tick,
+                        bank.failed_tick,
+                        bank.lending_frozen,
+                        bank.capital_ratio_bp,
+                    )
+                    for bank in result.economy.banks.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO loan_applications(
+                    run_id,application_id,borrower_id,lender_id,requested_cents,
+                    purpose,term_ticks,collateral,submitted_tick,status,score_bp,
+                    offered_cents,offered_rate_bp,reason_codes
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        application.application_id,
+                        application.borrower_id,
+                        application.lender_id,
+                        application.requested_cents,
+                        application.purpose,
+                        application.term_ticks,
+                        Jsonb(application.collateral),
+                        application.submitted_tick,
+                        application.status,
+                        application.score_bp,
+                        application.offered_cents,
+                        application.offered_rate_bp,
+                        Jsonb(list(application.reason_codes)),
+                    )
+                    for application in result.economy.loan_applications.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO loans(
+                    run_id,loan_id,lender_id,borrower_id,purpose,principal_cents,
+                    outstanding_cents,annual_rate_bp,term_ticks,originated_tick,
+                    matures_tick,status,collateral,collateral_value_cents,
+                    credit_score_at_origination_bp,payment_cents,payments_n,
+                    next_payment_tick,accrued_interest_cents,
+                    total_interest_paid_cents,capitalised_interest_cents,
+                    missed_since_tick,defaulted_tick,closed_tick
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                    %s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        loan.loan_id,
+                        loan.lender_id,
+                        loan.borrower_id,
+                        loan.purpose,
+                        loan.principal_cents,
+                        loan.outstanding_cents,
+                        loan.annual_rate_bp,
+                        loan.term_ticks,
+                        loan.originated_tick,
+                        loan.matures_tick,
+                        loan.status,
+                        Jsonb(loan.collateral),
+                        loan.collateral_value_cents,
+                        loan.credit_score_at_origination_bp,
+                        loan.payment_cents,
+                        loan.payments_n,
+                        loan.next_payment_tick,
+                        loan.accrued_interest_cents,
+                        loan.total_interest_paid_cents,
+                        loan.capitalised_interest_cents,
+                        loan.missed_since_tick,
+                        loan.defaulted_tick,
+                        loan.closed_tick,
+                    )
+                    for loan in result.economy.loans.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO loan_payments(
+                    run_id,payment_id,loan_id,tick,principal_cents,interest_cents,missed
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        payment.payment_id,
+                        payment.loan_id,
+                        payment.tick,
+                        payment.principal_cents,
+                        payment.interest_cents,
+                        payment.missed,
+                    )
+                    for payment in result.economy.loan_payments
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO tax_assessments(
+                    run_id,assessment_id,taxpayer_id,tax_type,base_cents,rate_bp,
+                    assessed_cents,assessed_tick,due_tick,paid_cents,status
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        assessment.assessment_id,
+                        assessment.taxpayer_id,
+                        assessment.tax_type,
+                        assessment.base_cents,
+                        assessment.rate_bp,
+                        assessment.assessed_cents,
+                        assessment.assessed_tick,
+                        assessment.due_tick,
+                        assessment.paid_cents,
+                        assessment.status,
+                    )
+                    for assessment in result.economy.tax_assessments.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO securities(
+                    run_id,symbol,issuer_firm_id,class,shares_outstanding,
+                    listed_tick,delisted_tick,coupon_bp,matures_tick
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        bond.symbol,
+                        "gv_treasury",
+                        "bond",
+                        bond.face_cents,
+                        bond.issued_tick,
+                        bond.matures_tick if bond.status == "matured" else None,
+                        bond.coupon_bp,
+                        bond.matures_tick,
+                    )
+                    for bond in result.economy.bonds.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO holdings(
+                    run_id,holder_id,symbol,qty,avg_cost_cents,reserved_qty
+                ) VALUES(%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (run_id, holder_id, symbol, 1, cents, 0)
+                    for holder_id, holdings in result.economy.bond_holdings_cents.items()
+                    for symbol, cents in holdings.items()
+                ],
+            )
         memories = [
             row
             for agent in result.population
