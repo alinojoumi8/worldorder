@@ -8,6 +8,7 @@ from typing import Any
 from polis.agents.actions.types import Action, ActionType, make_action
 from polis.agents.state import AgentPopulation
 from polis.config.canon import canonical_json
+from polis.config.mechanisms import mechanism
 from polis.config.settings import Settings
 from polis.economy.credit import CreditContext, write_off_loan
 from polis.economy.exchange.engine import ExchangeEngine
@@ -111,6 +112,78 @@ def _coalesce(legs: Iterable[Leg]) -> list[Leg]:
     ]
 
 
+@mechanism(
+    "venture_valuation",
+    entails=(
+        "Valuations are anchored to the median of recent comparable rounds and to a revenue "
+        "multiple. Valuation momentum — a rise in recent valuations mechanically raising the "
+        "next valuation — therefore follows in part from the anchoring rule, and a "
+        "private-market bubble is partly implied. Set w_llm_bp: 10,000 for the ablation in "
+        "which valuation is entirely investor-determined; any A3 or A6 claim about venture "
+        "valuations must report both settings."
+    ),
+    config_key="mechanisms.venture_valuation",
+)
+def venture_pre_money_cents(
+    anchor_cents: int,
+    valuation_view_cents: int,
+    llm_weight_bp: int,
+) -> int:
+    if anchor_cents < 0 or valuation_view_cents < 0:
+        raise ValueError("venture valuations cannot be negative")
+    if not 0 <= llm_weight_bp <= 10_000:
+        raise ValueError("venture valuation weight must be within 0..10000")
+    return (
+        (10_000 - llm_weight_bp) * anchor_cents + llm_weight_bp * valuation_view_cents
+    ) // 10_000
+
+
+@mechanism(
+    "ma.valuation_anchor",
+    entails=(
+        "Offer prices are anchored at or above the market capitalisation of listed targets "
+        "and above a DCF/comparables blend for private ones. A positive acquisition premium "
+        "is therefore implied. Not implied: the level of premiums, their cyclicality, whether "
+        "acquirers overpay relative to realised synergies, or the post-acquisition "
+        "productivity path."
+    ),
+    config_key="mechanisms.ma_valuation_anchor",
+)
+def acquisition_offer_cents(anchor_cents: int, premium_bp: int) -> int:
+    if anchor_cents < 0:
+        raise ValueError("acquisition anchor cannot be negative")
+    if premium_bp < -10_000:
+        raise ValueError("acquisition premium cannot reduce value below zero")
+    return anchor_cents * (10_000 + premium_bp) // 10_000
+
+
+@mechanism(
+    "ventures.integration_synergy",
+    entails=(
+        "Setting integration_synergy_bp = 0 by default matters: assuming positive synergies "
+        'would make "acquisitions improve productivity" a mechanism, and A6 asks whether '
+        "they do."
+    ),
+    config_key="mechanisms.ventures_integration_synergy",
+)
+def integrated_productivity_bp(
+    acquirer_productivity_bp: int,
+    acquirer_capital_cents: int,
+    target_productivity_bp: int,
+    target_capital_cents: int,
+    integration_delta_bp: int,
+) -> tuple[int, int]:
+    total_capital = acquirer_capital_cents + target_capital_cents
+    if total_capital <= 0:
+        return acquirer_productivity_bp, 0
+    blended = (
+        acquirer_productivity_bp * acquirer_capital_cents
+        + target_productivity_bp * target_capital_cents
+    ) // total_capital
+    integrated = max(1, blended + integration_delta_bp)
+    return integrated, integrated - blended
+
+
 def venture_waterfall(
     proceeds_cents: int,
     cap_rows: Sequence[CapTableState],
@@ -159,7 +232,58 @@ def venture_waterfall(
         result[holder_id] += cents
     if sum(result.values()) != proceeds_cents:
         raise RuntimeError("venture waterfall did not allocate exact proceeds")
-    return dict(sorted(result.items()))
+    return {holder_id: cents for holder_id, cents in sorted(result.items()) if cents > 0}
+
+
+def priority_waterfall(
+    proceeds_cents: int,
+    claims: Sequence[ClaimState],
+) -> dict[str, int]:
+    """Allocate a bankruptcy estate by strict class priority and class pro rata."""
+    if proceeds_cents < 0:
+        raise ValueError("bankruptcy proceeds cannot be negative")
+    if len({claim.claim_id for claim in claims}) != len(claims):
+        raise ValueError("bankruptcy claim ids must be unique")
+    if any(claim.claim_cents < 0 for claim in claims):
+        raise ValueError("bankruptcy claims cannot be negative")
+    if any(not 1 <= claim.priority_class <= 5 for claim in claims):
+        raise ValueError("bankruptcy priority class must be within 1..5")
+    payments = {claim.claim_id: 0 for claim in claims}
+    remaining = proceeds_cents
+    for priority in range(1, 6):
+        class_claims = sorted(
+            (
+                claim
+                for claim in claims
+                if claim.priority_class == priority and claim.claim_cents > 0
+            ),
+            key=lambda claim: claim.claim_id,
+        )
+        class_total = sum(claim.claim_cents for claim in class_claims)
+        pool = min(remaining, class_total)
+        if pool:
+            payments.update(
+                allocate(
+                    pool,
+                    [(claim.claim_id, claim.claim_cents) for claim in class_claims],
+                )
+            )
+        remaining -= pool
+        if remaining == 0:
+            break
+    total_claimed = sum(claim.claim_cents for claim in claims)
+    if sum(payments.values()) != min(proceeds_cents, total_claimed):
+        raise RuntimeError("priority waterfall did not allocate exact proceeds")
+    for junior in claims:
+        if payments[junior.claim_id] <= 0:
+            continue
+        if not all(
+            payments[senior.claim_id] == senior.claim_cents
+            for senior in claims
+            if senior.priority_class < junior.priority_class
+        ):
+            raise RuntimeError("junior claim paid before senior claims were satisfied")
+    return dict(sorted(payments.items()))
 
 
 class VentureEngine:
@@ -615,6 +739,42 @@ class VentureEngine:
             return fallback, str(result.call_id)
         return result.parsed, str(result.call_id)
 
+    def _venture_valuation_anchor(self, startup: StartupState, tick: int) -> int:
+        if startup.revenue_ttm_cents > 0:
+            multiple = self.settings.ventures.sector_multiple_bp.get(
+                startup.sector,
+                self.settings.ventures.sector_multiple_bp.get("default", 10_000),
+            )
+            return max(
+                1,
+                startup.revenue_ttm_cents * multiple // 10_000,
+            )
+        comparable_stage = self._next_stage(startup.stage)
+        comparable_rounds = [
+            row
+            for row in sorted(
+                self.economy.ventures.rounds.values(),
+                key=lambda item: (-item.closed_tick, item.round_id),
+            )
+            if row.startup_id != startup.startup_id
+            and row.stage == comparable_stage
+            and (other := self.economy.ventures.startups.get(row.startup_id)) is not None
+            and other.sector == startup.sector
+        ]
+        window = self.settings.ventures.comparable_window
+        if len(comparable_rounds) > window:
+            self.rng.get("ventures.comparables", startup.startup_id, tick).shuffle(
+                comparable_rounds
+            )
+            comparable_rounds = comparable_rounds[:window]
+        values = sorted(row.pre_money_cents for row in comparable_rounds)
+        if not values:
+            return max(1, self.settings.ventures.seed_default_pre_money_cents)
+        middle = len(values) // 2
+        if len(values) % 2:
+            return values[middle]
+        return (values[middle - 1] + values[middle]) // 2
+
     def _issue_term_sheet(
         self,
         action: Action,
@@ -644,11 +804,25 @@ class VentureEngine:
         expires = tick + (
             self.settings.ventures.term_sheet_days * self.settings.clock.ticks_per_sim_day
         )
+        valuation_mode = self.settings.mechanisms.get(
+            "venture_valuation",
+            "comparables_blend",
+        )
+        llm_weight_bp = (
+            10_000
+            if valuation_mode.lower() in {"off", "disabled", "investor_only"}
+            else self.settings.ventures.valuation_llm_weight_bp
+        )
+        pre_money_cents = venture_pre_money_cents(
+            self._venture_valuation_anchor(startup, tick),
+            int(params["pre_money_cents"]),
+            llm_weight_bp,
+        )
         term = TermSheetState(
             term_sheet_id=term_sheet_id,
             startup_id=startup_id,
             investor_id=investor_id,
-            pre_money_cents=int(params["pre_money_cents"]),
+            pre_money_cents=pre_money_cents,
             amount_cents=int(params["amount_cents"]),
             security=str(params.get("security", "preferred")),
             liq_pref_bp=int(params.get("liq_pref_bp", self.settings.ventures.liq_pref_bp)),
@@ -954,7 +1128,17 @@ class VentureEngine:
             or target.status != "active"
         ):
             return ()
-        offer = int(action.params.get("offer_cents", 0))
+        anchor = self._acquisition_anchor_cents(target_id)
+        anchor_mode = self.settings.mechanisms.get("ma_valuation_anchor", "on")
+        default_premium_bp = (
+            0
+            if anchor_mode.lower() in {"off", "false", "disabled", "none"}
+            else self.settings.ventures.acquisition_premium_bp
+        )
+        offer = int(action.params.get("offer_cents", 0)) or acquisition_offer_cents(
+            anchor,
+            default_premium_bp,
+        )
         stock_ratio_bp = int(action.params.get("stock_ratio_bp", 0))
         integration_mode = str(action.params.get("integration_mode", "absorb"))
         if integration_mode == "asset_sale" and stock_ratio_bp:
@@ -968,7 +1152,6 @@ class VentureEngine:
             sum(row.shares for row in self._acquisition_equity_rows(target_id)),
         )
         per_share = offer // shares
-        anchor = max(1, self.economy.ledger.net_worth(target_id))
         premium = 10_000 * (offer - anchor) // anchor
         deal_id = f"ma_{str(action.action_id).replace('-', '')[:18]}"
         deal = AcquisitionState(
@@ -1008,6 +1191,36 @@ class VentureEngine:
                 )
             ),
         )
+
+    def _acquisition_anchor_cents(self, target_id: str) -> int:
+        firm = self.economy.firms[target_id]
+        book_value = max(1, self._firm_balance_sheet_net_worth(target_id))
+        symbol = self._listed_symbol(target_id)
+        if symbol is not None:
+            security = self.economy.exchange.securities[symbol]
+            return max(book_value, security.last_price_cents * security.shares_outstanding)
+        multiple = self.settings.ventures.sector_multiple_bp.get(
+            firm.sector,
+            self.settings.ventures.sector_multiple_bp.get("default", 10_000),
+        )
+        revenue_comp = firm.cumulative_revenue_cents * multiple // 10_000
+        round_comps = sorted(
+            row.pre_money_cents
+            for row in self.economy.ventures.rounds.values()
+            if (startup := self.economy.ventures.startups.get(row.startup_id)) is not None
+            and startup.firm_id != target_id
+            and startup.sector == firm.sector
+        )
+        comparable = 0
+        if round_comps:
+            middle = len(round_comps) // 2
+            comparable = (
+                round_comps[middle]
+                if len(round_comps) % 2
+                else (round_comps[middle - 1] + round_comps[middle]) // 2
+            )
+        candidates = sorted((book_value, revenue_comp, comparable))
+        return max(book_value, candidates[1])
 
     def _tender(self, action: Action, tick: int, emit: Emit) -> tuple[Event, ...]:
         deal_id = action.params.get("deal_id")
@@ -1440,14 +1653,26 @@ class VentureEngine:
         total_capital = acquirer_capital + target_capital
         if total_capital <= 0:
             return 0
-        blended = (
-            acquirer.productivity_bp * acquirer_capital + target.productivity_bp * target_capital
-        ) // total_capital
-        configured_delta = self.settings.ventures.integration_synergy_bp if apply_synergy else 0
-        acquirer.productivity_bp = max(1, blended + configured_delta)
+        synergy_mode = self.settings.mechanisms.get(
+            "ventures_integration_synergy",
+            "on",
+        )
+        configured_delta = (
+            self.settings.ventures.integration_synergy_bp
+            if apply_synergy and synergy_mode.lower() not in {"off", "false", "disabled", "none"}
+            else 0
+        )
+        productivity, realised_delta = integrated_productivity_bp(
+            acquirer.productivity_bp,
+            acquirer_capital,
+            target.productivity_bp,
+            target_capital,
+            configured_delta,
+        )
+        acquirer.productivity_bp = productivity
         acquirer.capital_cents = total_capital
         target.capital_cents = 0
-        return acquirer.productivity_bp - blended
+        return realised_delta
 
     def _ensure_lender_deposit(
         self,
@@ -2404,21 +2629,17 @@ class VentureEngine:
             if row.case_id == case.case_id and row.claim_cents > 0
         ]
         source = self._deposit(case.entity_id) if distributable else None
-        remaining = distributable
         total_claimed = sum(row.claim_cents for row in claims)
+        waterfall_payments = priority_waterfall(distributable, claims)
         total_paid = 0
         for priority in range(1, 6):
             class_claims = [row for row in claims if row.priority_class == priority]
             if not class_claims:
                 continue
             class_total = sum(row.claim_cents for row in class_claims)
-            pool = min(remaining, class_total)
-            payments = allocate(
-                pool,
-                [(row.claim_id, row.claim_cents) for row in class_claims],
-            )
+            pool = sum(waterfall_payments.get(row.claim_id, 0) for row in class_claims)
             for claim in sorted(class_claims, key=lambda row: row.claim_id):
-                paid = payments.get(claim.claim_id, 0)
+                paid = waterfall_payments.get(claim.claim_id, 0)
                 claim.paid_cents = paid
                 expected = self.economy.ledger.next_txn_id(tick) if paid else None
                 event = emit(
@@ -2474,9 +2695,6 @@ class VentureEngine:
                         loan.outstanding_cents -= principal
                 events.append(event)
                 total_paid += paid
-            remaining -= pool
-            if remaining == 0:
-                break
         loan_ids = sorted({str(claim.loan_id) for claim in claims if claim.loan_id is not None})
         for loan_id in loan_ids:
             loan = self.economy.loans[loan_id]

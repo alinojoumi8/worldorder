@@ -412,6 +412,8 @@ class VentureSettings(FrozenModel):
     max_open_pitches: int = 5
     comparable_window: int = 8
     seed_default_pre_money_cents: int = 100_000_000
+    sector_multiple_bp: dict[str, int] = Field(default_factory=dict)
+    growth_cap_bp: int = 20_000
     valuation_llm_weight_bp: int = 5_000
     management_fee_bp: int = 200
     carry_bp: int = 2_000

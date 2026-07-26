@@ -55,6 +55,9 @@ mechanisms:
   price_setting: markup_over_cost
   credit_scoring: linear_scorecard
   credit_supply: endogenous
+  venture_valuation: comparables_blend
+  ma_valuation_anchor: "on"
+  ventures_integration_synergy: "on"
 society: {}
 economy:
   enabled: true
