@@ -1,0 +1,74 @@
+{
+  "accepted_implementation_git_sha": "50f88335c6dcad6ea7192bac293eeedb224afae4",
+  "accepted_on": "2026-07-26",
+  "branch": "codex/build/m3-capital",
+  "status": "engineering_passed_research_pending",
+  "frozen_run": {
+    "agents": 50,
+    "event_counts": {
+      "goods_purchased": 4256,
+      "loan_originated": 4,
+      "loan_payment_made": 12,
+      "trade_executed": 1,
+      "wage_paid": 20
+    },
+    "events": 28382,
+    "hash": "a26b0f5c453bed7a95a1120be70b3197b74a57db9f46b483f97b9c850af9119d",
+    "ticks": 100
+  },
+  "integration_run": {
+    "agents": 50,
+    "events": 125363,
+    "hash": "a615919ea6a53788cc4d07b38f024aa5c2538bea9fd0d68d7925b34c09ee2b3b",
+    "status": "completed",
+    "ticks": 500
+  },
+  "long_run": {
+    "agents": 50,
+    "events": 966539,
+    "hash": "982883938043edb71f014e4f50d04f46569f53d6b77190fc71438ae5de4ba129",
+    "status": "completed",
+    "ticks": 5000
+  },
+  "persistent_run": {
+    "exact_projection_rebuild": true,
+    "exact_replay": true,
+    "run_id": "d0b842a7-929b-5b54-a20c-7b6f498208b2",
+    "stored_events": 4177,
+    "terminal_hash": "fe7c2cf41dcc2dc0d0f83ea93a5314ac85c7b62c3861023fbd08ee822c18079d",
+    "verified": true
+  },
+  "quality": {
+    "determinism_lint": "passed",
+    "frontend_build": "passed",
+    "frontend_modules": 1580,
+    "import_linter_contracts": 4,
+    "mypy_source_files": 111,
+    "prompt_lint": "passed",
+    "pytest_passed": 152,
+    "ruff": "passed"
+  },
+  "read_only_observatory": {
+    "capital_available": true,
+    "freshness_metadata": true,
+    "mutation_verbs": 405,
+    "routes": [
+      "securities",
+      "trades",
+      "market_index",
+      "startups",
+      "acquisitions",
+      "bankruptcies"
+    ]
+  },
+  "remaining_gates": [
+    "C15 sliced listed-security liquidation with realised book impact",
+    "C15 in-world liquidation buyers for inventory, capital, and unlisted stakes",
+    "C15 acquisition redundancy, severance, loan transfer, and asset-sale shell paths",
+    "M3 mechanism declarations and ablations",
+    "C15 full property and bankruptcy-cascade matrix",
+    "C20 death-bankruptcy integration in M5",
+    "C18 antitrust decision integration in M4",
+    "Stage 3 five-seed five-year V1-V3 calibration"
+  ]
+}
