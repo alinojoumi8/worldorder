@@ -452,7 +452,7 @@ class Ledger:
             sum(
                 account.balance_cents
                 for account in self._accounts.values()
-                if account.code in {"cash", "res"}
+                if account.code == "cash" or (account.code == "res" and account.owner_id != "bk_cb")
             )
             + sum(
                 account.balance_cents

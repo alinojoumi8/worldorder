@@ -56,3 +56,44 @@ M1 observations now carry an explicit event-stakes value of zero. Later mileston
 the event-delta calculations for their institutions. Unmet needs continue to drive reflex
 choice and wellbeing, but they no longer masquerade as event stakes. This intentionally
 changes the frozen M1 golden hash and is covered by a regression test.
+
+## M2 / C11
+
+### Integer economy projections
+
+`03-DATA-MODEL.md` prints firm productivity and application match scores as `NUMERIC`.
+`06-ECONOMY-SPEC.md §0.1` supersedes those columns with integer basis-point values. The
+M2 migrations therefore use `productivity_bp` and `match_score_bp`; no binary float or
+decimal value can reach money, ranking, or replay-critical economy state.
+
+Firm `capital_cents` is the non-ledger real productive asset required by Rule L1.
+`liquid_cents` is the denormalized ledger net worth used by M-6. The earlier M2 foundation
+temporarily used `capital_cents` for both concepts; C11 separates them explicitly.
+
+### Genesis deposit and central-bank settlement
+
+The direct genesis-deposit shorthand in `06-ECONOMY-SPEC.md §13.2` conflicts with the
+per-bank deposit identity M-5. Genesis uses the coherent four-part issuance pattern:
+recipient deposit, matching bank deposit liability, matching commercial-bank reserves,
+and central-bank issuance. No balancing entry is fabricated outside the ledger.
+
+The central bank owns a reserve settlement account and matching deposit-liability account
+so taxes can settle into `dep:gv_treasury@bk_cb` through the same six-leg cross-bank
+transfer used elsewhere. A central bank's reserve claim on itself is excluded from M0;
+the treasury deposit is included. Counting both would double-count every tax receipt.
+
+### Scripted baseline placement
+
+The implemented M1 action path predates C10's institution-resolver registry. C11 therefore
+constructs typed `Action` objects with `origin="scripted"` inside the PHASE 7
+`MechanicalPolicy` fallback and resolves them in the documented labour type order. Native
+M1 actions still pass through the existing PHASE 4/5 path, and the frozen M1 action schema
+and golden run remain unchanged. A later integration chunk must route deliberate economic
+actions through the full C10 registry before any result is attributed to LLM economic
+choice.
+
+### Goods-kind renumbering
+
+C11 keeps firm kinds in 6000–6099. Per the ratified chunk contract, every C12 goods kind
+moves to its documented value plus 100 (6100–6199); the illustrative 6020 row in
+`02-ARCHITECTURE.md` is stale and must not be registered.

@@ -278,6 +278,276 @@ ACTION_REJECTED = register_kind(
     persistence=Persistence.PERSISTED,
     schema=_schema("action_id", "agent_id", "reason"),
 )
+VACANCY_POSTED = register_kind(
+    5001,
+    "VACANCY_POSTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "vacancy_id",
+        "firm_id",
+        "occupation",
+        "skill_reqs",
+        "wage_offer_cents",
+        "headcount",
+        "posted_tick",
+        "expires_tick",
+        "district_id",
+    ),
+)
+VACANCY_CLOSED = register_kind(
+    5002,
+    "VACANCY_CLOSED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("vacancy_id", "reason", "applicants_n", "days_open"),
+)
+JOB_APPLICATION_SUBMITTED = register_kind(
+    5003,
+    "JOB_APPLICATION_SUBMITTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "application_id",
+        "vacancy_id",
+        "agent_id",
+        "asked_wage_cents",
+        "referral_id",
+    ),
+)
+APPLICATION_SCREENED = register_kind(
+    5004,
+    "APPLICATION_SCREENED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "application_id",
+        "match_score_bp",
+        "rank",
+        "shortlisted",
+        "reject_reason",
+    ),
+)
+OFFER_MADE = register_kind(
+    5005,
+    "OFFER_MADE",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "offer_id",
+        "vacancy_id",
+        "firm_id",
+        "agent_id",
+        "wage_cents",
+        "occupation",
+        "expires_tick",
+    ),
+)
+OFFER_ACCEPTED = register_kind(
+    5006,
+    "OFFER_ACCEPTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("offer_id", "employment_id", "wage_cents"),
+)
+OFFER_DECLINED = register_kind(
+    5007,
+    "OFFER_DECLINED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("offer_id", "agent_id", "reason_code", "counter_wage_cents"),
+)
+OFFER_EXPIRED = register_kind(
+    5008,
+    "OFFER_EXPIRED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("offer_id", "agent_id"),
+)
+WAGE_NEGOTIATED = register_kind(
+    5009,
+    "WAGE_NEGOTIATED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("offer_id", "from_cents", "to_cents", "round", "initiator", "outcome"),
+)
+HIRED = register_kind(
+    5010,
+    "HIRED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "firm_id",
+        "employment_id",
+        "occupation",
+        "wage_cents",
+        "match_score_bp",
+        "search_duration_ticks",
+    ),
+)
+FIRED = register_kind(
+    5011,
+    "FIRED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("employment_id", "agent_id", "firm_id", "reason"),
+)
+QUIT = register_kind(
+    5012,
+    "QUIT",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("employment_id", "agent_id", "firm_id", "destination"),
+)
+LAYOFF_BATCH = register_kind(
+    5013,
+    "LAYOFF_BATCH",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "employment_ids", "headcount_before", "headcount_after", "trigger"),
+)
+WORK_PERFORMED = register_kind(
+    5020,
+    "WORK_PERFORMED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "employment_id",
+        "agent_id",
+        "firm_id",
+        "hours_bp",
+        "effort_bp",
+        "effective_labour_bp",
+        "skill_deltas",
+    ),
+)
+ABSENCE = register_kind(
+    5021,
+    "ABSENCE",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("employment_id", "cause", "hours_lost_bp"),
+)
+PAYROLL_RUN = register_kind(
+    5030,
+    "PAYROLL_RUN",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "period_start_tick",
+        "period_end_tick",
+        "n_employees",
+        "gross_cents",
+        "income_tax_cents",
+        "employer_tax_cents",
+        "net_cents",
+        "txn_ids",
+    ),
+)
+WAGE_PAID = register_kind(
+    5031,
+    "WAGE_PAID",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "employment_id",
+        "agent_id",
+        "firm_id",
+        "gross_cents",
+        "income_tax_cents",
+        "net_cents",
+        "hours_bp",
+        "txn_id",
+    ),
+)
+PAYROLL_SHORTFALL = register_kind(
+    5032,
+    "PAYROLL_SHORTFALL",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "required_cents",
+        "available_cents",
+        "unpaid_employment_ids",
+        "accrued_claim_cents",
+    ),
+)
+SKILL_DECAYED = register_kind(
+    5040,
+    "SKILL_DECAYED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "skill", "from_level_bp", "to_level_bp", "ticks_unused"),
+)
+UNEMPLOYMENT_SPELL_STARTED = register_kind(
+    5041,
+    "UNEMPLOYMENT_SPELL_STARTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "prior_employment_id", "prior_wage_cents", "cause"),
+)
+UNEMPLOYMENT_SPELL_ENDED = register_kind(
+    5042,
+    "UNEMPLOYMENT_SPELL_ENDED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "duration_ticks", "exit", "new_wage_cents", "wage_change_bp"),
+)
+LABOUR_SESSION_SUMMARY = register_kind(
+    5050,
+    "LABOUR_SESSION_SUMMARY",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "tick",
+        "vacancies_open",
+        "searchers",
+        "applications",
+        "offers",
+        "hires",
+        "mean_match_score_bp",
+        "mean_offer_wage_cents",
+        "median_hire_wage_cents",
+    ),
+)
+SELF_EMPLOYMENT_STARTED = register_kind(
+    5060,
+    "SELF_EMPLOYMENT_STARTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "firm_id", "sector"),
+)
+SELF_EMPLOYMENT_ENDED = register_kind(
+    5061,
+    "SELF_EMPLOYMENT_ENDED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "firm_id", "reason"),
+)
+RETIRED = register_kind(
+    5070,
+    "RETIRED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "age_years", "final_wage_cents", "pension_entitlement_cents"),
+)
+BENEFIT_CLAIM_OPENED = register_kind(
+    5080,
+    "BENEFIT_CLAIM_OPENED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "weekly_benefit_cents", "entitlement_ticks", "base_wage_cents"),
+)
+BENEFIT_EXHAUSTED = register_kind(
+    5081,
+    "BENEFIT_EXHAUSTED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "ticks_claimed"),
+)
 FIRM_FOUNDED = register_kind(
     6001,
     "FIRM_FOUNDED",
@@ -291,6 +561,147 @@ FIRM_FOUNDED = register_kind(
         "place_id",
         "initial_capital_cents",
         "ledger_account_id",
+    ),
+)
+FIRM_DISSOLVED = register_kind(
+    6002,
+    "FIRM_DISSOLVED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "reason",
+        "residual_cents",
+        "headcount_at_exit",
+        "age_ticks",
+    ),
+)
+FIRM_STATUS_CHANGED = register_kind(
+    6003,
+    "FIRM_STATUS_CHANGED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "from", "to", "trigger", "net_worth_cents", "liquid_cents"),
+)
+OWNERSHIP_TRANSFERRED = register_kind(
+    6004,
+    "OWNERSHIP_TRANSFERRED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "from_holder", "to_holder", "shares", "share_class", "cause"),
+)
+PRODUCTION_RUN = register_kind(
+    6010,
+    "PRODUCTION_RUN",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "sku",
+        "labour_bp",
+        "capital_cents_used",
+        "productivity_bp",
+        "output_micro",
+        "units_produced",
+        "unit_cost_cents",
+        "carry_micro_after",
+    ),
+)
+CAPITAL_PURCHASED = register_kind(
+    6011,
+    "CAPITAL_PURCHASED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "seller_firm_id",
+        "sku",
+        "units",
+        "cents",
+        "capital_cents_after",
+        "txn_id",
+    ),
+)
+CAPITAL_DEPRECIATED = register_kind(
+    6012,
+    "CAPITAL_DEPRECIATED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "from_cents", "to_cents", "rate_bp"),
+)
+INVENTORY_WRITTEN_OFF = register_kind(
+    6013,
+    "INVENTORY_WRITTEN_OFF",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "sku", "units", "unit_cost_cents", "value_cents", "reason"),
+)
+PRODUCTIVITY_UPDATED = register_kind(
+    6014,
+    "PRODUCTIVITY_UPDATED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "from_bp", "to_bp", "cause"),
+)
+PRICE_SET = register_kind(
+    6022,
+    "PRICE_SET",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "sku",
+        "from_cents",
+        "to_cents",
+        "rule",
+        "markup_bp",
+        "inventory_days",
+    ),
+)
+RESTOCK_ORDERED = register_kind(
+    6023,
+    "RESTOCK_ORDERED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "sku", "from_firm_id", "units", "cents", "txn_id"),
+)
+DIVIDEND_DECLARED = register_kind(
+    6030,
+    "DIVIDEND_DECLARED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "per_share_cents",
+        "total_cents",
+        "record_tick",
+        "payable_tick",
+        "decided_by",
+    ),
+)
+DIVIDEND_PAID = register_kind(
+    6031,
+    "DIVIDEND_PAID",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("firm_id", "holder_id", "shares", "cents", "txn_id"),
+)
+FIRM_PERIOD_CLOSED = register_kind(
+    6040,
+    "FIRM_PERIOD_CLOSED",
+    owner="polis.economy",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "firm_id",
+        "period",
+        "revenue_cents",
+        "wage_cents",
+        "input_cents",
+        "depreciation_cents",
+        "interest_cents",
+        "tax_cents",
+        "profit_cents",
+        "cumulative_losses_cents",
     ),
 )
 BANK_FOUNDED = register_kind(

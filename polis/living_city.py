@@ -20,6 +20,8 @@ from polis.agents.state import AgentPopulation
 from polis.config.runtime import RuntimeConfig
 from polis.config.settings import Settings, config_hash
 from polis.economy.genesis import create_economy
+from polis.economy.labour import load_occupations
+from polis.economy.policy import MechanicalPolicy
 from polis.economy.state import EconomyState, EconomyWorldState
 from polis.events.kinds import (
     ACTION_REJECTED,
@@ -143,6 +145,18 @@ class LivingCityEngine:
         self.router = router
         self.rng = rng
         self.economy = economy
+        self.economy_policy = (
+            MechanicalPolicy(
+                settings,
+                population,
+                world,
+                economy,
+                rng,
+                load_occupations(settings.economy.occupations_path),
+            )
+            if economy is not None
+            else None
+        )
         self.observations: dict[str, Observation] = {}
         self.routing: RoutingResult | None = None
         self.decisions: dict[str, Action] = {}
@@ -157,9 +171,14 @@ class LivingCityEngine:
             _Handler(Phase.DECIDE, "living.decide", 10, self.decide),
             _Handler(Phase.VALIDATE, "living.validate", 10, self.validate),
             _Handler(Phase.RESOLVE, "living.resolve", 10, self.resolve),
+            _Handler(Phase.INSTITUTIONS, "economy.institutions", 10, self.institutions),
             _Handler(Phase.VITALS, "living.vitals", 10, self.vitals),
             _Handler(Phase.METRICS, "living.metrics", 10, self.measure),
         )
+
+    async def institutions(self, ctx: TickContext) -> None:
+        if self.economy_policy is not None:
+            self.economy_policy.step(ctx.tick, ctx.emit)
 
     def _trace_kept(self, agent_id: str, tick: int, mode: str) -> bool:
         seed = self.rng.seed_for("cognition.sample", agent_id, tick)

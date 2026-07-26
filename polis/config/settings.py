@@ -177,6 +177,7 @@ class SocietySettings(FrozenModel):
 class EconomySettings(FrozenModel):
     enabled: bool = False
     currency: Literal["POL"] = "POL"
+    occupations_path: str = "configs/occupations.yaml"
     initial_firms: int = 0
     initial_banks: int = 3
     m0_cents_per_capita: int = 1_800_000
@@ -209,9 +210,13 @@ class LabourSettings(FrozenModel):
     max_bargaining_rounds: int = 2
     offer_stale_days: int = 3
     offer_ttl_days: int = 5
+    autopost_window_days: int = 5
     search_window_days: int = 28
+    severance_periods_bp: int = 0
+    notice_ticks: int = 0
     retirement_age: int = 65
     minimum_wage_cents: int = 0
+    skill_decay_bp_per_month: int = 40
     payroll: LabourPayrollSettings = LabourPayrollSettings()
 
 
@@ -225,12 +230,17 @@ class FirmMarkupSettings(FrozenModel):
 
 class FirmSettings(FrozenModel):
     beta_capital_bp: int = 3_000
+    capital_ref_cents: int = 1_000_000
     depreciation_bp_per_year: int = 1_000
     learning_bp_per_day: int = 3
     productivity_sigma_bp: int = 40
     productivity_bounds_bp: tuple[int, int] = (2_000, 40_000)
     spoilage_bp_per_day: int = 2_000
+    price_override_ttl_days: int = 30
     payout_ratio_bp: int = 3_000
+    retained_floor_months: int = 1
+    min_founding_capital_cents: int = 0
+    max_firms_per_founder: int = 3
     working_capital_months: int = 3
     markup: FirmMarkupSettings = FirmMarkupSettings()
 

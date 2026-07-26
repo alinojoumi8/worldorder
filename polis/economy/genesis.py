@@ -80,6 +80,8 @@ def create_economy(
     )
 
     issuance = ledger.open_account("iss", "bk_cb", "central_bank", tick=0)
+    central_reserves = ledger.open_account("res", "bk_cb", "central_bank", tick=0)
+    central_liability = ledger.open_account("dpl", "bk_cb", "central_bank", tick=0)
     treasury = ledger.open_account(
         "dep",
         "gv_treasury",
@@ -123,8 +125,8 @@ def create_economy(
         "bk_cb",
         "Central Bank of Polis",
         central_place.place_id,
-        issuance,
-        "",
+        central_reserves,
+        central_liability,
         True,
         reserve_ratio_bp=0,
     )
@@ -328,6 +330,17 @@ def create_economy(
     if txn_id != expected_txn_id:
         raise RuntimeError("ledger transaction ordinal diverged during genesis")
     events.append(issued_event)
+
+    eligible_agents = [
+        agent for agent in population if 18 <= agent.age_years < settings.labour.retirement_age
+    ]
+    target_base, target_extra = divmod(len(eligible_agents), max(1, len(firms)))
+    for ordinal, firm in enumerate(firms.values()):
+        firm.target_headcount = max(1, target_base + (1 if ordinal < target_extra else 0))
+        firm.capital_cents = settings.firms.capital_ref_cents
+    for agent in eligible_agents:
+        if agent.employment_status == "employed":
+            agent.employment_status = "unemployed"
 
     state = EconomyState(ledger, banks, firms)
     state.sync_denormalised(population)

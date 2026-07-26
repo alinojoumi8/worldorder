@@ -15,7 +15,8 @@ def m0_cents(ledger: Ledger) -> int:
     return sum(
         account.balance_cents
         for account in ledger.accounts()
-        if account.code in {"cash", "res"}
+        if account.code == "cash"
+        or (account.code == "res" and account.owner_id != "bk_cb")
         or (
             account.code == "dep"
             and account.owner_id == "gv_treasury"

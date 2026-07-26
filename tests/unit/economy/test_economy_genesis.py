@@ -57,7 +57,10 @@ def test_genesis_creates_exact_balanced_m0_distribution() -> None:
     assert economy.ledger.global_balance_cents() == 0
     assert isinstance(check_money(economy.ledger, economy), Ok)
     assert sum(agent.wealth_cents for agent in population) == expected_m0 * 7 // 10
-    assert sum(firm.capital_cents for firm in economy.firms.values()) == expected_m0 * 2 // 10
+    assert sum(firm.liquid_cents for firm in economy.firms.values()) == expected_m0 * 2 // 10
+    assert all(
+        firm.capital_cents == settings.firms.capital_ref_cents for firm in economy.firms.values()
+    )
     assert sum(bank.capital_cents for bank in economy.banks.values()) == expected_m0 // 10
     assert sum(event.kind == MONEY_ISSUED for event in log.staged()) == 3
 

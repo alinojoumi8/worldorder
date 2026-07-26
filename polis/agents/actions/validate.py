@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from polis.agents.actions.types import Action, ActionType, null_action
 from polis.agents.types import AgentState
@@ -25,14 +25,128 @@ class EmptyParams(_Params):
     pass
 
 
+class ApplyForJobParams(_Params):
+    vacancy_id: str
+    asked_wage_cents: int | None = Field(default=None, ge=0)
+
+
+class OfferDecisionParams(_Params):
+    offer_id: str
+    reason: str | None = None
+
+
+class NegotiateWageParams(_Params):
+    offer_id: str | None = None
+    employment_id: str | None = None
+    counter_cents: int = Field(ge=0)
+
+
+class EmploymentParams(_Params):
+    employment_id: str
+    reason: str | None = None
+
+
+class PostVacancyParams(_Params):
+    firm_id: str
+    occupation: str
+    wage_offer_cents: int = Field(ge=0)
+    headcount: int = Field(ge=1)
+
+
+class MakeOfferParams(_Params):
+    application_id: str
+    wage_cents: int = Field(ge=0)
+
+
+class WorkParams(_Params):
+    employment_id: str
+    effort_bp: int = Field(default=10_000, ge=0, le=10_000)
+
+
+class BuyGoodParams(_Params):
+    sku: str
+    qty: int = Field(ge=1, le=1_000)
+    seller_firm_id: str
+    max_unit_price_cents: int = Field(ge=0)
+
+
+class SetPriceParams(_Params):
+    firm_id: str
+    sku: str
+    price_cents: int = Field(ge=1)
+
+
+class ProduceParams(_Params):
+    sku: str
+
+
+class RestockParams(_Params):
+    sku: str
+    qty: int = Field(ge=1)
+
+
+class AccountParams(_Params):
+    bank_id: str
+    amount_cents: int | None = Field(default=None, ge=0)
+
+
+class LoanParams(_Params):
+    loan_id: str | None = None
+    bank_id: str | None = None
+    amount_cents: int = Field(ge=1)
+
+
 _PARAM_MODELS: dict[ActionType, type[_Params]] = {
     ActionType.MOVE_TO: MoveParams,
     ActionType.IDLE: EmptyParams,
     ActionType.SLEEP: EmptyParams,
     ActionType.EAT: EmptyParams,
+    ActionType.APPLY_FOR_JOB: ApplyForJobParams,
+    ActionType.ACCEPT_OFFER: OfferDecisionParams,
+    ActionType.DECLINE_OFFER: OfferDecisionParams,
+    ActionType.QUIT_JOB: EmploymentParams,
+    ActionType.NEGOTIATE_WAGE: NegotiateWageParams,
+    ActionType.POST_VACANCY: PostVacancyParams,
+    ActionType.MAKE_OFFER: MakeOfferParams,
+    ActionType.FIRE_EMPLOYEE: EmploymentParams,
+    ActionType.WORK: WorkParams,
     ActionType.STUDY: EmptyParams,
+    ActionType.BUY_GOOD: BuyGoodParams,
+    ActionType.SET_PRICE: SetPriceParams,
+    ActionType.PRODUCE: ProduceParams,
+    ActionType.RESTOCK: RestockParams,
+    ActionType.OPEN_ACCOUNT: AccountParams,
+    ActionType.DEPOSIT: AccountParams,
+    ActionType.WITHDRAW: AccountParams,
+    ActionType.APPLY_FOR_LOAN: LoanParams,
+    ActionType.REPAY_LOAN: LoanParams,
+    ActionType.DEFAULT: LoanParams,
     ActionType.NULL_ACTION: EmptyParams,
 }
+
+_ECONOMIC_ACTIONS = frozenset(
+    {
+        ActionType.APPLY_FOR_JOB,
+        ActionType.ACCEPT_OFFER,
+        ActionType.DECLINE_OFFER,
+        ActionType.QUIT_JOB,
+        ActionType.NEGOTIATE_WAGE,
+        ActionType.POST_VACANCY,
+        ActionType.MAKE_OFFER,
+        ActionType.FIRE_EMPLOYEE,
+        ActionType.WORK,
+        ActionType.BUY_GOOD,
+        ActionType.SET_PRICE,
+        ActionType.PRODUCE,
+        ActionType.RESTOCK,
+        ActionType.OPEN_ACCOUNT,
+        ActionType.DEPOSIT,
+        ActionType.WITHDRAW,
+        ActionType.APPLY_FOR_LOAN,
+        ActionType.REPAY_LOAN,
+        ActionType.DEFAULT,
+    }
+)
 
 
 @dataclass(slots=True)
@@ -120,7 +234,9 @@ def validate_action(
         if target_id != agent.home_place_id and not world.is_open(target_id, action.tick, profile):
             gates["locality"] = "fail"
             return _reject(action, "locality", gates, {"reason": "closed"})
-    elif not world.affords(location.place_id, action.type.value):
+    elif action.type not in _ECONOMIC_ACTIONS and not world.affords(
+        location.place_id, action.type.value
+    ):
         gates["locality"] = "fail"
         return _reject(action, "locality", gates)
     gates["locality"] = "pass"

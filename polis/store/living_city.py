@@ -55,6 +55,11 @@ async def _clear_projections(db: Database, run_id: Any) -> None:
         "ledger_entries",
         "ledger_accounts",
         "banks",
+        "inventory",
+        "employments",
+        "job_offers",
+        "job_applications",
+        "vacancies",
         "firms",
         "cognition_traces",
         "metrics",
@@ -247,8 +252,12 @@ async def write_living_city_projections(
                 INSERT INTO firms(
                     run_id,firm_id,name,founded_tick,dissolved_tick,sector,place_id,
                     founder_id,ledger_account_id,productivity_bp,capital_cents,
-                    headcount,is_public,symbol,status
-                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    liquid_cents,headcount,target_headcount,cumulative_output_units,
+                    cumulative_revenue_cents,cumulative_wage_cents,is_public,symbol,status
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                    %s,%s
+                )
                 """,
                 [
                     (
@@ -263,12 +272,148 @@ async def write_living_city_projections(
                         firm.ledger_account_id,
                         firm.productivity_bp,
                         firm.capital_cents,
+                        firm.liquid_cents,
                         firm.headcount,
+                        firm.target_headcount,
+                        firm.cumulative_output_units,
+                        firm.cumulative_revenue_cents,
+                        firm.cumulative_wage_cents,
                         False,
                         None,
                         firm.status,
                     )
                     for firm in result.economy.firms.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO vacancies(
+                    run_id,vacancy_id,firm_id,posted_tick,closed_tick,expires_tick,
+                    district_id,occupation,skill_reqs,wage_offer_cents,headcount,
+                    min_match_score_bp,applicants_n,status,filled_by
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        vacancy.vacancy_id,
+                        vacancy.firm_id,
+                        vacancy.posted_tick,
+                        (result.report.last_tick if vacancy.status != "open" else None),
+                        vacancy.expires_tick,
+                        vacancy.district_id,
+                        vacancy.occupation,
+                        Jsonb(vacancy.skill_reqs),
+                        vacancy.wage_offer_cents,
+                        vacancy.headcount,
+                        vacancy.min_match_score_bp,
+                        vacancy.applicants_n,
+                        vacancy.status,
+                        None,
+                    )
+                    for vacancy in result.economy.vacancies.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO job_applications(
+                    run_id,application_id,vacancy_id,agent_id,tick,
+                    asked_wage_cents,outcome,match_score_bp,rank
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        application.application_id,
+                        application.vacancy_id,
+                        application.agent_id,
+                        application.submitted_tick,
+                        application.asked_wage_cents,
+                        application.status,
+                        application.match_score_bp,
+                        application.rank,
+                    )
+                    for application in result.economy.applications.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO job_offers(
+                    run_id,offer_id,application_id,vacancy_id,firm_id,agent_id,
+                    wage_cents,occupation,made_tick,expires_tick,status
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        offer.offer_id,
+                        offer.application_id,
+                        offer.vacancy_id,
+                        offer.firm_id,
+                        offer.agent_id,
+                        offer.wage_cents,
+                        offer.occupation,
+                        offer.made_tick,
+                        offer.expires_tick,
+                        offer.status,
+                    )
+                    for offer in result.economy.offers.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO employments(
+                    run_id,employment_id,agent_id,firm_id,occupation,wage_cents,
+                    started_tick,ended_tick,end_reason,match_score_bp,hours_bp,
+                    accrued_wage_cents,accrual_remainder,total_paid_cents,
+                    last_worked_tick,last_effective_labour_bp
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        employment.employment_id,
+                        employment.agent_id,
+                        employment.firm_id,
+                        employment.occupation,
+                        employment.wage_cents,
+                        employment.started_tick,
+                        employment.ended_tick,
+                        None,
+                        employment.match_score_bp,
+                        employment.hours_bp,
+                        employment.accrued_wage_cents,
+                        employment.accrual_remainder,
+                        employment.total_paid_cents,
+                        employment.last_worked_tick,
+                        employment.last_effective_labour_bp,
+                    )
+                    for employment in result.economy.employments.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO inventory(
+                    run_id,firm_id,sku,qty,unit_cost_cents,price_cents,carry_micro,
+                    markup_bp,units_sold_28d,updated_tick
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        inventory.firm_id,
+                        inventory.sku,
+                        inventory.quantity,
+                        inventory.unit_cost_cents,
+                        inventory.price_cents,
+                        inventory.carry_micro,
+                        inventory.markup_bp,
+                        inventory.units_sold_28d,
+                        result.report.last_tick,
+                    )
+                    for inventory in result.economy.inventory.values()
                 ],
             )
             await cursor.executemany(

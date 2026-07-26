@@ -21,7 +21,16 @@ ACTION_SCHEMA: dict[str, Any] = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "type": {"enum": [item.value for item in ActionType]},
+                "type": {
+                    "enum": [
+                        ActionType.MOVE_TO.value,
+                        ActionType.IDLE.value,
+                        ActionType.SLEEP.value,
+                        ActionType.EAT.value,
+                        ActionType.STUDY.value,
+                        ActionType.NULL_ACTION.value,
+                    ]
+                },
                 "params": {"type": "object"},
             },
             "required": ["type", "params"],
