@@ -898,6 +898,10 @@ class LabourMarket:
                     raise RuntimeError("payroll transaction ordinal diverged")
                 txn_ids.append(str(txn_id))
                 employment.total_paid_cents += gross
+                income = self.economy.gross_income_by_tick.setdefault(tick, {})
+                income[employment.agent_id] = income.get(employment.agent_id, 0) + gross
+                wages = self.economy.gross_wages_by_tick.setdefault(tick, {})
+                wages[employment.agent_id] = wages.get(employment.agent_id, 0) + gross
                 employment.accrued_wage_cents = 0
                 paid_gross += gross
                 paid_tax += income_tax

@@ -609,10 +609,10 @@ async def write_living_city_projections(
                     credit_score_at_origination_bp,payment_cents,payments_n,
                     next_payment_tick,accrued_interest_cents,
                     total_interest_paid_cents,capitalised_interest_cents,
-                    missed_since_tick,defaulted_tick
+                    missed_since_tick,defaulted_tick,closed_tick
                 ) VALUES(
                     %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                    %s,%s,%s,%s,%s,%s
+                    %s,%s,%s,%s,%s,%s,%s
                 )
                 """,
                 [
@@ -640,6 +640,7 @@ async def write_living_city_projections(
                         loan.capitalised_interest_cents,
                         loan.missed_since_tick,
                         loan.defaulted_tick,
+                        loan.closed_tick,
                     )
                     for loan in result.economy.loans.values()
                 ],

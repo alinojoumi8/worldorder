@@ -69,6 +69,7 @@ export type MetricDefinition = {
   unit: string;
   cadence: string;
   definition: string;
+  available: boolean;
 };
 
 export type MetricSeries = Freshness & {
@@ -130,6 +131,8 @@ export const polisApi = {
       {
         items: MetricDefinition[];
         unavailable_in_m1: string[];
+        unavailable_for_run: string[];
+        economy_available: boolean;
       } & Freshness
     >(`/api/v1/runs/${runId}/metrics/catalogue`),
   metric: (runId: string, metric: string) =>

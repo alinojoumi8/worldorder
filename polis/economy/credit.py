@@ -219,7 +219,9 @@ def rwa_cents(bank_id: str, ctx: CreditContext) -> int:
 def capital_ratio_bp(bank_id: str, ctx: CreditContext) -> int:
     capital = capital_cents(bank_id, ctx.economy)
     rwa = rwa_cents(bank_id, ctx)
-    return 10_000 * capital // max(1, rwa)
+    if rwa <= 0:
+        return 10_000 if capital >= 0 else -10_000
+    return 10_000 * capital // rwa
 
 
 def borrower_state(borrower_id: str, ctx: CreditContext) -> BorrowerState:
@@ -797,6 +799,7 @@ class CreditEngine:
             events.append(event)
             if loan.outstanding_cents == 0:
                 loan.status = "repaid"
+                loan.closed_tick = tick
                 events.append(
                     emit(
                         NewEvent(
@@ -965,4 +968,5 @@ def write_off_loan(
     loan.accrued_interest_cents = 0
     if loan.outstanding_cents == 0:
         loan.status = "written_off"
+        loan.closed_tick = tick
     return (event,)

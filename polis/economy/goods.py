@@ -218,6 +218,9 @@ def seed_goods_state(settings: Settings, economy: EconomyState) -> BasketState:
     economy.cpi_fisher_history_bp[0] = 10_000
     for category in CATEGORIES:
         economy.cpi_category_history_bp.setdefault(category, {})[0] = 10_000
+    economy.initial_inventory_value_cents = sum(
+        row.quantity * row.unit_cost_cents for row in economy.inventory.values()
+    )
     return economy.basket
 
 

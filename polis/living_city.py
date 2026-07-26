@@ -527,6 +527,8 @@ class LivingCityEngine:
             routing=self.routing,
             memory=self.memory,
             world=self.world,
+            economy=self.economy,
+            settings=self.settings,
         )
         for point in points:
             ctx.metrics[point.metric] = point.value

@@ -78,6 +78,7 @@ class LoanState:
     payments_made: int = 0
     missed_since_tick: int | None = None
     defaulted_tick: int | None = None
+    closed_tick: int | None = None
 
 
 @dataclass(slots=True)
@@ -289,6 +290,9 @@ class EconomyState:
     cpi_core_history_bp: dict[int, int] = field(default_factory=dict)
     cpi_fisher_history_bp: dict[int, int] = field(default_factory=dict)
     cpi_category_history_bp: dict[str, dict[int, int]] = field(default_factory=dict)
+    initial_inventory_value_cents: int = 0
+    gross_income_by_tick: dict[int, dict[str, int]] = field(default_factory=dict)
+    gross_wages_by_tick: dict[int, dict[str, int]] = field(default_factory=dict)
     loan_applications: dict[str, LoanApplicationState] = field(default_factory=dict)
     loans: dict[str, LoanState] = field(default_factory=dict)
     loan_payments: list[LoanPaymentState] = field(default_factory=list)
@@ -363,6 +367,15 @@ class EconomyState:
                 category: dict(sorted(values.items()))
                 for category, values in sorted(self.cpi_category_history_bp.items())
             },
+            "initial_inventory_value_cents": self.initial_inventory_value_cents,
+            "gross_income_by_tick": {
+                tick: dict(sorted(values.items()))
+                for tick, values in sorted(self.gross_income_by_tick.items())
+            },
+            "gross_wages_by_tick": {
+                tick: dict(sorted(values.items()))
+                for tick, values in sorted(self.gross_wages_by_tick.items())
+            },
             "loan_applications": {
                 row_id: asdict(row) for row_id, row in sorted(self.loan_applications.items())
             },
@@ -400,6 +413,8 @@ class EconomyState:
         cpi_core_history_bp = state.get("cpi_core_history_bp", {})
         cpi_fisher_history_bp = state.get("cpi_fisher_history_bp", {})
         cpi_category_history_bp = state.get("cpi_category_history_bp", {})
+        gross_income_by_tick = state.get("gross_income_by_tick", {})
+        gross_wages_by_tick = state.get("gross_wages_by_tick", {})
         loan_applications = state.get("loan_applications", {})
         loans = state.get("loans", {})
         loan_payments = state.get("loan_payments", ())
@@ -426,6 +441,8 @@ class EconomyState:
             cpi_core_history_bp,
             cpi_fisher_history_bp,
             cpi_category_history_bp,
+            gross_income_by_tick,
+            gross_wages_by_tick,
             loan_applications,
             loans,
             tax_assessments,
@@ -511,6 +528,17 @@ class EconomyState:
             str(category): _int_history(values)
             for category, values in sorted(cpi_category_history_bp.items())
             if isinstance(values, Mapping)
+        }
+        self.initial_inventory_value_cents = int(state.get("initial_inventory_value_cents", 0))
+        self.gross_income_by_tick = {
+            int(tick): {str(agent_id): int(cents) for agent_id, cents in row.items()}
+            for tick, row in sorted(gross_income_by_tick.items())
+            if isinstance(row, Mapping)
+        }
+        self.gross_wages_by_tick = {
+            int(tick): {str(agent_id): int(cents) for agent_id, cents in row.items()}
+            for tick, row in sorted(gross_wages_by_tick.items())
+            if isinstance(row, Mapping)
         }
         self.loan_applications = {
             str(row_id): LoanApplicationState(

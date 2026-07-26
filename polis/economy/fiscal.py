@@ -384,6 +384,8 @@ def pay_transfers(
             raise RuntimeError("government transfer transaction ordinal diverged")
         treasury.spending_cents += weekly
         treasury.period_spending_cents += weekly
+        income = ctx.economy.gross_income_by_tick.setdefault(tick, {})
+        income[agent_id] = income.get(agent_id, 0) + weekly
         events.append(event)
     return tuple(events)
 
