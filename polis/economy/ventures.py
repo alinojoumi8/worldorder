@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
+from decimal import Decimal, localcontext
+from fractions import Fraction
 from typing import Any
 
 from polis.agents.actions.types import Action, ActionType, make_action
@@ -235,6 +237,70 @@ def venture_waterfall(
     return {holder_id: cents for holder_id, cents in sorted(result.items()) if cents > 0}
 
 
+def _monotone_pro_rata(
+    pool_cents: int,
+    weighted_claims: Sequence[tuple[str, int]],
+) -> dict[str, int]:
+    """Use capped highest averages so a larger pool never reduces a recovery."""
+    weights = dict(weighted_claims)
+    if len(weights) != len(weighted_claims):
+        raise ValueError("pro-rata allocation ids must be unique")
+    if pool_cents < 0 or any(weight < 0 for weight in weights.values()):
+        raise ValueError("pro-rata values cannot be negative")
+    total_weight = sum(weights.values())
+    if pool_cents > total_weight:
+        raise ValueError("pro-rata pool cannot exceed total claims")
+    if pool_cents == 0:
+        return dict.fromkeys(sorted(weights), 0)
+    if pool_cents == total_weight:
+        return dict(sorted(weights.items()))
+
+    # A Jefferson/D'Hondt highest-averages allocation is house-monotone. Locate
+    # its cutoff divisor in logarithmic time, then resolve only the tied seats
+    # using exact rational comparisons and stable claim-id ordering.
+    max_weight = max(weights.values(), default=0)
+    precision = max(80, len(str(max_weight)) * 3 + 32)
+    with localcontext() as context:
+        context.prec = precision
+        low = Decimal(0)
+        high = Decimal(max_weight + 1)
+        for _ in range(precision * 4):
+            midpoint = (low + high) / 2
+            if midpoint in (low, high):
+                break
+            seats = sum(min(weight, int(Decimal(weight) / midpoint)) for weight in weights.values())
+            if seats >= pool_cents:
+                low = midpoint
+            else:
+                high = midpoint
+        payments = {
+            claim_id: min(weight, int(Decimal(weight) / high))
+            for claim_id, weight in weights.items()
+        }
+
+    remaining = pool_cents - sum(payments.values())
+    if remaining < 0:
+        raise RuntimeError("pro-rata divisor search over-allocated the pool")
+    while remaining:
+        candidates = [
+            (claim_id, weight)
+            for claim_id, weight in weights.items()
+            if payments[claim_id] < weight
+        ]
+        if not candidates:
+            raise RuntimeError("pro-rata allocation exhausted all claims")
+        claim_id, _ = min(
+            candidates,
+            key=lambda item: (
+                -Fraction(item[1], payments[item[0]] + 1),
+                item[0],
+            ),
+        )
+        payments[claim_id] += 1
+        remaining -= 1
+    return dict(sorted(payments.items()))
+
+
 def priority_waterfall(
     proceeds_cents: int,
     claims: Sequence[ClaimState],
@@ -263,7 +329,7 @@ def priority_waterfall(
         pool = min(remaining, class_total)
         if pool:
             payments.update(
-                allocate(
+                _monotone_pro_rata(
                     pool,
                     [(claim.claim_id, claim.claim_cents) for claim in class_claims],
                 )
