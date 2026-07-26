@@ -10,6 +10,12 @@ from polis.config.mechanisms import mechanism_manifest
 from polis.config.paths import repo_git_sha
 from polis.config.runtime_time import utc_now_naive
 from polis.config.settings import Settings, config_hash, config_yaml
+from polis.events.kinds import (
+    ORDER_CANCELLED,
+    ORDER_EXPIRED,
+    ORDER_FILLED,
+    ORDER_SUBMITTED,
+)
 from polis.living_city import LivingCityResult, run_living_city
 from polis.observatory.live import RedisEphemeralPublisher
 from polis.research.metrics import catalogue_manifest
@@ -52,6 +58,20 @@ def _model_manifest(settings: Settings) -> dict[str, dict[str, str | None]]:
 
 async def _clear_projections(db: Database, run_id: Any) -> None:
     for table in (
+        "bankruptcy_claims",
+        "bankruptcies",
+        "acquisitions",
+        "term_sheets",
+        "pitches",
+        "cap_table",
+        "funding_rounds",
+        "vc_funds",
+        "startups",
+        "ipos",
+        "short_positions",
+        "ohlcv",
+        "trades",
+        "orders",
         "ledger_entries",
         "ledger_accounts",
         "holdings",
@@ -98,6 +118,17 @@ async def write_living_city_projections(
         await _clear_projections(db, run_id)
     as_of_seq = result.as_of_seq
     place_at = {(place.x, place.y): place.place_id for place in result.world.places}
+    submitted_seq = {
+        str(event.payload["order_id"]): event.seq
+        for event in result.events
+        if event.kind == ORDER_SUBMITTED and "order_id" in event.payload
+    }
+    ended_tick = {
+        str(event.payload["order_id"]): event.tick
+        for event in result.events
+        if event.kind in {ORDER_CANCELLED, ORDER_EXPIRED, ORDER_FILLED}
+        and "order_id" in event.payload
+    }
     async with db.txn() as connection, connection.cursor() as cursor:
         await cursor.executemany(
             """
@@ -276,7 +307,7 @@ async def write_living_city_projections(
                         firm.firm_id,
                         firm.name,
                         0,
-                        None,
+                        firm.dissolved_tick,
                         firm.sector,
                         firm.place_id,
                         firm.founder_id,
@@ -720,6 +751,458 @@ async def write_living_city_projections(
                     (run_id, holder_id, symbol, 1, cents, 0)
                     for holder_id, holdings in result.economy.bond_holdings_cents.items()
                     for symbol, cents in holdings.items()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO securities(
+                    run_id,symbol,issuer_firm_id,class,shares_outstanding,
+                    listed_tick,delisted_tick,coupon_bp,matures_tick,
+                    listing_price_cents,last_price_cents,reference_price_cents,
+                    ipo_round_id,lockup_until_tick,status,halt_until_tick,
+                    breaker_count
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        security.symbol,
+                        security.issuer_firm_id,
+                        security.security_class,
+                        security.shares_outstanding,
+                        security.listed_tick,
+                        security.delisted_tick,
+                        None,
+                        None,
+                        security.listing_price_cents,
+                        security.last_price_cents,
+                        security.reference_price_cents,
+                        security.ipo_round_id,
+                        security.lockup_until_tick,
+                        security.status,
+                        security.halt_until_tick,
+                        security.breaker_count,
+                    )
+                    for security in result.economy.exchange.securities.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO holdings(
+                    run_id,holder_id,symbol,qty,avg_cost_cents,reserved_qty,
+                    locked_qty
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        holding.holder_id,
+                        holding.symbol,
+                        holding.qty,
+                        holding.avg_cost_cents,
+                        holding.reserved_qty,
+                        holding.locked_qty,
+                    )
+                    for holding in result.economy.exchange.holdings.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO orders(
+                    run_id,order_id,symbol,trader_id,side,order_type,
+                    limit_price_cents,qty,remaining_qty,filled_qty,status,
+                    submitted_tick,submitted_seq,ended_tick,arrival_ordinal,
+                    reserved_cents,reserved_qty,filled_notional_cents,
+                    commission_cents,flags
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                    %s,%s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        order.order_id,
+                        order.symbol,
+                        order.trader_id,
+                        order.side,
+                        order.order_type,
+                        order.limit_price_cents,
+                        order.qty,
+                        order.remaining_qty,
+                        order.filled_qty,
+                        order.status,
+                        order.submitted_tick,
+                        submitted_seq.get(order.order_id, order.arrival_ordinal),
+                        ended_tick.get(order.order_id),
+                        order.arrival_ordinal,
+                        order.reserved_cents,
+                        order.reserved_qty,
+                        order.filled_notional_cents,
+                        order.commission_cents,
+                        Jsonb(list(order.flags)),
+                    )
+                    for order in result.economy.exchange.orders.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO trades(
+                    run_id,trade_id,tick,symbol,price_cents,qty,buy_order_id,
+                    sell_order_id,buyer_id,seller_id,aggressor,
+                    commission_buy_cents,commission_sell_cents,ledger_txn_id
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        trade.trade_id,
+                        trade.tick,
+                        trade.symbol,
+                        trade.price_cents,
+                        trade.qty,
+                        trade.buy_order_id,
+                        trade.sell_order_id,
+                        trade.buyer_id,
+                        trade.seller_id,
+                        trade.aggressor,
+                        trade.commission_buy_cents,
+                        trade.commission_sell_cents,
+                        trade.ledger_txn_id,
+                    )
+                    for trade in result.economy.exchange.trades
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO ohlcv(
+                    run_id,symbol,session_tick,open_cents,high_cents,low_cents,
+                    close_cents,volume,vwap_cents,trades_n
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row.symbol,
+                        row.session_tick,
+                        row.open_cents,
+                        row.high_cents,
+                        row.low_cents,
+                        row.close_cents,
+                        row.volume,
+                        row.vwap_cents,
+                        row.trades_n,
+                    )
+                    for row in result.economy.exchange.ohlcv.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO short_positions(
+                    run_id,trader_id,symbol,qty,entry_price_cents,
+                    collateral_cents,opened_tick,borrow_fee_bp,
+                    margin_deadline_tick,status
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row.trader_id,
+                        row.symbol,
+                        row.qty,
+                        row.entry_price_cents,
+                        row.collateral_cents,
+                        row.opened_tick,
+                        row.borrow_fee_bp,
+                        row.margin_deadline_tick,
+                        row.status,
+                    )
+                    for row in result.economy.exchange.shorts.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO ipos(
+                    run_id,ipo_id,firm_id,symbol,shares_offered,
+                    primary_shares,secondary_shares,price_low_cents,
+                    price_high_cents,underwriter_bank_id,announced_tick,
+                    book_close_tick,indications,status
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row.ipo_id,
+                        row.firm_id,
+                        row.symbol,
+                        row.shares_offered,
+                        row.primary_shares,
+                        row.secondary_shares,
+                        row.price_low_cents,
+                        row.price_high_cents,
+                        row.underwriter_bank_id,
+                        row.announced_tick,
+                        row.book_close_tick,
+                        Jsonb(row.indications),
+                        row.status,
+                    )
+                    for row in result.economy.exchange.ipos.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO startups(
+                    run_id,startup_id,firm_id,founder_id,thesis,sector,
+                    founded_tick,initial_capital_cents,burn_rate_cents,
+                    runway_ticks,revenue_ttm_cents,total_raised_cents,stage,status
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row.startup_id,
+                        row.firm_id,
+                        row.founder_id,
+                        row.thesis,
+                        row.sector,
+                        row.founded_tick,
+                        row.initial_capital_cents,
+                        row.burn_rate_cents,
+                        row.runway_ticks,
+                        row.revenue_ttm_cents,
+                        row.total_raised_cents,
+                        row.stage,
+                        row.status,
+                    )
+                    for row in result.economy.ventures.startups.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO vc_funds(
+                    run_id,fund_id,firm_id,gp_agent_id,committed_cents,
+                    called_cents,deployed_cents,vintage_tick,thesis,
+                    management_fee_bp,carry_bp,hurdle_bp,lps,status
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row.fund_id,
+                        row.firm_id,
+                        row.gp_agent_id,
+                        row.committed_cents,
+                        row.called_cents,
+                        row.deployed_cents,
+                        row.vintage_tick,
+                        row.thesis,
+                        row.management_fee_bp,
+                        row.carry_bp,
+                        row.hurdle_bp,
+                        Jsonb(row.lps),
+                        row.status,
+                    )
+                    for row in result.economy.ventures.funds.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO funding_rounds(
+                    run_id,round_id,startup_id,stage,pre_money_cents,
+                    amount_cents,post_money_cents,price_per_share_cents,
+                    new_shares,lead_investor_id,participants,option_pool_shares,
+                    liq_pref_bp,participating,closed_tick
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        row.round_id,
+                        row.startup_id,
+                        row.stage,
+                        row.pre_money_cents,
+                        row.amount_cents,
+                        row.post_money_cents,
+                        row.price_per_share_cents,
+                        row.new_shares,
+                        row.lead_investor_id,
+                        Jsonb(row.participants),
+                        row.option_pool_shares,
+                        row.liq_pref_bp,
+                        row.participating,
+                        row.closed_tick,
+                    )
+                    for row in result.economy.ventures.rounds.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO cap_table(
+                    run_id,firm_id,holder_id,share_class,shares,invested_cents,
+                    round_id,liq_pref_bp,participating,pro_rata,
+                    conversion_price_cents
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row.firm_id,
+                        row.holder_id,
+                        row.share_class,
+                        row.shares,
+                        row.invested_cents,
+                        row.round_id,
+                        row.liq_pref_bp,
+                        row.participating,
+                        row.pro_rata,
+                        row.conversion_price_cents,
+                    )
+                    for row in result.economy.ventures.cap_table.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO pitches(
+                    run_id,pitch_id,startup_id,founder_id,investor_id,ask_cents,
+                    pre_money_ask_cents,deck_text,made_tick,status,conviction_bp,
+                    valuation_view_cents,verdict
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row.pitch_id,
+                        row.startup_id,
+                        row.founder_id,
+                        row.investor_id,
+                        row.ask_cents,
+                        row.pre_money_ask_cents,
+                        row.deck_text,
+                        row.made_tick,
+                        row.status,
+                        row.conviction_bp,
+                        row.valuation_view_cents,
+                        row.verdict,
+                    )
+                    for row in result.economy.ventures.pitches.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO term_sheets(
+                    run_id,term_sheet_id,startup_id,investor_id,
+                    pre_money_cents,amount_cents,security,liq_pref_bp,
+                    participating,pro_rata,board_seat,option_pool_bp,
+                    anti_dilution,issued_tick,expires_tick,status
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        row.term_sheet_id,
+                        row.startup_id,
+                        row.investor_id,
+                        row.pre_money_cents,
+                        row.amount_cents,
+                        row.security,
+                        row.liq_pref_bp,
+                        row.participating,
+                        row.pro_rata,
+                        row.board_seat,
+                        row.option_pool_bp,
+                        row.anti_dilution,
+                        row.issued_tick,
+                        row.expires_tick,
+                        row.status,
+                    )
+                    for row in result.economy.ventures.term_sheets.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO acquisitions(
+                    run_id,deal_id,acquirer_id,target_id,offer_cents,
+                    per_share_cents,consideration,stock_ratio_bp,premium_bp,
+                    integration_mode,financing,proposed_tick,expires_tick,
+                    accepting_holders,status
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        row.deal_id,
+                        row.acquirer_id,
+                        row.target_id,
+                        row.offer_cents,
+                        row.per_share_cents,
+                        row.consideration,
+                        row.stock_ratio_bp,
+                        row.premium_bp,
+                        row.integration_mode,
+                        row.financing,
+                        row.proposed_tick,
+                        row.expires_tick,
+                        Jsonb(row.accepting_holders),
+                        row.status,
+                    )
+                    for row in result.economy.ventures.acquisitions.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO bankruptcies(
+                    run_id,case_id,entity_id,entity_type,trigger,assets_cents,
+                    liabilities_cents,filed_tick,stay_until_tick,status,
+                    liquidation_tick,estate_cents,resolved_tick
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row.case_id,
+                        row.entity_id,
+                        row.entity_type,
+                        row.trigger,
+                        row.assets_cents,
+                        row.liabilities_cents,
+                        row.filed_tick,
+                        row.stay_until_tick,
+                        row.status,
+                        row.liquidation_tick,
+                        row.estate_cents,
+                        row.resolved_tick,
+                    )
+                    for row in result.economy.ventures.bankruptcies.values()
+                ],
+            )
+            await cursor.executemany(
+                """
+                INSERT INTO bankruptcy_claims(
+                    run_id,claim_id,case_id,creditor_id,claim_cents,
+                    priority_class,collateral_ref,loan_id,paid_cents
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row.claim_id,
+                        row.case_id,
+                        row.creditor_id,
+                        row.claim_cents,
+                        row.priority_class,
+                        row.collateral_ref,
+                        row.loan_id,
+                        row.paid_cents,
+                    )
+                    for row in result.economy.ventures.claims.values()
                 ],
             )
         memories = [

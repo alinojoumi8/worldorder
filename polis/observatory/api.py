@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from polis.config.metric_catalogue import (
     FUTURE_METRICS,
     M2_METRICS,
+    M3_METRICS,
     METRICS,
     UNAVAILABLE_M1_METRICS,
 )
@@ -124,6 +125,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def db(request: Request) -> Database:
         return cast(Database, request.app.state.db)
 
+    async def milestone_availability(
+        database: Database,
+        run_id: UUID,
+    ) -> tuple[bool, bool]:
+        rows = await database.fetch(
+            """
+            SELECT
+                EXISTS(
+                    SELECT 1 FROM metrics WHERE run_id=%s AND metric='m1'
+                ) AS economy_available,
+                (
+                    EXISTS(SELECT 1 FROM securities WHERE run_id=%s AND class='common')
+                    OR EXISTS(SELECT 1 FROM startups WHERE run_id=%s)
+                    OR EXISTS(SELECT 1 FROM bankruptcies WHERE run_id=%s)
+                ) AS capital_available
+            """,
+            (run_id, run_id, run_id, run_id),
+        )
+        return bool(rows[0]["economy_available"]), bool(rows[0]["capital_available"])
+
     @app.get(f"{API_PREFIX}/health")
     async def health(request: Request) -> dict[str, Any]:
         database = db(request)
@@ -207,16 +228,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get(f"{API_PREFIX}/runs/{{run_id}}/metrics/catalogue")
     async def metric_catalogue(run_id: UUID, request: Request) -> dict[str, Any]:
         database = db(request)
-        economy_rows = await database.fetch(
-            """
-            SELECT EXISTS(
-                SELECT 1 FROM metrics WHERE run_id=%s AND metric='m1'
-            ) AS available
-            """,
-            (run_id,),
+        economy_available, capital_available = await milestone_availability(database, run_id)
+        unavailable = sorted(
+            FUTURE_METRICS
+            | (frozenset() if economy_available else M2_METRICS)
+            | (frozenset() if capital_available else M3_METRICS)
         )
-        economy_available = bool(economy_rows[0]["available"])
-        unavailable = sorted(FUTURE_METRICS | (frozenset() if economy_available else M2_METRICS))
         return _with_freshness(
             {
                 "items": [
@@ -230,6 +247,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "available": (
                             item.metric_id not in UNAVAILABLE_M1_METRICS
                             or (economy_available and item.metric_id in M2_METRICS)
+                            or (capital_available and item.metric_id in M3_METRICS)
                         ),
                     }
                     for item in METRICS.values()
@@ -237,6 +255,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "unavailable_in_m1": sorted(UNAVAILABLE_M1_METRICS),
                 "unavailable_for_run": unavailable,
                 "economy_available": economy_available,
+                "capital_available": capital_available,
             },
             await _freshness(database, run_id),
         )
@@ -255,19 +274,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if metric not in METRICS:
             raise HTTPException(404, "metric not registered")
         database = db(request)
-        if metric in M2_METRICS:
-            economy_rows = await database.fetch(
-                """
-                SELECT EXISTS(
-                    SELECT 1 FROM metrics WHERE run_id=%s AND metric='m1'
-                ) AS available
-                """,
-                (run_id,),
-            )
-            if not bool(economy_rows[0]["available"]):
+        if metric in M2_METRICS or metric in M3_METRICS:
+            economy_available, capital_available = await milestone_availability(database, run_id)
+            if metric in M2_METRICS and not economy_available:
                 raise HTTPException(
                     501,
                     f"{metric} is unavailable until the economy milestone",
+                )
+            if metric in M3_METRICS and not capital_available:
+                raise HTTPException(
+                    501,
+                    f"{metric} is unavailable until the capital milestone",
                 )
         rows = await database.fetch(
             """
@@ -289,6 +306,117 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "cadence": METRICS[metric].cadence,
                 "points": [_json_row(row) for row in rows],
             },
+            await _freshness(database, run_id),
+        )
+
+    @app.get(f"{API_PREFIX}/runs/{{run_id}}/market/securities")
+    async def market_securities(run_id: UUID, request: Request) -> dict[str, Any]:
+        database = db(request)
+        rows = await database.fetch(
+            """
+            SELECT s.symbol,s.issuer_firm_id,s.class,s.shares_outstanding,
+                   s.listed_tick,s.delisted_tick,s.listing_price_cents,
+                   s.last_price_cents,s.reference_price_cents,s.status,
+                   s.halt_until_tick,s.breaker_count,
+                   o.session_tick,o.open_cents,o.high_cents,o.low_cents,
+                   o.close_cents,o.volume,o.vwap_cents,o.trades_n
+            FROM securities s
+            LEFT JOIN LATERAL (
+                SELECT * FROM ohlcv
+                WHERE run_id=s.run_id AND symbol=s.symbol
+                ORDER BY session_tick DESC LIMIT 1
+            ) o ON TRUE
+            WHERE s.run_id=%s AND s.class='common'
+            ORDER BY s.symbol
+            """,
+            (run_id,),
+        )
+        return _with_freshness(
+            {"items": [_json_row(row) for row in rows]},
+            await _freshness(database, run_id),
+        )
+
+    @app.get(f"{API_PREFIX}/runs/{{run_id}}/market/trades")
+    async def market_trades(
+        run_id: UUID,
+        request: Request,
+        symbol: str | None = None,
+        limit: int = Query(200, ge=1, le=2_000),
+    ) -> dict[str, Any]:
+        database = db(request)
+        rows = await database.fetch(
+            """
+            SELECT trade_id,tick,symbol,price_cents,qty,buyer_id,seller_id,
+                   aggressor,commission_buy_cents,commission_sell_cents
+            FROM trades
+            WHERE run_id=%s AND (%s::text IS NULL OR symbol=%s)
+            ORDER BY tick DESC,trade_id DESC LIMIT %s
+            """,
+            (run_id, symbol, symbol, limit),
+        )
+        return _with_freshness(
+            {"items": [_json_row(row) for row in rows]},
+            await _freshness(database, run_id),
+        )
+
+    @app.get(f"{API_PREFIX}/runs/{{run_id}}/capital/startups")
+    async def capital_startups(run_id: UUID, request: Request) -> dict[str, Any]:
+        database = db(request)
+        rows = await database.fetch(
+            """
+            SELECT s.*,
+                   COALESCE(c.fully_diluted_shares,0) AS fully_diluted_shares,
+                   COALESCE(r.rounds_n,0) AS rounds_n
+            FROM startups s
+            LEFT JOIN (
+                SELECT run_id,firm_id,SUM(shares) AS fully_diluted_shares
+                FROM cap_table GROUP BY run_id,firm_id
+            ) c ON c.run_id=s.run_id AND c.firm_id=s.firm_id
+            LEFT JOIN (
+                SELECT run_id,startup_id,COUNT(*) AS rounds_n
+                FROM funding_rounds GROUP BY run_id,startup_id
+            ) r ON r.run_id=s.run_id AND r.startup_id=s.startup_id
+            WHERE s.run_id=%s ORDER BY s.founded_tick,s.startup_id
+            """,
+            (run_id,),
+        )
+        return _with_freshness(
+            {"items": [_json_row(row) for row in rows]},
+            await _freshness(database, run_id),
+        )
+
+    @app.get(f"{API_PREFIX}/runs/{{run_id}}/capital/acquisitions")
+    async def capital_acquisitions(run_id: UUID, request: Request) -> dict[str, Any]:
+        database = db(request)
+        rows = await database.fetch(
+            "SELECT * FROM acquisitions WHERE run_id=%s ORDER BY proposed_tick,deal_id",
+            (run_id,),
+        )
+        return _with_freshness(
+            {"items": [_json_row(row) for row in rows]},
+            await _freshness(database, run_id),
+        )
+
+    @app.get(f"{API_PREFIX}/runs/{{run_id}}/capital/bankruptcies")
+    async def capital_bankruptcies(run_id: UUID, request: Request) -> dict[str, Any]:
+        database = db(request)
+        rows = await database.fetch(
+            """
+            SELECT b.*,
+                   COALESCE(c.claims_cents,0) AS claims_cents,
+                   COALESCE(c.paid_cents,0) AS paid_cents
+            FROM bankruptcies b
+            LEFT JOIN (
+                SELECT run_id,case_id,SUM(claim_cents) AS claims_cents,
+                       SUM(paid_cents) AS paid_cents
+                FROM bankruptcy_claims GROUP BY run_id,case_id
+            ) c ON c.run_id=b.run_id AND c.case_id=b.case_id
+            WHERE b.run_id=%s ORDER BY b.filed_tick,b.case_id
+            """,
+            (run_id,),
+        )
+        return _with_freshness(
+            {"items": [_json_row(row) for row in rows]},
             await _freshness(database, run_id),
         )
 
