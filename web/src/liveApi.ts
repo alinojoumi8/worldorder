@@ -119,9 +119,11 @@ export const polisApi = {
     getJson<{ tick: number; agents: MapAgent[] } & Freshness>(
       `/api/v1/runs/${runId}/map`
     ),
-  agents: (runId: string) =>
+  agents: (runId: string, cursor?: string) =>
     getJson<{ items: AgentRecord[]; next_cursor: string | null } & Freshness>(
-      `/api/v1/runs/${runId}/agents?limit=500`
+      `/api/v1/runs/${runId}/agents?limit=500${
+        cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
+      }`
     ),
   metricCatalogue: (runId: string) =>
     getJson<
@@ -139,6 +141,22 @@ export const polisApi = {
       `/api/v1/runs/${runId}/agents/${agentId}/tick/${tick}`
     )
 };
+
+export async function allAgents(
+  runId: string
+): Promise<{ items: AgentRecord[] } & Freshness> {
+  const items: AgentRecord[] = [];
+  let cursor: string | undefined;
+  let freshness: Freshness | undefined;
+  do {
+    const page = await polisApi.agents(runId, cursor);
+    items.push(...page.items);
+    freshness = page;
+    cursor = page.next_cursor ?? undefined;
+  } while (cursor);
+  if (!freshness) throw new Error("Agent projection returned no page.");
+  return { items, ...freshness };
+}
 
 export function liveSocketUrl(runId: string): string {
   const configured = import.meta.env.VITE_POLIS_WS_BASE as string | undefined;

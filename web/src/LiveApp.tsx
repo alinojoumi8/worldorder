@@ -13,6 +13,7 @@ import {
   Wifi
 } from "lucide-react";
 import {
+  allAgents,
   liveSocketUrl,
   polisApi,
   type AgentRecord,
@@ -186,7 +187,7 @@ export default function LiveApp() {
           await Promise.all([
             polisApi.mapStatic(run.run_id),
             polisApi.map(run.run_id),
-            polisApi.agents(run.run_id),
+            allAgents(run.run_id),
             polisApi.metricCatalogue(run.run_id),
             polisApi.metric(run.run_id, "city.wellbeing_mean"),
             polisApi.metric(run.run_id, "sys.cognition.deliberate_share"),
