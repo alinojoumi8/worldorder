@@ -155,7 +155,7 @@ export async function allAgents(
     cursor = page.next_cursor ?? undefined;
   } while (cursor);
   if (!freshness) throw new Error("Agent projection returned no page.");
-  return { items, ...freshness };
+  return { ...freshness, items };
 }
 
 export function liveSocketUrl(runId: string): string {

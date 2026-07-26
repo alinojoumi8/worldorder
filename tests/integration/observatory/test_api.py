@@ -51,6 +51,7 @@ async def test_observatory_is_read_only_fresh_and_marks_future_views_unavailable
                 base_url="http://test",
             ) as client:
                 health = await client.get("/api/v1/health")
+                runs = await client.get("/api/v1/runs")
                 detail = await client.get(f"/api/v1/runs/{run_id}")
                 agents = await client.get(f"/api/v1/runs/{run_id}/agents")
                 metric = await client.get(
@@ -64,6 +65,9 @@ async def test_observatory_is_read_only_fresh_and_marks_future_views_unavailable
         assert health.status_code == 200
         assert health.json()["database"]["role"] == "reader"
         assert health.json()["database"]["alembic_head"] == "0005_observatory_projections"
+        assert runs.status_code == 200
+        assert runs.json()["as_of_seq"] > 0
+        assert "engine" in runs.json()
         assert detail.status_code == 200
         assert detail.json()["as_of_tick"] == 3
         assert detail.json()["as_of_seq"] > 0

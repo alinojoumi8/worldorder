@@ -156,13 +156,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             FROM runs ORDER BY started_at DESC
             """
         )
-        as_of_tick = max((int(row["last_tick"]) for row in rows), default=0)
-        return {
-            "items": [_json_row(row) for row in rows],
-            "as_of_tick": as_of_tick,
-            "as_of_seq": 0,
-            "engine": {"fresh": bool(rows), "projection_lag_ticks": 0},
-        }
+        freshness = (
+            await _freshness(database, UUID(str(rows[0]["run_id"])))
+            if rows
+            else {
+                "as_of_tick": 0,
+                "as_of_seq": 0,
+                "engine": {"fresh": False, "projection_lag_ticks": 0},
+            }
+        )
+        return _with_freshness(
+            {"items": [_json_row(row) for row in rows]},
+            freshness,
+        )
 
     @app.get(f"{API_PREFIX}/runs/{{run_id}}")
     async def run_detail(run_id: UUID, request: Request) -> dict[str, Any]:
