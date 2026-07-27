@@ -1,7 +1,7 @@
 {
   ".codebase-memory/artifact.json": {
-    "mtime": 1785116261.5827446,
-    "ast_hash": "748c2bba38a972c90fb9378a84980be3",
+    "mtime": 1785116635.213427,
+    "ast_hash": "90cb583b2751dfcf219d6b87e8cbc0c4",
     "semantic_hash": ""
   },
   ".impeccable/composition-options.json": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "polis/living_city.py": {
-    "mtime": 1785113990.3414512,
-    "ast_hash": "3e67cc65308cc4c8b878cb41d3c3b065",
+    "mtime": 1785116511.1216812,
+    "ast_hash": "e62484d57a38b968079a1739f709c7d2",
     "semantic_hash": ""
   },
   "polis/llm/__init__.py": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "polis/llm/lanes.py": {
-    "mtime": 1785115724.1335504,
-    "ast_hash": "c63c9009570045cacedf417d555fd70a",
+    "mtime": 1785116502.5838933,
+    "ast_hash": "02a11519f9b2890dcbe3cab365194bc4",
     "semantic_hash": ""
   },
   "polis/llm/providers/__init__.py": {
@@ -415,8 +415,8 @@
     "semantic_hash": ""
   },
   "polis/llm/router.py": {
-    "mtime": 1785115724.1335504,
-    "ast_hash": "0b54b5651003579de78f81c135ea2ca7",
+    "mtime": 1785116511.1206844,
+    "ast_hash": "667c037072d0a15c7a516ae02be019ef",
     "semantic_hash": ""
   },
   "polis/llm/structured.py": {
@@ -1420,8 +1420,8 @@
     "semantic_hash": ""
   },
   "scripts/preflight_live_calibration.py": {
-    "mtime": 1785115944.662322,
-    "ast_hash": "ac284aa8c9a77263c126eadb06493918",
+    "mtime": 1785116502.5868943,
+    "ast_hash": "353f62f640c67f13649e8cf2d3b47960",
     "semantic_hash": ""
   },
   "tests/unit/llm/test_cli_provider.py": {
@@ -1430,8 +1430,8 @@
     "semantic_hash": ""
   },
   "tests/unit/llm/test_lanes.py": {
-    "mtime": 1785115701.9080753,
-    "ast_hash": "32fe92c19ed720f0d3ffcb258f83234f",
+    "mtime": 1785116502.588893,
+    "ast_hash": "278169150a96b081e60499d1104d7f65",
     "semantic_hash": ""
   },
   "tests/unit/llm/test_openai_compat.py": {
@@ -1450,8 +1450,8 @@
     "semantic_hash": ""
   },
   "tests/unit/scripts/test_preflight_live_calibration.py": {
-    "mtime": 1785115930.5648675,
-    "ast_hash": "c2e2153a455a5f619dfcef62be03263a",
+    "mtime": 1785116502.5878913,
+    "ast_hash": "e88217e9753a9893af9913b24970adb3",
     "semantic_hash": ""
   },
   "configs/live-codex-cli-smoke.yaml": {

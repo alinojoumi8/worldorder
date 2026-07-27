@@ -598,6 +598,7 @@ async def run_living_city(
     ephemeral_sink: EphemeralSink | None = None,
     collect_events: bool = True,
     cache_mode: Literal["live", "replay", "hybrid"] | None = None,
+    lane_concurrency_overrides: Mapping[str, int] | None = None,
 ) -> LivingCityResult:
     run_id = run_id_for(settings)
     rng = RngRegistry(settings.run.seed)
@@ -642,6 +643,7 @@ async def run_living_city(
         run_id=run_id,
         lanes={} if cache_mode == "replay" else None,
         cache=runtime_cache,
+        concurrency_overrides=lane_concurrency_overrides,
     )
     log.stage(
         NewEvent(

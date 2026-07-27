@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
-from polis.llm.lanes import Lane
+from polis.config.settings import load_settings
+from polis.llm.lanes import Lane, build_lanes
 from polis.llm.providers.base import (
     Capabilities,
     CompletionRequest,
@@ -145,3 +147,13 @@ async def test_lane_run_quota_hard_stops_wire_retries(tmp_path) -> None:
     with pytest.raises(ProviderRateLimited):
         await lane.complete(request())
     assert provider.calls == 2
+
+
+def test_runtime_concurrency_override_does_not_mutate_settings() -> None:
+    settings = load_settings(Path("configs/smoke.yaml"))
+    lanes = build_lanes(
+        settings.llm,
+        concurrency_overrides={"stub": 2},
+    )
+    assert lanes["stub"].semaphore._value == 2
+    assert settings.llm.providers["stub"].max_concurrency == 64

@@ -61,10 +61,19 @@ class LLMRouter:
         lanes: Mapping[str, Lane] | None = None,
         cache: CompletionCache | None = None,
         budget: BudgetGuard | None = None,
+        concurrency_overrides: Mapping[str, int] | None = None,
     ) -> None:
         self.settings = settings
         self.run_id = run_id
-        self.lanes = dict(lanes if lanes is not None else build_lanes(settings.llm, run_id=run_id))
+        self.lanes = dict(
+            lanes
+            if lanes is not None
+            else build_lanes(
+                settings.llm,
+                run_id=run_id,
+                concurrency_overrides=concurrency_overrides,
+            )
+        )
         self.cache = cache or CompletionCache(
             mode=settings.llm.cache.mode,
             l0_entries=settings.llm.cache.l0_entries,

@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "2f722d20da2aef1ae4aa86de6f80c15b4b325528",
-    "indexed_at": "2026-07-27T01:37:41Z",
+    "commit": "30a54c82d395a8ce51df5639e57177e9b34ae2a8",
+    "indexed_at": "2026-07-27T01:43:55Z",
     "project": "worldorder",
-    "nodes": 6044,
-    "edges": 23645,
+    "nodes": 6095,
+    "edges": 23769,
     "original_size": 15007744,
-    "compressed_size": 3288959,
+    "compressed_size": 3297726,
     "compression_level": 3
 }

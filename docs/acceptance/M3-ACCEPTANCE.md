@@ -109,8 +109,10 @@ separate cost and privacy review promotes them.
 | Grok CLI one-call smoke | PASS: clean-profile schema-valid response and exact offline replay; 15,349 input and 23 output tokens |
 | 1,000-agent preflight | PASS: 70/70 schema-valid calls, 71 wire attempts, four action types, zero null actions, USD 0.04597452 |
 | Preflight replay | PASS: terminal hash `04a8aca030f2a52cb4183ee27f2f88dd978532522df7de87afc9e00dcc6be702` reproduced exactly offline |
-| Full offline gate | PASS: 195 non-live tests, Ruff lint/format, mypy strict, four import contracts, determinism and prompt linters, and the production frontend build |
+| Full offline gate | PASS: 196 non-live tests, Ruff lint/format, mypy strict, four import contracts, determinism and prompt linters, and the production frontend build |
 
 The 80-tick run uses a run-UUID-scoped persistent wire-attempt ledger. Provider rate limits
 trigger a bounded cached restart, while a long `Retry-After` from either hard quota stops the
-run instead of waiting through or bypassing the ceiling.
+run instead of waiting through or bypassing the ceiling. Transport concurrency is a runtime
+control rather than a semantic configuration change, so lowering burst pressure preserves
+the same run ID, completion cache, event chain, and quota scope.

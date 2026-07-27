@@ -52,11 +52,16 @@ async def run_resumable(
     *,
     attempts: int,
     retry_delay_seconds: float,
+    concurrency_overrides: dict[str, int],
     runner: LiveRunner = run_living_city,
 ) -> LivingCityResult:
     for attempt in range(1, attempts + 1):
         try:
-            return await runner(settings, collect_events=False)
+            return await runner(
+                settings,
+                collect_events=False,
+                lane_concurrency_overrides=concurrency_overrides,
+            )
         except ProviderRateLimited as exc:
             if attempt >= attempts or exc.retry_after_s > 60:
                 raise
@@ -111,7 +116,6 @@ async def preflight(
                 "retention": "full",
             },
             "llm": {
-                "providers": {"reasoning": {"max_concurrency": concurrency}},
                 "budget": {
                     "lines": {
                         "cognition": {
@@ -130,6 +134,7 @@ async def preflight(
         settings,
         attempts=resume_attempts,
         retry_delay_seconds=resume_delay_seconds,
+        concurrency_overrides={"reasoning": concurrency},
     )
     replay = await run_living_city(
         settings,

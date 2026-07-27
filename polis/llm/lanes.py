@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -94,11 +95,19 @@ def build_lanes(
     *,
     http: httpx.AsyncClient | None = None,
     run_id: UUID | None = None,
+    concurrency_overrides: Mapping[str, int] | None = None,
 ) -> dict[str, Lane]:
     if settings.cache.mode == "replay":
         return {}
+    runtime_concurrency = dict(concurrency_overrides or {})
+    unknown = sorted(set(runtime_concurrency) - set(settings.providers))
+    if unknown:
+        raise ValueError(f"concurrency override references unknown lanes: {unknown}")
+    if any(value <= 0 for value in runtime_concurrency.values()):
+        raise ValueError("concurrency overrides must be positive")
     result: dict[str, Lane] = {}
     for name, config in sorted(settings.providers.items()):
+        max_concurrency = runtime_concurrency.get(name, config.max_concurrency)
         if config.kind == "stub":
             provider: Provider = StubProvider()
         else:
@@ -107,7 +116,7 @@ def build_lanes(
                 max_output_tokens=8192,
                 structured_output=config.structured_output,
                 prefix_caching=True,
-                max_concurrency=config.max_concurrency,
+                max_concurrency=max_concurrency,
                 rpm_limit=config.rpm_limit,
                 tpm_limit=config.tpm_limit,
                 supports_embeddings=config.kind == "ollama",
@@ -152,7 +161,7 @@ def build_lanes(
         result[name] = Lane(
             name=name,
             provider=provider,
-            semaphore=asyncio.Semaphore(config.max_concurrency),
+            semaphore=asyncio.Semaphore(max_concurrency),
             quota=(
                 SlidingWindowQuota(config.quota_path)
                 if config.calls_per_window is not None

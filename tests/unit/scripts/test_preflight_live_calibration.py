@@ -23,9 +23,10 @@ async def test_live_calibration_resumes_transient_failures_from_cache() -> None:
     calls = 0
     expected = cast(LivingCityResult, object())
 
-    async def runner(settings, *, collect_events):
+    async def runner(settings, *, collect_events, lane_concurrency_overrides):
         nonlocal calls
         del settings, collect_events
+        assert lane_concurrency_overrides == {"reasoning": 2}
         calls += 1
         if calls < 3:
             raise ProviderTransient("retry")
@@ -35,6 +36,7 @@ async def test_live_calibration_resumes_transient_failures_from_cache() -> None:
         load_settings(Path("configs/smoke.yaml")),
         attempts=3,
         retry_delay_seconds=0,
+        concurrency_overrides={"reasoning": 2},
         runner=runner,
     )
 
