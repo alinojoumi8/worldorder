@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID
@@ -177,3 +178,49 @@ async def test_deliberate_stub_call_is_structured_and_prompt_disciplined() -> No
     assert result.call.parsed_ok
     assert result.action.actor_id == "ag_0000"
     assert all(word not in result.prompt.lower() for word in ("simulation", " ai ", "model"))
+
+
+@pytest.mark.asyncio
+async def test_deliberate_prompt_exposes_resource_bounded_market_action() -> None:
+    _rng, world, population = _population(2)
+    observation = build_observations(
+        population,
+        world,
+        tick=4,
+        sim_time=datetime(2100, 1, 5),
+    )["ag_0000"]
+    observation = replace(
+        observation,
+        place=replace(
+            observation.place,
+            legal_actions=(*observation.place.legal_actions, "SUBMIT_ORDER"),
+        ),
+        market={
+            "liquid_cents": 10_000,
+            "securities": (
+                {
+                    "symbol": "POLS",
+                    "last_price_cents": 1_000,
+                    "holding_qty": 0,
+                    "available_qty": 0,
+                },
+            ),
+            "open_orders": (),
+        },
+    )
+    router = LLMRouter(
+        settings=load_settings(Path("configs/smoke.yaml")),
+        run_id=UUID("20000000-0000-0000-0000-000000000010"),
+    )
+
+    result = await deliberate_decide(
+        population["ag_0000"],
+        observation,
+        (),
+        router=router,
+        salience=0.7,
+    )
+
+    assert result.call.parsed_ok
+    assert "SUBMIT_ORDER" in result.prompt
+    assert "POLS" in result.prompt

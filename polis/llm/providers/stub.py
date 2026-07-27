@@ -88,7 +88,21 @@ def _synthesise(schema: Mapping[str, Any], digest: bytes, prompt: str, path: str
     if "enum" in schema:
         return _pick(list(schema["enum"]), digest, len(path))
     if "oneOf" in schema:
-        return _synthesise(schema["oneOf"][0], digest, prompt, path)
+        branches = list(schema["oneOf"])
+        if not branches:
+            raise StubContractError("cannot select from an empty oneOf")
+        if path.endswith("/action"):
+            supported = {
+                branch.get("properties", {}).get("type", {}).get("const"): branch
+                for branch in branches
+            }
+            actions = [
+                action for action in legal_actions_from_prompt(prompt) if action in supported
+            ]
+            if actions:
+                selected = _pick(actions, digest, len(path))
+                return _synthesise(supported[selected], digest, prompt, path)
+        return _synthesise(branches[0], digest, prompt, path)
     if "anyOf" in schema:
         return _synthesise(schema["anyOf"][0], digest, prompt, path)
     kind = schema.get("type", "object")
@@ -101,7 +115,8 @@ def _synthesise(schema: Mapping[str, Any], digest: bytes, prompt: str, path: str
         }
         if path.endswith("/action"):
             actions = legal_actions_from_prompt(prompt)
-            if actions and "type" in result:
+            type_schema = properties.get("type", {})
+            if actions and "type" in result and "const" not in type_schema:
                 result["type"] = _pick(actions, digest, len(path))
         return result
     if kind == "array":

@@ -3,6 +3,8 @@ import math
 
 import pytest
 
+from polis.agents.actions.types import ActionType
+from polis.agents.actions.validate import action_response_schema
 from polis.llm.providers.base import CompletionRequest, SamplingParams
 from polis.llm.providers.stub import (
     StubProvider,
@@ -51,6 +53,74 @@ async def test_stub_is_pure_and_schema_valid() -> None:
     value = json.loads(first.text)
     assert value["action"]["type"] in {"MOVE", "STUDY"}
     assert 0 <= value["confidence"] <= 1
+
+
+@pytest.mark.asyncio
+async def test_stub_selects_a_matching_typed_action_branch() -> None:
+    schema = {
+        "type": "object",
+        "required": ["action"],
+        "properties": {
+            "action": {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "required": ["type", "params"],
+                        "properties": {
+                            "type": {"const": "MOVE_TO"},
+                            "params": {
+                                "type": "object",
+                                "required": ["place_id"],
+                                "properties": {"place_id": {"type": "string"}},
+                            },
+                        },
+                    },
+                    {
+                        "type": "object",
+                        "required": ["type", "params"],
+                        "properties": {
+                            "type": {"const": "IDLE"},
+                            "params": {"type": "object", "properties": {}},
+                        },
+                    },
+                ]
+            }
+        },
+    }
+    typed_request = CompletionRequest(
+        purpose="DELIBERATE",
+        system="Return an action.",
+        user="## What you can do\n- MOVE_TO\n- IDLE\n\nPlaces: pl_001",
+        schema=schema,
+        sampling=SamplingParams(temperature=0.8, seed=9),
+        call_seed=9,
+        timeout_s=1,
+    )
+
+    response = await StubProvider().complete(typed_request)
+    value = json.loads(response.text)
+
+    assert value["action"]["type"] in {"MOVE_TO", "IDLE"}
+    if value["action"]["type"] == "MOVE_TO":
+        assert value["action"]["params"]["place_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action_type", tuple(ActionType))
+async def test_stub_honours_every_typed_action_contract(action_type: ActionType) -> None:
+    typed_request = CompletionRequest(
+        purpose="DELIBERATE",
+        system="Return an action.",
+        user=f"## What you can do\n- {action_type.value}\n\nPlaces: pl_001",
+        schema=action_response_schema((action_type.value,)),
+        sampling=SamplingParams(temperature=0.8, seed=10),
+        call_seed=10,
+        timeout_s=1,
+    )
+
+    response = await StubProvider().complete(typed_request)
+
+    assert json.loads(response.text)["action"]["type"] == action_type.value
 
 
 def test_legal_action_parser_is_scoped() -> None:

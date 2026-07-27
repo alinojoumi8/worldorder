@@ -23,6 +23,7 @@ from polis.economy.genesis import create_economy
 from polis.economy.labour import load_occupations
 from polis.economy.policy import MechanicalPolicy
 from polis.economy.state import EconomyState, EconomyWorldState
+from polis.economy_observations import augment_economic_observations
 from polis.events.kinds import (
     ACTION_REJECTED,
     ACTION_VALIDATED,
@@ -205,6 +206,12 @@ class LivingCityEngine:
             tick=ctx.tick,
             sim_time=ctx.sim_time,
         )
+        if self.economy is not None and not self.settings.ablations.reflex_only:
+            self.observations = augment_economic_observations(
+                self.observations,
+                self.population,
+                self.economy,
+            )
 
     async def salience(self, ctx: TickContext) -> None:
         self.routing = route_cognition(

@@ -119,7 +119,13 @@ class MechanicalPolicy:
         events.extend(self.labour.decay_unused_skills(tick, emit))
         events.extend(self.firms.run_daily(tick, emit))
         events.extend(self.goods.compute_cpi(tick, emit))
-        exchange_actions = (*actions, *self.ventures.liquidation_actions(tick))
+        exchange_actions = actions
+        if (
+            self.settings.ablations.reflex_only
+            and self.settings.mechanisms.get("exchange_zero_intelligence_trader", "off") != "off"
+        ):
+            exchange_actions = (*exchange_actions, *self._zero_intelligence_actions(tick))
+        exchange_actions = (*exchange_actions, *self.ventures.liquidation_actions(tick))
         events.extend(self.exchange.resolve(exchange_actions, tick, emit))
         events.extend(await self.banking.step(tick, emit))
         events.extend(await self.ventures.resolve(actions, tick, emit))
@@ -127,6 +133,96 @@ class MechanicalPolicy:
         self.economy.sync_denormalised(self.population)
         self.economy.ledger.commit_tick(tick)
         return tuple(events)
+
+    @mechanism(
+        "exchange.zero_intelligence_trader",
+        entails=(
+            "In the reflex-only baseline, seeded resource-constrained reservation prices "
+            "generate exchange orders. Participation and quotes are mechanically supplied; "
+            "executed volume, price paths, and market continuity are not guaranteed."
+        ),
+        config_key="mechanisms.exchange_zero_intelligence_trader",
+        default_enabled=False,
+    )
+    def _zero_intelligence_actions(self, tick: int) -> tuple[Action, ...]:
+        actions: list[Action] = []
+        ordinals: dict[str, int] = {}
+        settings = self.settings.exchange
+        liquid_by_owner: dict[str, int] = {}
+        for account in self.economy.ledger.accounts():
+            if account.code in {"cash", "dep"}:
+                liquid_by_owner[account.owner_id] = (
+                    liquid_by_owner.get(account.owner_id, 0) + account.balance_cents
+                )
+        for symbol, security in sorted(self.economy.exchange.securities.items()):
+            if security.status != "listed":
+                continue
+            holders = {
+                holding.holder_id
+                for holding in self.economy.exchange.holdings.values()
+                if holding.symbol == symbol and holding.qty > 0
+            }
+            for agent in self.population:
+                if not agent.alive or agent.age_years < 18:
+                    continue
+                holding = self.economy.exchange.holdings.get(
+                    self.economy.exchange.holding_key(agent.agent_id, symbol)
+                )
+                available_qty = (
+                    max(0, holding.qty - holding.reserved_qty - holding.locked_qty)
+                    if holding is not None
+                    else 0
+                )
+                rng = self.rng.get(
+                    "exchange.zero_intelligence",
+                    f"{symbol}:{agent.agent_id}",
+                    tick,
+                )
+                if (
+                    available_qty == 0
+                    and rng.randint(0, 9_999) >= settings.zero_intelligence_participation_bp
+                ):
+                    continue
+                sell = available_qty > 0 and (len(holders) == 1 or rng.randint(0, 1) == 0)
+                offset_bp = rng.randint(
+                    -settings.zero_intelligence_spread_bp,
+                    settings.zero_intelligence_spread_bp,
+                )
+                limit_price = max(
+                    settings.tick_size_cents,
+                    security.last_price_cents * (10_000 + offset_bp) // 10_000,
+                )
+                limit_price -= limit_price % settings.tick_size_cents
+                limit_price = max(settings.tick_size_cents, limit_price)
+                if sell:
+                    max_qty = min(settings.zero_intelligence_max_order_qty, available_qty)
+                    side = "sell"
+                else:
+                    liquid = liquid_by_owner.get(agent.agent_id, 0)
+                    max_qty = min(
+                        settings.zero_intelligence_max_order_qty,
+                        liquid // max(1, limit_price),
+                    )
+                    side = "buy"
+                if max_qty <= 0:
+                    continue
+                quantity = rng.randint(1, max_qty)
+                actions.append(
+                    self._action(
+                        agent.agent_id,
+                        tick,
+                        ActionType.SUBMIT_ORDER,
+                        {
+                            "symbol": symbol,
+                            "side": side,
+                            "order_type": "limit",
+                            "qty": quantity,
+                            "limit_price_cents": limit_price,
+                        },
+                        ordinals,
+                    )
+                )
+        return tuple(actions)
 
     def _stay_blocks(self, action: Action) -> bool:
         if action.type in {

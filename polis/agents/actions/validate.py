@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -232,6 +233,53 @@ _PARAM_MODELS: dict[ActionType, type[_Params]] = {
     ActionType.DECLARE_DIVIDEND: DividendParams,
     ActionType.NULL_ACTION: EmptyParams,
 }
+
+
+def action_response_schema(legal_actions: Sequence[str]) -> dict[str, Any]:
+    branches: list[dict[str, Any]] = []
+    seen: set[ActionType] = set()
+    for value in legal_actions:
+        try:
+            action_type = ActionType(value)
+        except ValueError:
+            continue
+        if action_type in seen:
+            continue
+        seen.add(action_type)
+        branches.append(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": action_type.value},
+                    "params": _PARAM_MODELS[action_type].model_json_schema(),
+                },
+                "required": ["type", "params"],
+            }
+        )
+    if not branches:
+        branches.append(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": ActionType.NULL_ACTION.value},
+                    "params": EmptyParams.model_json_schema(),
+                },
+                "required": ["type", "params"],
+            }
+        )
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "reasoning": {"type": "string", "maxLength": 300},
+            "action": {"oneOf": branches},
+        },
+        "required": ["reasoning", "action"],
+    }
+
 
 _ECONOMIC_ACTIONS = frozenset(
     {

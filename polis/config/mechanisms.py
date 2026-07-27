@@ -16,13 +16,20 @@ class MechanismSpec:
     config_key: str | None
     module: str
     qualname: str
+    default_enabled: bool
 
 
 MECHANISM_REGISTRY: Final[dict[str, MechanismSpec]] = {}
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def mechanism(id: str, *, entails: str, config_key: str | None = None) -> Callable[[F], F]:
+def mechanism(
+    id: str,
+    *,
+    entails: str,
+    config_key: str | None = None,
+    default_enabled: bool = True,
+) -> Callable[[F], F]:
     def register(function: F) -> F:
         if id in MECHANISM_REGISTRY:
             raise MechanismError(f"duplicate mechanism id: {id}")
@@ -32,6 +39,7 @@ def mechanism(id: str, *, entails: str, config_key: str | None = None) -> Callab
             config_key=config_key,
             module=function.__module__,
             qualname=function.__qualname__,
+            default_enabled=default_enabled,
         )
         return function
 
@@ -62,6 +70,8 @@ def active_mechanisms(settings: Settings) -> dict[str, MechanismSpec]:
             if key in settings.mechanisms:
                 configured = settings.mechanisms[key]
                 break
+        if configured is None and not spec.default_enabled:
+            continue
         if configured is None or configured.lower() not in disabled:
             result[mechanism_id] = spec
     return result
@@ -70,4 +80,9 @@ def active_mechanisms(settings: Settings) -> dict[str, MechanismSpec]:
 def mechanism_manifest(
     settings: Settings,
 ) -> dict[str, dict[str, str | None]]:
-    return {key: asdict(value) for key, value in active_mechanisms(settings).items()}
+    manifest: dict[str, dict[str, str | None]] = {}
+    for key, value in active_mechanisms(settings).items():
+        row = asdict(value)
+        row.pop("default_enabled")
+        manifest[key] = row
+    return manifest
