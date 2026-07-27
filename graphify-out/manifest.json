@@ -1,7 +1,7 @@
 {
   ".codebase-memory/artifact.json": {
-    "mtime": 1785116635.213427,
-    "ast_hash": "90cb583b2751dfcf219d6b87e8cbc0c4",
+    "mtime": 1785117888.300014,
+    "ast_hash": "59a0d0059b126bb6133c63f9115cf85e",
     "semantic_hash": ""
   },
   ".impeccable/composition-options.json": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "polis/llm/lanes.py": {
-    "mtime": 1785116502.5838933,
-    "ast_hash": "02a11519f9b2890dcbe3cab365194bc4",
+    "mtime": 1785117608.736434,
+    "ast_hash": "58d9c63ae7ae2a96ac32c1029802cf12",
     "semantic_hash": ""
   },
   "polis/llm/providers/__init__.py": {
@@ -1335,8 +1335,8 @@
     "semantic_hash": ""
   },
   "docs/acceptance/M3-ACCEPTANCE.md": {
-    "mtime": 1785116154.030519,
-    "ast_hash": "1a70bc0578853f5fa4564f9245e6617b",
+    "mtime": 1785116675.6434906,
+    "ast_hash": "8ddf3cc849073bd9e43c675693a52fef",
     "semantic_hash": ""
   },
   "artifacts/validation/m3-stage3-multiseed.json": {
@@ -1415,13 +1415,13 @@
     "semantic_hash": ""
   },
   "polis/llm/quota.py": {
-    "mtime": 1785112792.498884,
-    "ast_hash": "fd5d5b915bc7c9b44c7c9f21968b0557",
+    "mtime": 1785117635.1492095,
+    "ast_hash": "eac89cef9cfa81e52b729a34d2c512cd",
     "semantic_hash": ""
   },
   "scripts/preflight_live_calibration.py": {
-    "mtime": 1785116502.5868943,
-    "ast_hash": "353f62f640c67f13649e8cf2d3b47960",
+    "mtime": 1785117608.7374299,
+    "ast_hash": "7b1b78892d2387a20e3128195cc53c24",
     "semantic_hash": ""
   },
   "tests/unit/llm/test_cli_provider.py": {
@@ -1440,8 +1440,8 @@
     "semantic_hash": ""
   },
   "tests/unit/llm/test_quota.py": {
-    "mtime": 1785112659.6069465,
-    "ast_hash": "ca2582576c9d1818ad82b8fa8ddcfeda",
+    "mtime": 1785117608.7384305,
+    "ast_hash": "f149112d06a7f49429f6be4fc7f4a54f",
     "semantic_hash": ""
   },
   "tests/unit/llm/test_router_repair.py": {

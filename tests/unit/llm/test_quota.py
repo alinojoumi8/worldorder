@@ -15,12 +15,14 @@ async def test_sliding_window_quota_persists_across_instances(tmp_path) -> None:
 
     await first.reserve("minimax-key", limit=2, window_seconds=10)
     await second.reserve("minimax-key", limit=2, window_seconds=10)
+    assert await first.count("minimax-key", window_seconds=10) == 2
     with pytest.raises(ProviderRateLimited) as raised:
         await first.reserve("minimax-key", limit=2, window_seconds=10)
     assert raised.value.retry_after_s == 10
 
     current = 111.0
     await first.reserve("minimax-key", limit=2, window_seconds=10)
+    assert await first.count("minimax-key", window_seconds=10) == 1
 
 
 @pytest.mark.asyncio

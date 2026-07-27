@@ -13,6 +13,8 @@ from typing import Any
 from polis.config.settings import load_settings
 from polis.living_city import LivingCityResult, run_living_city
 from polis.llm.providers.base import ProviderRateLimited, ProviderTransient
+from polis.llm.quota import RUN_QUOTA_WINDOW_SECONDS, SlidingWindowQuota
+from polis.simulation import run_id_for
 
 LiveRunner = Callable[..., Awaitable[LivingCityResult]]
 
@@ -146,7 +148,13 @@ async def preflight(
     call_count = len(calls)
     parsed_calls = sum(bool(row.get("parsed_ok")) for row in calls)
     repair_attempts = sum(int(row.get("repair_attempts", 0)) for row in calls)
-    wire_calls = call_count + repair_attempts
+    logical_attempts = call_count + repair_attempts
+    lane_name = settings.llm.routing["DELIBERATE"].lane
+    quota = SlidingWindowQuota(settings.llm.providers[lane_name].quota_path)
+    wire_calls = await quota.count(
+        f"polis-run:{run_id_for(settings)}",
+        window_seconds=RUN_QUOTA_WINDOW_SECONDS,
+    )
     latencies = [int(row.get("latency_ms", 0)) for row in calls]
     total_cost = sum((Decimal(str(row.get("cost_usd", "0"))) for row in calls), Decimal(0))
     null_actions = actions["NULL_ACTION"]
@@ -171,6 +179,7 @@ async def preflight(
         "concurrency": concurrency,
         "max_calls_per_run": max_calls,
         "calls": call_count,
+        "logical_attempts": logical_attempts,
         "wire_calls": wire_calls,
         "repair_attempts": repair_attempts,
         "parsed_calls": parsed_calls,

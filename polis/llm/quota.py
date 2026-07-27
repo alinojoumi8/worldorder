@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from polis.llm.providers.base import ProviderRateLimited
 
+RUN_QUOTA_WINDOW_SECONDS = 604_800
+
 
 def quota_path(value: str) -> Path:
     raw = value.removeprefix("file://")
@@ -22,6 +24,25 @@ class SlidingWindowQuota:
 
     async def reserve(self, scope: str, *, limit: int, window_seconds: int) -> None:
         await asyncio.to_thread(self._reserve, scope, limit, window_seconds)
+
+    async def count(self, scope: str, *, window_seconds: int) -> int:
+        return await asyncio.to_thread(self._count, scope, window_seconds)
+
+    def _count(self, scope: str, window_seconds: int) -> int:
+        if not self.path.is_file():
+            return 0
+        cutoff = self.now() - window_seconds
+        with sqlite3.connect(self.path, timeout=30) as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) FROM provider_call_reservations
+                WHERE scope = ? AND reserved_at > ?
+                """,
+                (scope, cutoff),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("quota count query returned no row")
+        return int(row[0])
 
     def _reserve(self, scope: str, limit: int, window_seconds: int) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

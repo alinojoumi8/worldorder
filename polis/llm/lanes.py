@@ -20,7 +20,7 @@ from polis.llm.providers.base import (
 from polis.llm.providers.cli import CliProvider, cli_extra_bool, cli_extra_int, cli_extra_str
 from polis.llm.providers.openai_compat import OllamaProvider, OpenAICompatProvider
 from polis.llm.providers.stub import StubProvider
-from polis.llm.quota import SlidingWindowQuota
+from polis.llm.quota import RUN_QUOTA_WINDOW_SECONDS, SlidingWindowQuota
 
 
 @dataclass(slots=True)
@@ -38,7 +38,7 @@ class Lane:
     run_quota: SlidingWindowQuota | None = None
     run_quota_scope: str | None = None
     run_quota_limit: int | None = None
-    run_quota_window_seconds: int = 604_800
+    run_quota_window_seconds: int = RUN_QUOTA_WINDOW_SECONDS
 
     async def complete(self, request: CompletionRequest) -> CompletionResponse:
         async with self.semaphore:

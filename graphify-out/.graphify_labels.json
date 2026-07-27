@@ -203,5 +203,7 @@
   "201": "9. Implementation notes",
   "202": "__init__.py",
   "203": "hashing.py",
-  "204": "Any"
+  "204": "Any",
+  "205": "live_provider_smoke.py",
+  "206": "SeedSource"
 }
