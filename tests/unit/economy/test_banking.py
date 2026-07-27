@@ -37,7 +37,7 @@ from polis.economy.fiscal import (
 from polis.economy.genesis import create_economy
 from polis.economy.invariants import m0_cents, m1_cents
 from polis.economy.ledger import bank_of
-from polis.economy.state import TaxAssessmentState
+from polis.economy.state import EconomyWorldState, TaxAssessmentState
 from polis.events.kinds import (
     BANK_FAILED,
     BANK_RUN_DETECTED,
@@ -304,6 +304,146 @@ def test_repayment_destroys_inside_money_and_realises_only_interest_as_income() 
     assert m1_cents(economy.ledger) == before[0] - principal - interest
     assert capital_cents(lender_id, economy) == before[1] + interest
     assert economy.ledger.net_worth(firm.firm_id) == before[2] - interest
+
+
+def test_final_payment_classifies_capitalised_interest_as_paid() -> None:
+    settings, _world, population, economy, _rng, log = economy_fixture()
+    firm = next(iter(economy.firms.values()))
+    lender_id = bank_of(firm.ledger_account_id)
+    assert lender_id is not None
+    context = CreditContext(settings, population, economy)
+    request = LoanRequest(
+        firm.firm_id,
+        lender_id,
+        100_000,
+        "corporate",
+        360,
+        {},
+        200_000,
+    )
+    decision = decide(
+        request,
+        borrower_state(firm.firm_id, context),
+        economy.banks[lender_id],
+        ctx=context,
+    )
+    originate(
+        request,
+        decision,
+        1,
+        ctx=context,
+        emit=lambda draft: log.stage(
+            draft,
+            tick=1,
+            sim_time=datetime(2025, 1, 2),
+        ),
+    )
+    loan = next(iter(economy.loans.values()))
+    loan.accrued_interest_cents = 500
+    loan.missed_since_tick = 1
+    engine = CreditEngine(context)
+    engine._transition_missed(
+        loan,
+        31,
+        lambda draft: log.stage(
+            draft,
+            tick=31,
+            sim_time=datetime(2025, 2, 1),
+        ),
+    )
+    loan.payments_n = 1
+    loan.next_payment_tick = 31
+
+    engine.amortise(
+        31,
+        lambda draft: log.stage(
+            draft,
+            tick=31,
+            sim_time=datetime(2025, 2, 1),
+        ),
+    )
+
+    assert loan.status == "repaid"
+    assert loan.total_interest_paid_cents == 500
+    assert (
+        EconomyWorldState(
+            population,
+            economy,
+            ticks_per_year=360,
+        ).interest_imbalance_cents()
+        == 0
+    )
+
+
+def test_writeoff_forgives_only_unresolved_capitalised_interest() -> None:
+    settings, _world, population, economy, _rng, log = economy_fixture()
+    firm = next(iter(economy.firms.values()))
+    lender_id = bank_of(firm.ledger_account_id)
+    assert lender_id is not None
+    context = CreditContext(settings, population, economy)
+    request = LoanRequest(
+        firm.firm_id,
+        lender_id,
+        100_000,
+        "corporate",
+        360,
+        {},
+        200_000,
+    )
+    decision = decide(
+        request,
+        borrower_state(firm.firm_id, context),
+        economy.banks[lender_id],
+        ctx=context,
+    )
+    originate(
+        request,
+        decision,
+        1,
+        ctx=context,
+        emit=lambda draft: log.stage(
+            draft,
+            tick=1,
+            sim_time=datetime(2025, 1, 2),
+        ),
+    )
+    loan = next(iter(economy.loans.values()))
+    loan.accrued_interest_cents = 500
+    loan.missed_since_tick = 1
+    CreditEngine(context)._transition_missed(
+        loan,
+        31,
+        lambda draft: log.stage(
+            draft,
+            tick=31,
+            sim_time=datetime(2025, 2, 1),
+        ),
+    )
+    loan.total_interest_paid_cents = 200
+
+    write_off_loan(
+        loan.loan_id,
+        loan.outstanding_cents,
+        0,
+        31,
+        ctx=context,
+        emit=lambda draft: log.stage(
+            draft,
+            tick=31,
+            sim_time=datetime(2025, 2, 1),
+        ),
+    )
+
+    assert loan.status == "written_off"
+    assert loan.total_interest_forgiven_cents == 300
+    assert (
+        EconomyWorldState(
+            population,
+            economy,
+            ticks_per_year=360,
+        ).interest_imbalance_cents()
+        == 0
+    )
 
 
 def test_writeoff_moves_no_money_and_transfers_the_loss_to_bank_and_borrower() -> None:
