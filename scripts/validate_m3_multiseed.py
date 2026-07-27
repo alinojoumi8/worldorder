@@ -54,6 +54,16 @@ class _GateEventSink(MemoryEventSink):
         self.events.extend(event for event in events if event.kind in _GATE_EVENT_KINDS)
 
 
+def _completed_duration(
+    *,
+    status: str,
+    ticks: int,
+    last_tick: int,
+    expected_ticks: int,
+) -> bool:
+    return status == "completed" and ticks == expected_ticks and last_tick == expected_ticks
+
+
 def _metric_series(result: LivingCityResult) -> dict[str, list[Observation]]:
     metrics = {point.metric for point in result.metrics.points}
     return {
@@ -276,6 +286,12 @@ async def run_seed(
         for event in result.events
         if event.kind == INVARIANT_VIOLATED
     )
+    duration_complete = _completed_duration(
+        status=result.report.status,
+        ticks=result.report.ticks,
+        last_tick=result.report.last_tick,
+        expected_ticks=ticks,
+    )
     ticks_per_year = settings.clock.days_per_sim_year * settings.clock.ticks_per_sim_day
     gates: tuple[GateResult, ...] = (
         evaluate_v1(
@@ -306,15 +322,26 @@ async def run_seed(
         "population": settings.population.initial_agents,
         "years": years,
         "ticks": result.report.ticks,
+        "expected_ticks": ticks,
+        "duration_complete": duration_complete,
         "last_tick": result.report.last_tick,
         "events": result.report.events,
         "terminal_hash": result.report.chain_hash,
         "status": result.report.status,
         "halt_reason": result.report.halt_reason,
+        "invariant_violations": [
+            {"tick": event.tick, **dict(event.payload)}
+            for event in result.events
+            if event.kind == INVARIANT_VIOLATED
+        ],
         "elapsed_seconds": round(elapsed, 3),
         "ticks_per_second": round(result.report.ticks / elapsed, 3),
         "gates": {gate.gate_id: gate.as_dict() for gate in gates},
-        "gate_verdict": "pass" if all(gate.verdict == "pass" for gate in gates) else "fail",
+        "gate_verdict": (
+            "pass"
+            if duration_complete and all(gate.verdict == "pass" for gate in gates)
+            else "fail"
+        ),
     }
     write_json(output, report)
     return report

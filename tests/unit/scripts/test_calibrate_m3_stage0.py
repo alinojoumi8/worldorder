@@ -14,7 +14,7 @@ from scripts.calibrate_m3_stage0 import (
     _aggregate,
     _stage0_ineligibility_reasons,
 )
-from scripts.validate_m3_multiseed import DEFAULT_SEEDS, _GateEventSink
+from scripts.validate_m3_multiseed import DEFAULT_SEEDS, _completed_duration, _GateEventSink
 
 
 def test_stage0_config_is_a_non_fixture_mechanical_calibration() -> None:
@@ -28,6 +28,27 @@ def test_stage0_config_is_a_non_fixture_mechanical_calibration() -> None:
     assert "exchange.zero_intelligence_trader" in mechanism_manifest(settings)
     assert "exchange.zero_intelligence_trader" not in mechanism_manifest(
         load_settings(Path("configs/m3-smoke.yaml"))
+    )
+
+
+def test_halted_or_truncated_run_never_satisfies_duration() -> None:
+    assert _completed_duration(
+        status="completed",
+        ticks=720,
+        last_tick=720,
+        expected_ticks=720,
+    )
+    assert not _completed_duration(
+        status="halted",
+        ticks=421,
+        last_tick=421,
+        expected_ticks=720,
+    )
+    assert not _completed_duration(
+        status="completed",
+        ticks=719,
+        last_tick=719,
+        expected_ticks=720,
     )
 
 

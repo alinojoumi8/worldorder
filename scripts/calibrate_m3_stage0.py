@@ -16,6 +16,7 @@ from polis.living_city import run_living_city
 from polis.research.gates import GateResult, evaluate_v2, evaluate_v3
 from scripts.validate_m3_multiseed import (
     DEFAULT_SEEDS,
+    _completed_duration,
     _derived_v3_series,
     _GateEventSink,
     _git_sha,
@@ -96,6 +97,12 @@ async def run_seed(
         for event in result.events
         if event.kind == INVARIANT_VIOLATED
     )
+    duration_complete = _completed_duration(
+        status=result.report.status,
+        ticks=result.report.ticks,
+        last_tick=result.report.last_tick,
+        expected_ticks=ticks,
+    )
     gates: tuple[GateResult, ...] = (
         evaluate_v2(
             last_tick=result.report.last_tick,
@@ -122,16 +129,27 @@ async def run_seed(
         "population": settings.population.initial_agents,
         "years": years,
         "ticks": result.report.ticks,
+        "expected_ticks": ticks,
+        "duration_complete": duration_complete,
         "last_tick": result.report.last_tick,
         "events": result.report.events,
         "terminal_hash": result.report.chain_hash,
         "status": result.report.status,
         "halt_reason": result.report.halt_reason,
+        "invariant_violations": [
+            {"tick": event.tick, **dict(event.payload)}
+            for event in result.events
+            if event.kind == INVARIANT_VIOLATED
+        ],
         "elapsed_seconds": round(elapsed, 3),
         "ticks_per_second": round(result.report.ticks / elapsed, 3),
         "series_summary": _series_summary(series),
         "gates": {gate.gate_id: gate.as_dict() for gate in gates},
-        "gate_verdict": "pass" if all(gate.verdict == "pass" for gate in gates) else "fail",
+        "gate_verdict": (
+            "pass"
+            if duration_complete and all(gate.verdict == "pass" for gate in gates)
+            else "fail"
+        ),
     }
     write_json(output, report)
     return report
