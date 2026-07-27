@@ -30,6 +30,7 @@ class OpenAICompatProvider:
         api_key_env: str | None,
         capabilities: Capabilities,
         client: httpx.AsyncClient | None = None,
+        reasoning_split: bool = False,
     ) -> None:
         self.name = name
         self.model = model
@@ -38,6 +39,7 @@ class OpenAICompatProvider:
         self.api_key = os.environ.get(api_key_env, "") if api_key_env else ""
         self.client = client or httpx.AsyncClient(timeout=45)
         self._owns_client = client is None
+        self.reasoning_split = reasoning_split
 
     async def complete(self, request: CompletionRequest) -> CompletionResponse:
         payload: dict[str, Any] = {
@@ -53,6 +55,8 @@ class OpenAICompatProvider:
         }
         if request.sampling.seed is not None and self.capabilities.supports_call_seed:
             payload["seed"] = request.sampling.seed
+        if self.reasoning_split:
+            payload["reasoning_split"] = True
         if request.schema and self.capabilities.structured_output == "schema":
             payload["response_format"] = {
                 "type": "json_schema",
@@ -71,7 +75,15 @@ class OpenAICompatProvider:
         except httpx.TransportError as exc:
             raise ProviderTransient(str(exc)) from exc
         if response.status_code == 429:
-            raise ProviderRateLimited("provider rate limited")
+            retry_after = response.headers.get("retry-after", "1")
+            try:
+                retry_after_s = max(0.0, float(retry_after))
+            except ValueError:
+                retry_after_s = 1.0
+            raise ProviderRateLimited(
+                "provider rate limited",
+                retry_after_s=retry_after_s,
+            )
         if response.status_code >= 500:
             raise ProviderTransient(f"provider returned {response.status_code}")
         if response.status_code >= 400:

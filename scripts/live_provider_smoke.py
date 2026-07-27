@@ -23,7 +23,10 @@ SCHEMA = {
 }
 VARIABLES = {
     "system": "Return one compact JSON object and no other text.",
-    "prompt": 'Choose the action IDLE. Return {"action":"IDLE","reason":"..."}.',
+    "prompt": (
+        'Choose the action IDLE. Return {"action":"IDLE","reason":"..."}. '
+        "The reason must be at most 80 characters."
+    ),
 }
 
 
@@ -40,6 +43,8 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 async def smoke(config: Path) -> dict[str, Any]:
     live_settings = load_settings(config)
     router = LLMRouter(settings=live_settings, run_id=RUN_ID)
+    route = live_settings.llm.routing[Purpose.DELIBERATE.value]
+    provider_kind = live_settings.llm.providers[route.lane].kind
     await router.start()
     try:
         live = await router.call(
@@ -84,17 +89,21 @@ async def smoke(config: Path) -> dict[str, Any]:
         and live.cost_usd == replay.cost_usd
     )
     cost_limit = live_settings.llm.budget.usd_per_run
+    max_calls = live_settings.llm.budget.max_calls_per_run
     gates = {
         "real_provider_response": bool(live.text) and live.model_version is not None,
-        "hard_output_token_bound": live.tokens_out <= 128,
+        "real_provider_call": not live.cache_hit,
+        "schema_valid": live.parsed_ok,
+        "hard_output_token_bound": live.tokens_out <= route.max_tokens,
         "hard_cost_limit": live.cost_usd <= cost_limit,
+        "hard_call_limit": max_calls is None or router.budget.cumulative_calls <= max_calls,
         "offline_replay_has_no_lanes": replay_router.lanes == {},
         "offline_replay_cache_hit": replay_router.cache.hits == 1,
         "offline_replay_exact": exact,
     }
     return {
         "status": "passed" if all(gates.values()) else "failed",
-        "provider": "minimax",
+        "provider": provider_kind,
         "model": live.model,
         "model_version": live.model_version,
         "call_id": str(live.call_id),

@@ -107,7 +107,7 @@ class _Handler(PhaseHandler):
 
 
 def _call_payload(call: Any) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "call_id": str(call.call_id),
         "purpose": call.purpose.value,
         "text": call.text,
@@ -122,6 +122,9 @@ def _call_payload(call: Any) -> dict[str, object]:
         "latency_ms": call.latency_ms,
         "error": call.error,
     }
+    if call.repair_attempts:
+        payload["repair_attempts"] = call.repair_attempts
+    return payload
 
 
 class LivingCityEngine:

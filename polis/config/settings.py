@@ -68,6 +68,7 @@ class LLMBudgetSettings(FrozenModel):
     lines: dict[str, LLMBudgetLine]
     usd_per_run: Decimal = Decimal("60.0")
     usd_halt_multiple: Decimal = Decimal("1.2")
+    max_calls_per_run: int | None = Field(default=None, gt=0)
     on_exhaustion: Literal["degrade_to_reflex", "halt"] = "degrade_to_reflex"
 
 
@@ -84,13 +85,20 @@ class RouteSpec(FrozenModel):
 
 
 class LaneSettings(FrozenModel):
-    kind: Literal["minimax", "ollama", "openai_compat", "stub"]
+    kind: Literal["codex_cli", "grok_cli", "minimax", "ollama", "openai_compat", "stub"]
     base_url: str | None = None
     api_key_env: str | None = None
     max_concurrency: int = 8
     rpm_limit: int | None = None
     tpm_limit: int | None = None
+    calls_per_window: int | None = Field(default=None, gt=0)
+    call_window_seconds: int = Field(default=18_000, gt=0)
+    quota_scope: str | None = None
+    quota_path: str = "file://./.cache/provider-quota.sqlite3"
     timeout_s: float = 45.0
+    max_retries: int = Field(default=2, ge=0, le=5)
+    retry_base_seconds: float = Field(default=0.25, ge=0)
+    retry_max_seconds: float = Field(default=10.0, ge=0)
     structured_output: Literal["schema", "json_mode", "none"] = "schema"
     billing: Literal["token", "gpu_time", "free"] = "token"
     model_version_pin: str | None = None
@@ -598,6 +606,23 @@ _ECONOMY_CONFIG_FIELDS = frozenset(
 
 def _config_payload(settings: Settings, *, by_alias: bool = False) -> dict[str, Any]:
     payload = settings.model_dump(mode="json", by_alias=by_alias)
+    budget = payload["llm"]["budget"]
+    if budget["max_calls_per_run"] is None:
+        budget.pop("max_calls_per_run")
+    for provider in payload["llm"]["providers"].values():
+        if provider["calls_per_window"] is None:
+            provider.pop("calls_per_window")
+            provider.pop("call_window_seconds")
+            provider.pop("quota_scope")
+            provider.pop("quota_path")
+        if (
+            provider["max_retries"] == 2
+            and provider["retry_base_seconds"] == 0.25
+            and provider["retry_max_seconds"] == 10.0
+        ):
+            provider.pop("max_retries")
+            provider.pop("retry_base_seconds")
+            provider.pop("retry_max_seconds")
     if not settings.economy.enabled:
         for field in _ECONOMY_CONFIG_FIELDS:
             payload.pop(field, None)

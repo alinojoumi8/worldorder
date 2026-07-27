@@ -1,0 +1,31 @@
+{
+  "call_id": "e973124c-493e-5b38-b058-754a59ffd0f0",
+  "cost_usd": "0",
+  "finish_reason": "stop",
+  "gates": {
+    "hard_call_limit": true,
+    "hard_cost_limit": true,
+    "hard_output_token_bound": true,
+    "offline_replay_cache_hit": true,
+    "offline_replay_exact": true,
+    "offline_replay_has_no_lanes": true,
+    "real_provider_call": true,
+    "real_provider_response": true,
+    "schema_valid": true
+  },
+  "hard_cost_limit_usd": "0",
+  "latency_ms": 6625,
+  "model": "grok-4.5-build",
+  "model_version": "grok-4.5-build",
+  "offline_replay": {
+    "cache_mode": "replay",
+    "call_id_matches": true,
+    "lanes": 0,
+    "text_sha256_matches": true
+  },
+  "parsed_ok": true,
+  "provider": "grok_cli",
+  "status": "passed",
+  "tokens_in": 15349,
+  "tokens_out": 23
+}

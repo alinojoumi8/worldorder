@@ -1,0 +1,44 @@
+{
+  "action_counts": {
+    "EAT": 3,
+    "IDLE": 3,
+    "MOVE_TO": 5,
+    "SLEEP": 59
+  },
+  "calls": 70,
+  "concurrency": 2,
+  "config": "configs\\live-minimax-m3-pilot.yaml",
+  "cost_usd": "0.04597452",
+  "gates": {
+    "action_diversity": true,
+    "call_limit_respected": true,
+    "cost_limit": true,
+    "live_completed": true,
+    "null_action_rate": true,
+    "offline_replay_exact": true,
+    "provider_calls_recorded": true,
+    "replay_completed": true,
+    "schema_valid_rate": true
+  },
+  "latency_ms": {
+    "max": 24218,
+    "min": 1406,
+    "p50": 4000,
+    "p95": 12546
+  },
+  "live_chain_hash": "04a8aca030f2a52cb4183ee27f2f88dd978532522df7de87afc9e00dcc6be702",
+  "max_calls_per_run": 100,
+  "model": "MiniMax-M3",
+  "null_action_rate": 0.0,
+  "parsed_calls": 70,
+  "parsed_rate": 1.0,
+  "population": 1000,
+  "provider": "minimax",
+  "repair_attempts": 1,
+  "replay_chain_hash": "04a8aca030f2a52cb4183ee27f2f88dd978532522df7de87afc9e00dcc6be702",
+  "status": "passed",
+  "ticks": 1,
+  "tokens_in": 30281,
+  "tokens_out": 13638,
+  "wire_calls": 71
+}

@@ -112,7 +112,7 @@ class CompletionCache:
                 )
                 """
             )
-            if mode != "replay":
+            if mode == "live":
                 # Each authoritative execution starts cold. It then leaves an exact,
                 # run-scoped cache that an offline replay can consume.
                 self._database.execute("DELETE FROM completions")
@@ -148,7 +148,7 @@ class CompletionCache:
 
     async def get(self, key: str, *, rendered_hash: str) -> CacheRecord | None:
         record = self._records.get(key)
-        if record is None and self.mode == "replay":
+        if record is None and self.mode in {"hybrid", "replay"}:
             record = self._load_persistent(key)
             if record is not None:
                 self._remember(record)

@@ -15,6 +15,26 @@ def test_smoke_and_baseline_load() -> None:
     assert config_hash(baseline) == config_hash(load_settings(Path("configs/baseline.yaml")))
 
 
+@pytest.mark.parametrize(
+    "path,kind,max_calls",
+    [
+        ("configs/live-minimax-m3-smoke.yaml", "minimax", 1),
+        ("configs/live-minimax-m3-pilot.yaml", "minimax", 8_000),
+        ("configs/live-codex-cli-smoke.yaml", "codex_cli", 1),
+        ("configs/live-grok-cli-smoke.yaml", "grok_cli", 1),
+    ],
+)
+def test_bounded_live_provider_configs_load(
+    path: str,
+    kind: str,
+    max_calls: int,
+) -> None:
+    settings = load_settings(Path(path))
+    route = settings.llm.routing["DELIBERATE"]
+    assert settings.llm.providers[route.lane].kind == kind
+    assert settings.llm.budget.max_calls_per_run == max_calls
+
+
 def test_semantic_override_changes_hash() -> None:
     base = load_settings(Path("configs/smoke.yaml"))
     changed = load_settings(Path("configs/smoke.yaml"), overrides={"run": {"seed": 99}})
@@ -23,7 +43,10 @@ def test_semantic_override_changes_hash() -> None:
 
 def test_config_yaml_round_trips_aliased_fields() -> None:
     settings = load_settings(Path("configs/smoke.yaml"))
-    restored = Settings.model_validate(yaml.safe_load(config_yaml(settings)))
+    serialized = config_yaml(settings)
+    assert "max_calls_per_run" not in serialized
+    assert "calls_per_window" not in serialized
+    restored = Settings.model_validate(yaml.safe_load(serialized))
     assert restored == settings
 
 

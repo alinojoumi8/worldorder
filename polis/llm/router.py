@@ -40,6 +40,7 @@ class CallResult:
     budget_line: str
     provider_request_id: str | None
     error: str | None
+    repair_attempts: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +64,7 @@ class LLMRouter:
     ) -> None:
         self.settings = settings
         self.run_id = run_id
-        self.lanes = dict(lanes if lanes is not None else build_lanes(settings.llm))
+        self.lanes = dict(lanes if lanes is not None else build_lanes(settings.llm, run_id=run_id))
         self.cache = cache or CompletionCache(
             mode=settings.llm.cache.mode,
             l0_entries=settings.llm.cache.l0_entries,
@@ -105,6 +106,69 @@ class LLMRouter:
         tick: int,
         variables: Mapping[str, Any],
         schema: Mapping[str, Any] | None = None,
+    ) -> CallResult:
+        route = self.settings.llm.routing[purpose.value]
+        provider_config = self.settings.llm.providers[route.lane]
+        rendered_variables = dict(variables)
+        schema_instruction = ""
+        if schema is not None and route.structured == "repair":
+            schema_instruction = (
+                "No deep analysis is needed. Answer directly.\n"
+                "## Required JSON Schema\n"
+                f"{canonical_json(schema)}\n"
+                "Return one JSON object matching this schema and no other text."
+            )
+        if schema_instruction and provider_config.extra.get("render_schema", False):
+            prompt = str(rendered_variables.get("prompt", canonical_json(rendered_variables)))
+            rendered_variables["prompt"] = f"{prompt}\n\n{schema_instruction}"
+        attempts = [
+            await self._call_once(
+                purpose,
+                agent_id,
+                tick,
+                rendered_variables,
+                schema,
+            )
+        ]
+        if schema is None or route.structured != "repair" or attempts[-1].parsed_ok:
+            return attempts[-1]
+        for repair_attempt in range(1, 3):
+            error = attempts[-1].error or "response did not match the required schema"
+            repaired_variables = {
+                **rendered_variables,
+                "prompt": (
+                    f"{rendered_variables['prompt']}\n\n"
+                    f"{schema_instruction}\n"
+                    f"Validation error: {error}\n"
+                    "Return a corrected JSON object only."
+                ),
+                "repair_attempt": repair_attempt,
+            }
+            attempts.append(
+                await self._call_once(
+                    purpose,
+                    agent_id,
+                    tick,
+                    repaired_variables,
+                    schema,
+                )
+            )
+            if attempts[-1].parsed_ok:
+                return self._aggregate_attempts(attempts)
+        exhausted = self._aggregate_attempts(attempts)
+        return dataclass_replace(
+            exhausted,
+            degraded=True,
+            error=f"schema_repair_exhausted: {attempts[-1].error}",
+        )
+
+    async def _call_once(
+        self,
+        purpose: Purpose,
+        agent_id: str,
+        tick: int,
+        variables: Mapping[str, Any],
+        schema: Mapping[str, Any] | None,
     ) -> CallResult:
         route = self.settings.llm.routing[purpose.value]
         lane = self.lanes.get(route.lane)
@@ -208,6 +272,22 @@ class LLMRouter:
             schema,
             cache_hit=False,
             cost=cost,
+        )
+
+    @staticmethod
+    def _aggregate_attempts(attempts: Sequence[CallResult]) -> CallResult:
+        final = attempts[-1]
+        return dataclass_replace(
+            final,
+            tokens_in=sum(attempt.tokens_in for attempt in attempts),
+            tokens_out=sum(attempt.tokens_out for attempt in attempts),
+            tokens_cached_in=sum(attempt.tokens_cached_in for attempt in attempts),
+            cost_usd=sum(
+                (attempt.cost_usd for attempt in attempts),
+                Decimal(0),
+            ),
+            latency_ms=sum(attempt.latency_ms for attempt in attempts),
+            repair_attempts=len(attempts) - 1,
         )
 
     def _result(

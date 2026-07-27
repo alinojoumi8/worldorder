@@ -51,6 +51,22 @@ async def test_file_cache_survives_for_offline_replay(tmp_path) -> None:
     await replay.close()
 
 
+@pytest.mark.asyncio
+async def test_hybrid_cache_reuses_persistent_completion(tmp_path) -> None:
+    path = f"file://{tmp_path.as_posix()}"
+    response = CompletionResponse("{}", 10, 2, 0, "v1", "request", 4, "stop")
+    first = CompletionCache(mode="hybrid", path=path, namespace="run")
+    await first.put(CacheRecord("key", "rendered", response))
+    await first.close()
+
+    resumed = CompletionCache(mode="hybrid", path=path, namespace="run")
+    restored = await resumed.get("key", rendered_hash="rendered")
+    assert restored is not None
+    assert restored.response == response
+    assert resumed.reported_hit("key")
+    await resumed.close()
+
+
 def test_budget_ladder_degrades_then_halts() -> None:
     settings = LLMBudgetSettings(
         lines={"cognition": LLMBudgetLine(calls_per_tick=1, tokens_per_tick=10)},
@@ -64,3 +80,17 @@ def test_budget_ladder_degrades_then_halts() -> None:
     assert budget.admit("cognition", 1, 1, Decimal(0)) == Admission.DEGRADE
     budget.cumulative_usd = Decimal("1.3")
     assert budget.admit("cognition", 0, 0, Decimal(0)) == Admission.HALT
+
+
+def test_budget_hard_stops_at_run_call_limit() -> None:
+    settings = LLMBudgetSettings(
+        lines={"cognition": LLMBudgetLine(calls_per_tick=3, tokens_per_tick=100)},
+        max_calls_per_run=2,
+    )
+    budget = BudgetGuard(settings)
+    budget.begin_tick(1)
+    assert budget.admit("cognition", 1, 1, Decimal(0)) == Admission.PERMIT
+    assert budget.admit("cognition", 1, 1, Decimal(0)) == Admission.PERMIT
+    assert budget.admit("cognition", 1, 1, Decimal(0)) == Admission.HALT
+    assert budget.cumulative_calls == 2
+    assert budget.binding_constraint == "run.calls_halt"
