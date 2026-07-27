@@ -211,3 +211,16 @@ Run-level wire attempts use a second persistent scope keyed by run UUID. Every r
 against both ceilings before network invocation, so failures and cached process restarts
 cannot reset or evade the hard cap. Transient provider failures trigger bounded cached
 resume; a quota response whose wait exceeds the retry ceiling remains terminal.
+
+### Pilot outcome
+
+The 80-tick/1,000-agent MiniMax M3 pilot passed all nine declared gates. It completed
+5,600 logical calls with 30 schema-repair attempts and 6,072 actual provider wire
+attempts, staying below the 8,000-attempt run ceiling. All 5,600 responses were
+schema-valid; the run produced five action types and two null actions (0.035714%).
+Configured token pricing yielded USD 2.98517640, below the USD 25 cost ceiling.
+
+The offline replay opened no provider lane and reproduced terminal chain hash
+`b4fecd7855530a19f96d70618ffda3545b9a65d1e44099362e41566d79b371c4` exactly.
+This validates the bounded calibration harness; it does not promote the pilot to the full
+five-seed/five-year M3 research gate.
