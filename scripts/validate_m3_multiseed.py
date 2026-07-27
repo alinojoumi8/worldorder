@@ -27,11 +27,31 @@ from polis.events.kinds import (
     INVARIANT_VIOLATED,
     SESSION_CLOSED,
 )
+from polis.events.log import MemoryEventSink
+from polis.events.types import Event
 from polis.living_city import LivingCityResult, run_living_city
 from polis.research.gates import GateResult, Observation, evaluate_v1, evaluate_v2, evaluate_v3
 from scripts.calibrate_m1 import write_json
 
 DEFAULT_SEEDS = (2026072701, 2026072702, 2026072703, 2026072704, 2026072705)
+_GATE_EVENT_KINDS = frozenset(
+    {
+        BANKRUPTCY_FILED,
+        FIRM_DISSOLVED,
+        FIRM_FOUNDED,
+        FIRM_STATUS_CHANGED,
+        INTEGRATION_COMPLETED,
+        INVARIANT_VIOLATED,
+        SESSION_CLOSED,
+    }
+)
+
+
+class _GateEventSink(MemoryEventSink):
+    """Retain only events required by V2/V3 while the log still hashes every event."""
+
+    async def append(self, events: Sequence[Event]) -> None:
+        self.events.extend(event for event in events if event.kind in _GATE_EVENT_KINDS)
 
 
 def _metric_series(result: LivingCityResult) -> dict[str, list[Observation]]:
@@ -242,7 +262,11 @@ async def run_seed(
         },
     )
     started = time.perf_counter()
-    result = await run_living_city(settings, collect_events=True)
+    result = await run_living_city(
+        settings,
+        sink=_GateEventSink(),
+        collect_events=False,
+    )
     elapsed = time.perf_counter() - started
     series = _metric_series(result)
     series.update(_derived_v3_series(result, settings))

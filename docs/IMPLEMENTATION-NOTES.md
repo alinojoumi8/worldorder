@@ -175,6 +175,35 @@ records issue and clear/fail events. The `securities.issuer_firm_id` column stor
 only the venue and price-discovery portion; the treasury decision, coupons, maturities, and
 ledger settlement remain C14-owned.
 
+## M3 / non-fixture mechanical calibration
+
+The Stage 0 configuration is an explicit reflex-only calibration instrument, not research
+evidence. It uses the existing 1,000-agent economy, a declared founder-owned genesis
+listing, and a default-disabled zero-intelligence trader with seeded reservation prices.
+Every order is limited by the actor's cash or available holdings. There is no market maker,
+guaranteed fill, wash trade, transfer, or post-genesis subsidy.
+
+Stage 0 freezes five seeds over two simulated years and requires V2 and V3 on every run.
+One-seed or shorter invocations remain tuning diagnostics and cannot mark themselves
+accepted. The aggregate records the base and per-run configuration hashes, code SHA,
+terminal hashes, active mechanism manifest, gate roster, seed roster, and duration.
+
+The first one-year probe at `labour.min_match_score_bp = 5_500` passed V2 and four V3
+sub-checks but collapsed toward full employment. The specification's declared labour
+calibration lever was raised to `6_500`; seed `2026072701` then passed V2 and every V3
+sub-check, ending at 259 bp unemployment with only three startup-day failures. This is
+tuning evidence only until the frozen five-seed/two-year run passes.
+
+Calibration retains only the event kinds needed to recompute V2/V3, while the event log
+still validates, sequences, and hash-chains every event. This avoids treating RAM retention
+as evidence and keeps the formal gate viable at 1,000 agents.
+
+For live cognition, the action response schema is generated from the actions legal in the
+current observation and carries each action's typed parameter contract. Listed securities,
+cash, available holdings, and open orders are exposed through a read-only, pre-indexed
+economic observation adapter. Perception does not create holdings or otherwise mutate
+simulation state.
+
 ## M3 / bounded live-provider calibration
 
 ### MiniMax M3 pilot does not silently replace the routing specification
