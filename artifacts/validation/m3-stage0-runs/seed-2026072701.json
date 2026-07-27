@@ -1,0 +1,501 @@
+{
+  "base_config_hash": "71267d5af4aee7a65cbd4539bea563149d495e364595c5512794b29e591f7ad1",
+  "code_git_sha": "bc684769331f2bdf3d77451d4380f6165adf8252",
+  "config": "configs\\m3-calibration-stage0.yaml",
+  "config_class": "mechanical_calibration",
+  "duration_complete": true,
+  "elapsed_seconds": 1349.473,
+  "events": 3446608,
+  "expected_ticks": 720,
+  "gate_verdict": "pass",
+  "gates": {
+    "V2": {
+      "gate_id": "V2",
+      "notes": "",
+      "statistic": {
+        "checks": {
+          "checked_every_tick": true,
+          "final_ledger_exact": true,
+          "zero_posthoc_violations": true,
+          "zero_runtime_violations": true
+        },
+        "expected_ticks_checked": 721,
+        "final_ledger_checks_cents": {
+          "base_money": 0,
+          "deposits": 0,
+          "global": 0,
+          "materialisation": 0
+        },
+        "posthoc_violating_ticks": [],
+        "runtime_violations": {
+          "INV-LEDGER": 0,
+          "INV-MONEY": 0
+        },
+        "ticks_checked": 721
+      },
+      "threshold": {
+        "final_ledger_imbalance_cents": 0,
+        "posthoc_violating_ticks_max": 0,
+        "runtime_violations_max": 0,
+        "ticks_checked": 721
+      },
+      "verdict": "pass",
+      "window": {
+        "from_tick": 0,
+        "to_tick": 720
+      }
+    },
+    "V3": {
+      "gate_id": "V3",
+      "notes": "",
+      "statistic": {
+        "active_firms": {
+          "evaluations": 720,
+          "failure_share": 0.0,
+          "failures": 0,
+          "pass": true
+        },
+        "agents.zero_transactions_30d_share": {
+          "evaluations": 102,
+          "failure_share": 0.0,
+          "failures": 0,
+          "pass": true
+        },
+        "exchange.zero_trade_streak": {
+          "evaluations": 720,
+          "failure_share": 0.0,
+          "failures": 0,
+          "pass": true
+        },
+        "unemployment_rate": {
+          "evaluations": 720,
+          "failure_share": 0.00833333,
+          "failures": 6,
+          "pass": true
+        },
+        "wealth_share.top1": {
+          "evaluations": 720,
+          "failure_share": 0.0,
+          "failures": 0,
+          "pass": true
+        }
+      },
+      "threshold": {
+        "active_firms_min": 5,
+        "agents_zero_transactions_30d_share_max_bp_exclusive": 5000,
+        "exchange_zero_trade_streak_max": 3,
+        "failure_share_max": 0.05,
+        "unemployment_rate_bp_exclusive": [
+          50,
+          6000
+        ],
+        "wealth_share.top1_max_bp_exclusive": 9000
+      },
+      "verdict": "pass",
+      "window": {
+        "from_tick": 1,
+        "to_tick": 720
+      }
+    }
+  },
+  "halt_reason": null,
+  "invariant_violations": [],
+  "last_tick": 720,
+  "population": 1000,
+  "protocol_id": "m3-stage0-mechanical-v1",
+  "run_config_hash": "2624b5e85ea6f76febd9d7e1dda7400818fbe244072da4171861f30c506174f2",
+  "run_id": "43f31de8-c9f2-53e4-b85a-c18ca771f9e8",
+  "seed": 2026072701,
+  "series_summary": {
+    "active_firms": {
+      "evaluations": 720,
+      "first": 61.0,
+      "last": 61.0,
+      "maximum": 61.0,
+      "mean": 61.0,
+      "minimum": 61.0
+    },
+    "agents.zero_transactions_30d_share": {
+      "evaluations": 102,
+      "first": 36.0,
+      "last": 3430.0,
+      "maximum": 3430.0,
+      "mean": 1697.54902,
+      "minimum": 12.0
+    },
+    "bank_capital_ratio": {
+      "evaluations": 720,
+      "first": 44036.0,
+      "last": 127644.0,
+      "maximum": 393685.0,
+      "mean": 122717.170833,
+      "minimum": 40703.0
+    },
+    "city.population": {
+      "evaluations": 720,
+      "first": 1000.0,
+      "last": 1000.0,
+      "maximum": 1000.0,
+      "mean": 1000.0,
+      "minimum": 1000.0
+    },
+    "city.wellbeing_mean": {
+      "evaluations": 720,
+      "first": 70.41256,
+      "last": 28.32552,
+      "maximum": 70.41256,
+      "mean": 34.090783,
+      "minimum": 28.2484
+    },
+    "cpi": {
+      "evaluations": 720,
+      "first": 9914.0,
+      "last": 14489.0,
+      "maximum": 15903.0,
+      "mean": 14503.216667,
+      "minimum": 9897.0
+    },
+    "credit_growth_yoy": {
+      "evaluations": 50,
+      "first": -8804.0,
+      "last": 18708.0,
+      "maximum": 18708.0,
+      "mean": 1754.1,
+      "minimum": -8858.0
+    },
+    "credit_outstanding_cents": {
+      "evaluations": 102,
+      "first": 40875000.0,
+      "last": 12346979.0,
+      "maximum": 40875000.0,
+      "mean": 23104653.235294,
+      "minimum": 4300871.0
+    },
+    "credit_to_gdp_bp": {
+      "evaluations": 5,
+      "first": 38.0,
+      "last": 109.0,
+      "maximum": 302.0,
+      "mean": 142.4,
+      "minimum": 38.0
+    },
+    "default_rate": {
+      "evaluations": 102,
+      "first": 0.0,
+      "last": 0.0,
+      "maximum": 35467.0,
+      "mean": 1291.156863,
+      "minimum": 0.0
+    },
+    "education.mean_skill": {
+      "evaluations": 720,
+      "first": 0.45491531,
+      "last": 0.47481119,
+      "maximum": 0.47639578,
+      "mean": 0.46962,
+      "minimum": 0.45491531
+    },
+    "exchange.zero_trade_streak": {
+      "evaluations": 720,
+      "first": 1.0,
+      "last": 0.0,
+      "maximum": 1.0,
+      "mean": 0.001389,
+      "minimum": 0.0
+    },
+    "gdp_nominal": {
+      "evaluations": 8,
+      "first": 258461990.0,
+      "last": 284443235.0,
+      "maximum": 292520889.0,
+      "mean": 281940822.375,
+      "minimum": 258461990.0
+    },
+    "gdp_production": {
+      "evaluations": 8,
+      "first": 55569694.0,
+      "last": 63643541.0,
+      "maximum": 69741563.0,
+      "mean": 63742644.25,
+      "minimum": 55569694.0
+    },
+    "gdp_real": {
+      "evaluations": 8,
+      "first": 196998467.0,
+      "last": 196316678.0,
+      "maximum": 196998467.0,
+      "mean": 190951864.25,
+      "minimum": 183285272.0
+    },
+    "gini_income": {
+      "evaluations": 8,
+      "first": 5120.0,
+      "last": 8292.0,
+      "maximum": 8292.0,
+      "mean": 6706.0,
+      "minimum": 5120.0
+    },
+    "gini_wealth": {
+      "evaluations": 8,
+      "first": 4990.0,
+      "last": 6556.0,
+      "maximum": 6556.0,
+      "mean": 5901.625,
+      "minimum": 4990.0
+    },
+    "hhi_sector": {
+      "evaluations": 8,
+      "first": 1874.0,
+      "last": 1908.0,
+      "maximum": 1931.0,
+      "mean": 1882.375,
+      "minimum": 1836.0
+    },
+    "inflation_yoy": {
+      "evaluations": 5,
+      "first": 5514.0,
+      "last": -661.0,
+      "maximum": 5514.0,
+      "mean": 1227.2,
+      "minimum": -661.0
+    },
+    "inventory_value_cents": {
+      "evaluations": 8,
+      "first": 355206106.0,
+      "last": 1897899235.0,
+      "maximum": 1897899235.0,
+      "mean": 1130316554.25,
+      "minimum": 355206106.0
+    },
+    "labour_share": {
+      "evaluations": 8,
+      "first": 1935.0,
+      "last": 0.0,
+      "maximum": 16522.0,
+      "mean": 2307.125,
+      "minimum": 0.0
+    },
+    "lending_rate_bp": {
+      "evaluations": 102,
+      "first": 635.0,
+      "last": 580.0,
+      "maximum": 853.0,
+      "mean": 682.588235,
+      "minimum": 580.0
+    },
+    "lfpr": {
+      "evaluations": 720,
+      "first": 0.0,
+      "last": 8422.0,
+      "maximum": 8862.0,
+      "mean": 8459.068056,
+      "minimum": 0.0
+    },
+    "m0": {
+      "evaluations": 720,
+      "first": 1800000000.0,
+      "last": 1800000000.0,
+      "maximum": 1800000000.0,
+      "mean": 1800000000.0,
+      "minimum": 1800000000.0
+    },
+    "m1": {
+      "evaluations": 720,
+      "first": 1660810933.0,
+      "last": 1377442469.0,
+      "maximum": 1660810933.0,
+      "mean": 1519123804.473611,
+      "minimum": 1377442469.0
+    },
+    "market_index": {
+      "evaluations": 720,
+      "first": 10000.0,
+      "last": 4269540.0,
+      "maximum": 4879770.0,
+      "mean": 3244089.75,
+      "minimum": 10000.0
+    },
+    "mean_wage": {
+      "evaluations": 102,
+      "first": 150000.0,
+      "last": 150000.0,
+      "maximum": 150000.0,
+      "mean": 150000.0,
+      "minimum": 150000.0
+    },
+    "median_wage": {
+      "evaluations": 102,
+      "first": 150000.0,
+      "last": 150000.0,
+      "maximum": 150000.0,
+      "mean": 150000.0,
+      "minimum": 150000.0
+    },
+    "policy_rate_bp": {
+      "evaluations": 720,
+      "first": 400.0,
+      "last": 400.0,
+      "maximum": 400.0,
+      "mean": 400.0,
+      "minimum": 400.0
+    },
+    "share_negative_networth": {
+      "evaluations": 8,
+      "first": 0.0,
+      "last": 0.0,
+      "maximum": 0.0,
+      "mean": 0.0,
+      "minimum": 0.0
+    },
+    "sys.actions.entropy": {
+      "evaluations": 720,
+      "first": 1.6162817,
+      "last": 0.84904609,
+      "maximum": 1.6162817,
+      "mean": 0.827372,
+      "minimum": 0.70708078
+    },
+    "sys.actions.unique": {
+      "evaluations": 720,
+      "first": 6.0,
+      "last": 4.0,
+      "maximum": 6.0,
+      "mean": 4.068056,
+      "minimum": 4.0
+    },
+    "sys.cognition.deliberate_share": {
+      "evaluations": 720,
+      "first": 0.0,
+      "last": 0.0,
+      "maximum": 0.0,
+      "mean": 0.0,
+      "minimum": 0.0
+    },
+    "sys.cognition.reflect_share": {
+      "evaluations": 720,
+      "first": 0.0,
+      "last": 0.0,
+      "maximum": 0.0,
+      "mean": 0.0,
+      "minimum": 0.0
+    },
+    "sys.cognition.salience_cutoff": {
+      "evaluations": 720,
+      "first": 1.0,
+      "last": 1.0,
+      "maximum": 1.0,
+      "mean": 1.0,
+      "minimum": 1.0
+    },
+    "sys.cognition.salience_p50": {
+      "evaluations": 720,
+      "first": 0.11938484,
+      "last": 0.13715086,
+      "maximum": 0.20185575,
+      "mean": 0.133384,
+      "minimum": 0.07270351
+    },
+    "sys.cognition.salience_p90": {
+      "evaluations": 720,
+      "first": 0.13954097,
+      "last": 0.15104497,
+      "maximum": 0.24614062,
+      "mean": 0.152094,
+      "minimum": 0.13954097
+    },
+    "sys.memory.count": {
+      "evaluations": 720,
+      "first": 0.0,
+      "last": 257.0,
+      "maximum": 257.0,
+      "mean": 252.286111,
+      "minimum": 0.0
+    },
+    "term_spread_bp": {
+      "evaluations": 8,
+      "first": 252.0,
+      "last": 180.0,
+      "maximum": 453.0,
+      "mean": 291.25,
+      "minimum": 180.0
+    },
+    "u_broad": {
+      "evaluations": 720,
+      "first": 0.0,
+      "last": 239.0,
+      "maximum": 10000.0,
+      "mean": 367.968056,
+      "minimum": 0.0
+    },
+    "unemployment_rate": {
+      "evaluations": 720,
+      "first": 0.0,
+      "last": 239.0,
+      "maximum": 10000.0,
+      "mean": 367.968056,
+      "minimum": 0.0
+    },
+    "vacancy_rate": {
+      "evaluations": 720,
+      "first": 10000.0,
+      "last": 1779.0,
+      "maximum": 10000.0,
+      "mean": 1836.472222,
+      "minimum": 1724.0
+    },
+    "velocity": {
+      "evaluations": 5,
+      "first": 7203.0,
+      "last": 8189.0,
+      "maximum": 8189.0,
+      "mean": 7912.0,
+      "minimum": 7203.0
+    },
+    "wealth_share.bottom50": {
+      "evaluations": 8,
+      "first": 1302.0,
+      "last": 235.0,
+      "maximum": 1302.0,
+      "mean": 675.0,
+      "minimum": 235.0
+    },
+    "wealth_share.top1": {
+      "evaluations": 720,
+      "first": 333.0,
+      "last": 742.0,
+      "maximum": 873.0,
+      "mean": 549.230556,
+      "minimum": 325.0
+    },
+    "wealth_share.top10": {
+      "evaluations": 8,
+      "first": 2770.0,
+      "last": 3940.0,
+      "maximum": 3940.0,
+      "mean": 3423.875,
+      "minimum": 2770.0
+    },
+    "wealth_share_undefined": {
+      "evaluations": 8,
+      "first": 0.0,
+      "last": 0.0,
+      "maximum": 0.0,
+      "mean": 0.0,
+      "minimum": 0.0
+    },
+    "world.occupied_places": {
+      "evaluations": 720,
+      "first": 147.0,
+      "last": 134.0,
+      "maximum": 150.0,
+      "mean": 134.154167,
+      "minimum": 134.0
+    }
+  },
+  "stage0_ineligibility_reasons": [],
+  "status": "completed",
+  "terminal_hash": "b0d2850ffeb878732864d39409192f5a419be671f3b649c76910e27b5b9b7140",
+  "ticks": 720,
+  "ticks_per_second": 0.534,
+  "years": 2
+}

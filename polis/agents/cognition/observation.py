@@ -48,8 +48,8 @@ class Observation:
     inbox: tuple[dict[str, str], ...]
     feed: tuple[dict[str, str], ...]
     news: tuple[dict[str, str], ...]
-    market: None
-    employer: None
+    market: dict[str, object] | None
+    employer: dict[str, object] | None
     offers: tuple[dict[str, str], ...]
     obligations: tuple[dict[str, str], ...]
     stakes: float

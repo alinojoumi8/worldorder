@@ -1,43 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from polis.agents.actions.types import Action, ActionType, make_action
+from polis.agents.actions.validate import action_response_schema
 from polis.agents.cognition.observation import Observation
 from polis.agents.memory import Retrieval
 from polis.agents.types import AgentState
 from polis.config.canon import sha256_hex
 from polis.llm.purposes import Purpose
 from polis.llm.router import CallResult, LLMRouter
-
-ACTION_SCHEMA: dict[str, Any] = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "reasoning": {"type": "string", "maxLength": 300},
-        "action": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "type": {
-                    "enum": [
-                        ActionType.MOVE_TO.value,
-                        ActionType.IDLE.value,
-                        ActionType.SLEEP.value,
-                        ActionType.EAT.value,
-                        ActionType.STUDY.value,
-                        ActionType.NULL_ACTION.value,
-                    ]
-                },
-                "params": {"type": "object"},
-            },
-            "required": ["type", "params"],
-        },
-    },
-    "required": ["reasoning", "action"],
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +38,7 @@ def render_prompt(
         or "- Nothing especially relevant comes to mind."
     )
     legal = "\n".join(f"- {name}" for name in observation.place.legal_actions)
+    economy = f"## Economy\n{observation.market}\n" if observation.market is not None else ""
     return (
         f"You are {agent.display_name}, age {agent.age_years:.0f}, living in the city.\n"
         f"{' '.join(traits)}\n"
@@ -75,6 +48,7 @@ def render_prompt(
         f"Energy {agent.needs.energy:.2f}; hunger {agent.needs.hunger:.2f}.\n"
         "## What comes to mind\n"
         f"{recollections}\n"
+        f"{economy}"
         "## What you can do\n"
         f"{legal}\n"
         "## Decision\n"
@@ -99,7 +73,7 @@ async def deliberate_decide(
             "system": "Act as this person. Choose only from the available actions.",
             "prompt": prompt,
         },
-        ACTION_SCHEMA,
+        action_response_schema(observation.place.legal_actions),
     )
     parsed = result.parsed or {}
     action_row = parsed.get("action", {})

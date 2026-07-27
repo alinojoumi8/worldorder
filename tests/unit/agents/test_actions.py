@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from polis.agents.actions.resolve import resolve_actions
 from polis.agents.actions.types import ActionType, make_action
-from polis.agents.actions.validate import ActionBudget, validate_action
+from polis.agents.actions.validate import (
+    ActionBudget,
+    action_response_schema,
+    validate_action,
+)
 from polis.agents.genesis import generate_agents
 from polis.config.settings import PopulationSettings, WorldSettings
 from polis.kernel.clock import PROFILES
@@ -57,6 +61,19 @@ def test_action_validation_rejects_unknown_move_and_consumes_one_slot() -> None:
     assert rejected.reason == "locality"
     assert rejected.action.type == ActionType.NULL_ACTION
     assert accepted.accepted
+
+
+def test_action_response_schema_is_scoped_and_typed() -> None:
+    schema = action_response_schema(("IDLE", "SUBMIT_ORDER", "IDLE"))
+    branches = schema["properties"]["action"]["oneOf"]
+
+    assert [branch["properties"]["type"]["const"] for branch in branches] == [
+        "IDLE",
+        "SUBMIT_ORDER",
+    ]
+    order_params = branches[1]["properties"]["params"]
+    assert {"symbol", "side", "qty"} <= set(order_params["required"])
+    assert order_params["properties"]["order_type"]["default"] == "limit"
 
 
 def test_resolver_restores_needs_without_money() -> None:

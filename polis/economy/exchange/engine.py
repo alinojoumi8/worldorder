@@ -97,6 +97,7 @@ class ExchangeEngine:
         if not self.settings.exchange.enabled:
             return ()
         events: list[Event] = []
+        events.extend(self._bootstrap_listing(tick, emit))
         exchange_actions = [
             action
             for action in actions
@@ -161,6 +162,34 @@ class ExchangeEngine:
         if self.settings.clock.profile == "chronicle" or closing:
             events.extend(self._close_session(tick, emit))
         return tuple(events)
+
+    def _bootstrap_listing(self, tick: int, emit: Emit) -> tuple[Event, ...]:
+        listing_day = self.settings.exchange.bootstrap_listing_day
+        if (
+            listing_day is None
+            or tick != listing_day * self.settings.clock.ticks_per_sim_day
+            or self.state.securities
+        ):
+            return ()
+        firm = next(
+            (
+                row
+                for row in sorted(self.economy.firms.values(), key=lambda item: item.firm_id)
+                if row.status == "active" and row.firm_id != "fm_broker"
+            ),
+            None,
+        )
+        if firm is None:
+            return ()
+        return self.list_security(
+            symbol="POLS",
+            issuer_firm_id=firm.firm_id,
+            shares_outstanding=self.settings.exchange.bootstrap_shares,
+            listing_price_cents=self.settings.exchange.bootstrap_price_cents,
+            tick=tick,
+            emit=emit,
+            holders={firm.founder_id: self.settings.exchange.bootstrap_shares},
+        )
 
     def list_security(
         self,

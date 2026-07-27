@@ -2,7 +2,7 @@
   "accepted_engineering_implementation_git_sha": "ad7a1751add70ef8ce478dc3a3f5eb9b805b11a4",
   "accepted_on": "2026-07-26",
   "branch": "codex/build/m3-calibration",
-  "status": "engineering_passed_research_failed",
+  "status": "engineering_and_stage0_passed_research_pending",
   "validation_harness_git_sha": "c6a1aaa46a87b1954c09a0c5e31847284e35e3b1",
   "completed_gates": [
     "C15 acquisition integration, redundancies, severance, loan transfer, and asset-sale shell paths",
@@ -36,9 +36,9 @@
     "frontend_build": "passed",
     "frontend_modules": 1580,
     "import_linter_contracts": 4,
-    "mypy_source_files": 112,
+    "mypy_source_files": 115,
     "prompt_lint": "passed",
-    "pytest_passed": 175,
+    "pytest_passed": 250,
     "ruff": "passed"
   },
   "read_only_observatory": {
@@ -79,9 +79,37 @@
     "ticks_per_seed": 1800,
     "years_per_seed": 5
   },
+  "stage0_mechanical_calibration": {
+    "all_runs_stage0_eligible": true,
+    "all_v2_v3_pass": true,
+    "artifact": "artifacts/validation/m3-stage0-multiseed.json",
+    "base_config_hash": "71267d5af4aee7a65cbd4539bea563149d495e364595c5512794b29e591f7ad1",
+    "code_git_sha": "bc684769331f2bdf3d77451d4380f6165adf8252",
+    "events_total": 17039602,
+    "gate_matrix": {
+      "2026072701": {"V2": "pass", "V3": "pass"},
+      "2026072702": {"V2": "pass", "V3": "pass"},
+      "2026072703": {"V2": "pass", "V3": "pass"},
+      "2026072704": {"V2": "pass", "V3": "pass"},
+      "2026072705": {"V2": "pass", "V3": "pass"}
+    },
+    "mechanism_manifest_hash": "723185bf2b50c618b9fe6c228a1247a42754396d2c2b18bdfe9840a2be64e67b",
+    "population": 1000,
+    "protocol_id": "m3-stage0-mechanical-v1",
+    "seeds": [2026072701, 2026072702, 2026072703, 2026072704, 2026072705],
+    "stage0_accepted": true,
+    "status": "mechanical_calibration_passed",
+    "throughput_ticks_per_second": {
+      "maximum": 0.564,
+      "mean": 0.545,
+      "minimum": 0.534
+    },
+    "ticks_per_seed": 720,
+    "years_per_seed": 2
+  },
   "remaining_gates": [
-    "Stage 3 non-fixture 1000-agent V1-V3 calibration",
-    "bounded real-provider run and offline cache replay after cost approval",
+    "Stage 1 three-seed one-year real-provider V2-V4 calibration and offline cache replay",
+    "Stage 3 five-seed five-year real-provider V1-V3 acceptance",
     "C18 antitrust decision integration in M4",
     "C20 death-bankruptcy integration in M5"
   ]

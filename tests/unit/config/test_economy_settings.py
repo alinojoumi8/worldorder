@@ -6,7 +6,7 @@ import pytest
 
 from polis.config.errors import RuntimeOverlayError
 from polis.config.runtime import LayeredOverlay, StaticOverlay
-from polis.config.settings import EconomySettings, load_settings
+from polis.config.settings import EconomySettings, ExchangeSettings, load_settings
 
 
 def test_economy_is_disabled_by_default_for_frozen_m1_runs() -> None:
@@ -18,6 +18,20 @@ def test_economy_is_disabled_by_default_for_frozen_m1_runs() -> None:
 def test_genesis_shares_must_sum_exactly() -> None:
     with pytest.raises(ValueError):
         EconomySettings(household_share_bp=6_999)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("bootstrap_listing_day", 0),
+        ("zero_intelligence_participation_bp", 10_001),
+        ("zero_intelligence_spread_bp", 2_001),
+        ("zero_intelligence_max_order_qty", 0),
+    ],
+)
+def test_exchange_calibration_controls_are_bounded(field: str, value: int) -> None:
+    with pytest.raises(ValueError):
+        ExchangeSettings(**{field: value})
 
 
 def test_static_and_layered_runtime_overlays_are_typed_and_temporal() -> None:

@@ -395,6 +395,9 @@ class ExchangeSettings(FrozenModel):
     bootstrap_listing_day: int | None = None
     bootstrap_shares: int = 100_000
     bootstrap_price_cents: int = 1_000
+    zero_intelligence_participation_bp: int = 500
+    zero_intelligence_spread_bp: int = 500
+    zero_intelligence_max_order_qty: int = 10
 
     @model_validator(mode="after")
     def validate_exchange(self) -> ExchangeSettings:
@@ -404,8 +407,20 @@ class ExchangeSettings(FrozenModel):
             raise ValueError("exchange.commission_bp must be between 0 and 10,000")
         if not 0 < self.max_order_qty_bp <= 10_000:
             raise ValueError("exchange.max_order_qty_bp must be between 1 and 10,000")
+        if self.bootstrap_listing_day is not None and self.bootstrap_listing_day < 1:
+            raise ValueError("exchange.bootstrap_listing_day must be at least 1")
         if self.bootstrap_shares <= 0 or self.bootstrap_price_cents <= 0:
             raise ValueError("exchange bootstrap shares and price must be positive")
+        if not 0 <= self.zero_intelligence_participation_bp <= 10_000:
+            raise ValueError(
+                "exchange.zero_intelligence_participation_bp must be between 0 and 10,000"
+            )
+        if not 0 <= self.zero_intelligence_spread_bp <= self.band_bp:
+            raise ValueError(
+                "exchange.zero_intelligence_spread_bp must be between 0 and exchange.band_bp"
+            )
+        if self.zero_intelligence_max_order_qty <= 0:
+            raise ValueError("exchange.zero_intelligence_max_order_qty must be positive")
         return self
 
 

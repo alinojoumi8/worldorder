@@ -796,8 +796,17 @@ class CreditEngine:
             )
             if transaction_id != expected:
                 raise RuntimeError("loan payment transaction ordinal diverged")
+            capitalised_interest_due = max(
+                0,
+                loan.total_interest_scheduled_cents
+                - loan.total_interest_paid_cents
+                - loan.total_interest_forgiven_cents,
+            )
             loan.outstanding_cents -= principal
-            loan.total_interest_paid_cents += interest
+            loan.total_interest_paid_cents += interest + min(
+                principal,
+                capitalised_interest_due,
+            )
             loan.total_interest_scheduled_cents += interest
             loan.accrued_interest_cents = 0
             loan.payments_made += 1
@@ -970,10 +979,16 @@ def write_off_loan(
     )
     if transaction_id != expected:
         raise RuntimeError("loan write-off transaction ordinal diverged")
+    capitalised_interest_due = max(
+        0,
+        loan.total_interest_scheduled_cents
+        - loan.total_interest_paid_cents
+        - loan.total_interest_forgiven_cents,
+    )
     loan.outstanding_cents -= written_off
     loan.total_interest_scheduled_cents += loan.accrued_interest_cents
     loan.total_interest_forgiven_cents += (
-        loan.capitalised_interest_cents + loan.accrued_interest_cents
+        min(written_off, capitalised_interest_due) + loan.accrued_interest_cents
     )
     loan.accrued_interest_cents = 0
     if loan.outstanding_cents == 0:
