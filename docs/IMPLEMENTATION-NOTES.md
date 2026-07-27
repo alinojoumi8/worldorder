@@ -191,8 +191,13 @@ terminal hashes, active mechanism manifest, gate roster, seed roster, and durati
 The first one-year probe at `labour.min_match_score_bp = 5_500` passed V2 and four V3
 sub-checks but collapsed toward full employment. The specification's declared labour
 calibration lever was raised to `6_500`; seed `2026072701` then passed V2 and every V3
-sub-check, ending at 259 bp unemployment with only three startup-day failures. This is
-tuning evidence only until the frozen five-seed/two-year run passes.
+sub-check, ending at 259 bp unemployment with only three startup-day failures.
+
+The frozen five-seed/two-year run subsequently passed V2 and V3 for every seed. An initial
+formal attempt found `INV-INTEREST` at tick 421 because capitalized interest was not
+classified consistently across repayment and write-off. The corrected lifecycle treats
+only unresolved capitalized interest as payable or forgivable; all five reruns completed
+720 ticks without invariant violations.
 
 Calibration retains only the event kinds needed to recompute V2/V3, while the event log
 still validates, sequences, and hash-chains every event. This avoids treating RAM retention
