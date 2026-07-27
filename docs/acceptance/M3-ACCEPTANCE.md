@@ -73,9 +73,49 @@ acceptance fixture, the reflex-only ablation, and the stub provider.
 2. Calibrate labour participation and recurring transaction activity until V1 and V3 pass
    on all five predeclared seeds.
 3. Run the same five-seed/five-year gate with a bounded real provider and offline cache
-   replay after an explicit cost limit is approved.
+   replay after an explicit cost limit is approved. The named 80-tick/1,000-agent MiniMax
+   M3 pilot passed, but it does not replace the full five-seed/five-year gate.
 4. Integrate antitrust decisions when polity lands in M4.
 5. Integrate the four bankruptcy/death orderings when C20 lands in M5.
 
 Until the first three gates pass, M3 is an accepted engineering milestone, not an accepted
 research milestone.
+
+## Live-provider pilot completed
+
+The bounded stage used `MiniMax-M3` under two independent circuit breakers:
+
+- persistent provider scope: at most 10,000 calls in any 18,000-second window;
+- pilot run: at most 8,000 provider wire attempts across cached resumes and at most USD 25
+  at configured list prices.
+
+The 80-tick pilot is intentionally shorter than a five-year research seed. At the accepted
+7% deliberate share, a five-year/1,000-agent seed needs roughly 126,000 deliberate calls
+before reflections. The pilot first validates schema repair, action diversity, throughput,
+quota enforcement, cache persistence, and exact offline replay. Full five-seed execution
+must then be scheduled across provider windows.
+
+Codex and Grok CLI integrations are limited to one-call compatibility smokes. They execute
+outside the repository with bounded output and no simulation mutation authority. Their
+high harness overhead makes them inappropriate for population-scale cognition until a
+separate cost and privacy review promotes them.
+
+### Live calibration evidence
+
+| Gate | Result |
+|---|---|
+| MiniMax M3 one-call smoke | PASS: schema-valid live response, USD 0.00019716, exact offline replay with no provider lane |
+| Codex CLI one-call smoke | PASS: schema-valid response, bounded process, exact offline replay; 21,147 input and 23 output tokens |
+| Grok CLI one-call smoke | PASS: clean-profile schema-valid response and exact offline replay; 15,349 input and 23 output tokens |
+| 1,000-agent preflight | PASS: 70/70 schema-valid calls, 71 wire attempts, four action types, zero null actions, USD 0.04597452 |
+| Preflight replay | PASS: terminal hash `04a8aca030f2a52cb4183ee27f2f88dd978532522df7de87afc9e00dcc6be702` reproduced exactly offline |
+| 80-tick/1,000-agent pilot | PASS: 5,600 completed calls, 30 repair attempts, 6,072 provider wire attempts, 100% schema-valid responses, five action types, two null actions (0.035714%), and USD 2.98517640 |
+| Pilot replay | PASS: terminal hash `b4fecd7855530a19f96d70618ffda3545b9a65d1e44099362e41566d79b371c4` reproduced exactly offline with no provider access |
+| Full offline gate | PASS: 196 non-live tests, Ruff lint/format, mypy strict, four import contracts, determinism and prompt linters, and the production frontend build |
+
+The completed run remained below both hard limits: 6,072 of 8,000 permitted wire attempts
+and USD 2.98517640 of the USD 25 ceiling. Its run-UUID-scoped persistent wire-attempt
+ledger included retries, while the completion cache preserved the 5,600 logical
+completions across bounded restarts. Transport concurrency remained a runtime control, so
+lowering burst pressure preserved the same run ID, completion cache, event chain, and quota
+scope.

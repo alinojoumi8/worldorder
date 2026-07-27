@@ -107,7 +107,7 @@ class _Handler(PhaseHandler):
 
 
 def _call_payload(call: Any) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "call_id": str(call.call_id),
         "purpose": call.purpose.value,
         "text": call.text,
@@ -122,6 +122,9 @@ def _call_payload(call: Any) -> dict[str, object]:
         "latency_ms": call.latency_ms,
         "error": call.error,
     }
+    if call.repair_attempts:
+        payload["repair_attempts"] = call.repair_attempts
+    return payload
 
 
 class LivingCityEngine:
@@ -595,6 +598,7 @@ async def run_living_city(
     ephemeral_sink: EphemeralSink | None = None,
     collect_events: bool = True,
     cache_mode: Literal["live", "replay", "hybrid"] | None = None,
+    lane_concurrency_overrides: Mapping[str, int] | None = None,
 ) -> LivingCityResult:
     run_id = run_id_for(settings)
     rng = RngRegistry(settings.run.seed)
@@ -639,6 +643,7 @@ async def run_living_city(
         run_id=run_id,
         lanes={} if cache_mode == "replay" else None,
         cache=runtime_cache,
+        concurrency_overrides=lane_concurrency_overrides,
     )
     log.stage(
         NewEvent(

@@ -174,3 +174,53 @@ records issue and clear/fail events. The `securities.issuer_firm_id` column stor
 `gv_treasury` because the binding shared table has no generic issuer column. C13 will replace
 only the venue and price-discovery portion; the treasury decision, coupons, maturities, and
 ledger settlement remain C14-owned.
+
+## M3 / bounded live-provider calibration
+
+### MiniMax M3 pilot does not silently replace the routing specification
+
+`02-ARCHITECTURE.md` and `09-MODEL-ROUTING.md` bind the baseline research design to
+MiniMax M2.7. The vendor now exposes `MiniMax-M3`, but a model-family update changes the
+research instrument. The new M3 configuration is therefore a named, bounded pilot rather
+than an edit to `configs/baseline.yaml`. Promotion requires a cached offline replay and a
+comparison report against the accepted baseline.
+
+At the 7% deliberate target, 1,000 agents imply roughly 70 deliberate calls per tick. A
+five-year chronicle seed is about 126,000 deliberate calls before reflections and other
+ancillary purposes. A 10,000-call/five-hour subscription window therefore cannot contain
+one full seed. `configs/live-minimax-m3-pilot.yaml` runs 80 ticks with an 8,000-call
+run-level hard stop and a persistent 10,000-call/18,000-second provider quota.
+
+### Coding CLIs are bounded provider probes, not simulation workers
+
+The Codex and Grok CLI adapters follow the same stdin/structured-output/event-parsing
+shape used by Paperclip's local Codex adapter. Each call runs in an empty temporary
+directory, captures bounded output, uses a hard timeout, and enters the normal POLIS
+completion cache. Replay mode constructs no CLI process.
+
+Grok runs with tools, web search, MCPs, plugins, cross-session memory, subagents, and
+Claude/Cursor compatibility disabled in a temporary clean profile. Codex runs ephemeral,
+outside the repository, with user config and rules ignored and a read-only sandbox.
+Codex still has an agentic read-only tool surface, so its lane requires the explicit
+`extra.allow_readonly_agent: true` acknowledgement. Both committed CLI configurations are
+one-call smokes only; neither is eligible for the 1,000-agent cognition lane.
+
+Provider-window reservations are stored in SQLite before process or network invocation.
+They survive process restarts and coordinate concurrent lanes sharing a quota scope.
+Run-level wire attempts use a second persistent scope keyed by run UUID. Every retry reserves
+against both ceilings before network invocation, so failures and cached process restarts
+cannot reset or evade the hard cap. Transient provider failures trigger bounded cached
+resume; a quota response whose wait exceeds the retry ceiling remains terminal.
+
+### Pilot outcome
+
+The 80-tick/1,000-agent MiniMax M3 pilot passed all nine declared gates. It completed
+5,600 logical calls with 30 schema-repair attempts and 6,072 actual provider wire
+attempts, staying below the 8,000-attempt run ceiling. All 5,600 responses were
+schema-valid; the run produced five action types and two null actions (0.035714%).
+Configured token pricing yielded USD 2.98517640, below the USD 25 cost ceiling.
+
+The offline replay opened no provider lane and reproduced terminal chain hash
+`b4fecd7855530a19f96d70618ffda3545b9a65d1e44099362e41566d79b371c4` exactly.
+This validates the bounded calibration harness; it does not promote the pilot to the full
+five-seed/five-year M3 research gate.

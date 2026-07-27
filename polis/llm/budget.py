@@ -25,6 +25,7 @@ class BudgetGuard:
         self.settings = settings
         self.tick = -1
         self.usage: dict[str, _Usage] = {}
+        self.cumulative_calls = 0
         self.cumulative_usd = Decimal(0)
         self.binding_constraint: str | None = None
 
@@ -38,6 +39,12 @@ class BudgetGuard:
         cap = self.settings.lines[line]
         usage = self.usage[line]
         reason: str | None = None
+        if (
+            self.settings.max_calls_per_run is not None
+            and self.cumulative_calls + 1 > self.settings.max_calls_per_run
+        ):
+            self.binding_constraint = "run.calls_halt"
+            return Admission.HALT
         if self.cumulative_usd + est_usd > (
             self.settings.usd_per_run * self.settings.usd_halt_multiple
         ):
@@ -50,6 +57,8 @@ class BudgetGuard:
         elif self.cumulative_usd + est_usd > self.settings.usd_per_run:
             reason = "run.usd"
         if reason is None:
+            usage.calls += 1
+            self.cumulative_calls += 1
             return Admission.PERMIT
         self.binding_constraint = reason
         return Admission.HALT if self.settings.on_exhaustion == "halt" else Admission.DEGRADE
@@ -63,7 +72,6 @@ class BudgetGuard:
         usd: Decimal,
     ) -> None:
         usage = self.usage[line]
-        usage.calls += 1
         usage.tokens += tokens_in + tokens_out
         usage.usd += usd
         self.cumulative_usd += usd

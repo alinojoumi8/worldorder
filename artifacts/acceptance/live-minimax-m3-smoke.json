@@ -1,0 +1,31 @@
+{
+  "call_id": "062d4926-a7cc-54ea-a7fe-30eb4596d776",
+  "cost_usd": "0.00019716",
+  "finish_reason": "stop",
+  "gates": {
+    "hard_call_limit": true,
+    "hard_cost_limit": true,
+    "hard_output_token_bound": true,
+    "offline_replay_cache_hit": true,
+    "offline_replay_exact": true,
+    "offline_replay_has_no_lanes": true,
+    "real_provider_call": true,
+    "real_provider_response": true,
+    "schema_valid": true
+  },
+  "hard_cost_limit_usd": "0.05",
+  "latency_ms": 1108,
+  "model": "MiniMax-M3",
+  "model_version": "MiniMax-M3",
+  "offline_replay": {
+    "cache_mode": "replay",
+    "call_id_matches": true,
+    "lanes": 0,
+    "text_sha256_matches": true
+  },
+  "parsed_ok": true,
+  "provider": "minimax",
+  "status": "passed",
+  "tokens_in": 207,
+  "tokens_out": 56
+}
