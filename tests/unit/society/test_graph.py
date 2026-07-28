@@ -4,6 +4,7 @@ from uuid import UUID
 import pytest
 
 from polis.config.settings import SocietySettings
+from polis.events.kinds import TIE_ENDED, TIE_TYPE_CHANGED
 from polis.events.log import EventLog, MemoryEventSink
 from polis.kernel.clock import PROFILES, Clock
 from polis.kernel.rng import RngRegistry
@@ -104,3 +105,44 @@ def test_homophily_is_exactly_disabled_at_zero() -> None:
 
     assert formation_multiplier(a, b, 0.0) == 1.0
     assert formation_multiplier(a, b, 0.5) > 1.0
+
+
+def test_pair_lookup_is_symmetric_and_does_not_scan_all_ties() -> None:
+    repo = MemoryGraphRepository()
+    graph = make_graph("microscope", repo)
+    graph.form("z", "a", "friend", "befriend", 0)
+
+    assert graph.tie("z", "a", "friend") == graph.tie("a", "z", "friend")
+    assert repo.for_pair("z", "a") == repo.for_pair("a", "z")
+
+
+def test_transition_emits_event_and_preserves_existing_target_tie() -> None:
+    repo = MemoryGraphRepository()
+    graph = make_graph("microscope", repo)
+    graph.form("a", "b", "acquaintance", "colocation", 0)
+    graph.form("a", "b", "friend", "befriend", 1)
+    acquaintance = graph.tie("a", "b", "acquaintance")
+    friend = graph.tie("a", "b", "friend")
+    assert acquaintance is not None
+    assert friend is not None
+
+    event = graph.transition(acquaintance, "friend", "test", 2)
+
+    assert event.kind == TIE_ENDED
+    assert event.payload["reason"] == "merged_into_friend"
+    assert graph.tie("a", "b", "acquaintance") is None
+    assert graph.tie("a", "b", "friend") == friend
+
+
+def test_transition_without_target_emits_type_change() -> None:
+    repo = MemoryGraphRepository()
+    graph = make_graph("microscope", repo)
+    graph.form("a", "b", "acquaintance", "befriend", 0)
+    acquaintance = graph.tie("a", "b", "acquaintance")
+    assert acquaintance is not None
+
+    event = graph.transition(acquaintance, "friend", "test", 1)
+
+    assert event.kind == TIE_TYPE_CHANGED
+    assert graph.tie("a", "b", "acquaintance") is None
+    assert graph.tie("a", "b", "friend") is not None

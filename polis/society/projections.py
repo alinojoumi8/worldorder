@@ -19,7 +19,7 @@ from polis.store.projections.base import ProjectionContext, register_projection
 
 class PostsProjection:
     name = "posts_projection"
-    tables: tuple[str, ...] = ("posts", "engagements")
+    tables: tuple[str, ...] = ("posts", "engagements", "post_viewers")
     handles: frozenset[int] = frozenset({POST_PUBLISHED, POST_DELETED, POST_ENGAGED})
 
     async def apply(self, ctx: ProjectionContext, event: Event) -> None:
@@ -79,23 +79,27 @@ class PostsProjection:
             if payload["type"] == "view":
                 await ctx.conn.execute(
                     """
-                    UPDATE posts p SET reach = q.reach
-                    FROM (
-                        SELECT post_id, COUNT(DISTINCT agent_id)::int AS reach
-                        FROM engagements
-                        WHERE run_id=%s AND post_id=%s AND type='view'
-                        GROUP BY post_id
-                    ) q
-                    WHERE p.run_id=%s AND p.post_id=q.post_id
+                    WITH inserted AS (
+                        INSERT INTO post_viewers(run_id,post_id,agent_id)
+                        VALUES(%s,%s,%s)
+                        ON CONFLICT DO NOTHING
+                        RETURNING 1
+                    )
+                    UPDATE posts SET reach=reach+1
+                    WHERE run_id=%s AND post_id=%s
+                      AND EXISTS (SELECT 1 FROM inserted)
                     """,
                     (
                         ctx.run_id,
                         payload["post_id"],
+                        payload["agent_id"],
                         ctx.run_id,
+                        payload["post_id"],
                     ),
                 )
 
     async def truncate(self, ctx: ProjectionContext) -> None:
+        await ctx.conn.execute("DELETE FROM post_viewers WHERE run_id=%s", (ctx.run_id,))
         await ctx.conn.execute("DELETE FROM engagements WHERE run_id=%s", (ctx.run_id,))
         await ctx.conn.execute("DELETE FROM posts WHERE run_id=%s", (ctx.run_id,))
 

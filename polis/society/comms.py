@@ -106,7 +106,12 @@ class SpeechSnapshot:
 
 
 class LedgerApi(Protocol):
-    def can_pay_broadcast(self, payer_id: str, amount_cents: int) -> bool: ...
+    def can_pay_broadcast(
+        self,
+        payer_id: str,
+        payee_id: str,
+        amount_cents: int,
+    ) -> bool: ...
 
     def next_broadcast_txn_id(self, tick: int) -> str: ...
 
@@ -123,8 +128,13 @@ class LedgerApi(Protocol):
 
 
 class NullLedger:
-    def can_pay_broadcast(self, payer_id: str, amount_cents: int) -> bool:
-        del payer_id, amount_cents
+    def can_pay_broadcast(
+        self,
+        payer_id: str,
+        payee_id: str,
+        amount_cents: int,
+    ) -> bool:
+        del payer_id, payee_id, amount_cents
         return True
 
     def next_broadcast_txn_id(self, tick: int) -> str:
@@ -520,7 +530,7 @@ class CommunicationResolver:
         self.repo = repo
         self.cfg = cfg
         self._subresolvers: tuple[InstitutionResolver, ...] = ()
-        self._speech_snapshots: dict[object, SpeechSnapshot] = {}
+        self._speech_snapshots: dict[object, tuple[int, SpeechSnapshot]] = {}
         self.handles = OWN_TYPES
 
     def compose(self, sub: InstitutionResolver) -> None:
@@ -601,7 +611,7 @@ class CommunicationResolver:
             snapshot = _speech_snapshot(ctx.observation)
             if snapshot is None or not snapshot.candidates:
                 return GateFailure("locality", "SAY requires a co-located listener")
-            self._speech_snapshots[action.action_id] = snapshot
+            self._speech_snapshots[action.action_id] = (ctx.tick, snapshot)
         if action.type == ActionType.BROADCAST:
             observed_place = getattr(getattr(ctx.observation, "place", None), "place_id", None)
             requested_place = action.params.get("place_id")
@@ -630,7 +640,15 @@ class CommunicationResolver:
             if place_id is not None:
                 place = self.world.place(str(place_id))
                 fee = 0 if place.owner_id in {None, action.actor_id} else int(place.rent_cents)
-                if fee > 0 and not self.ledger.can_pay_broadcast(action.actor_id, fee):
+                if (
+                    fee > 0
+                    and place.owner_id is not None
+                    and not self.ledger.can_pay_broadcast(
+                        action.actor_id,
+                        place.owner_id,
+                        fee,
+                    )
+                ):
                     return GateFailure(
                         "resources",
                         "insufficient liquid balance for the broadcast venue fee",
@@ -643,6 +661,9 @@ class CommunicationResolver:
         tick: int,
         ctx: ResolutionContext,
     ) -> Sequence[Event]:
+        self._speech_snapshots = {
+            action_id: item for action_id, item in self._speech_snapshots.items() if item[0] >= tick
+        }
         events: list[Event] = []
         own = sorted(
             (row for row in actions if row.action.type in OWN_TYPES),
@@ -699,6 +720,8 @@ class CommunicationResolver:
             return (*events, *((engagement,) if engagement is not None else ()))
         if action.type in {ActionType.FOLLOW, ActionType.UNFOLLOW}:
             target = _param(params, "followee_id") or _param(params, "target_id")
+            if target is None:
+                return ()
             event = (
                 self.platform.follow(action.actor_id, str(target), "feed", tick)
                 if action.type == ActionType.FOLLOW
@@ -707,7 +730,10 @@ class CommunicationResolver:
             if event is None:
                 return ()
             events = [event]
-            if action.type == ActionType.FOLLOW:
+            if (
+                action.type == ActionType.FOLLOW
+                and self.graph.tie(action.actor_id, str(target)) is None
+            ):
                 formed = self.graph.form(
                     action.actor_id,
                     str(target),
@@ -721,7 +747,11 @@ class CommunicationResolver:
         if action.type == ActionType.BEFRIEND:
             target = str(_param(params, "target_id"))
             prior = self.repo.offer_befriend(action.actor_id, target, tick)
-            event = self.graph.form(action.actor_id, target, "acquaintance", "befriend", tick)
+            event = (
+                self.graph.form(action.actor_id, target, "acquaintance", "befriend", tick)
+                if self.graph.tie(action.actor_id, target) is None
+                else None
+            )
             result = [] if event is None else [event]
             if (
                 prior is not None
@@ -730,17 +760,22 @@ class CommunicationResolver:
             ):
                 current = self.graph.tie(action.actor_id, target, "acquaintance")
                 if current is not None:
-                    self.graph.repo.put(replace(current, ended_tick=tick))
-                upgraded = self.graph.form(action.actor_id, target, "friend", "befriend", tick)
-                if upgraded is not None:
-                    result.append(upgraded)
+                    result.append(
+                        self.graph.transition(
+                            current,
+                            "friend",
+                            "reciprocal_befriend",
+                            tick,
+                        )
+                    )
             return tuple(result)
         return ()
 
     def _say(
         self, action: Action, params: object, tick: int, ctx: ResolutionContext
     ) -> Sequence[Event]:
-        snapshot = self._speech_snapshots.pop(action.action_id, None)
+        cached = self._speech_snapshots.pop(action.action_id, None)
+        snapshot = None if cached is None or cached[0] != tick else cached[1]
         if snapshot is None:
             observations = ctx.repositories.get("observations")
             observation = (
@@ -928,8 +963,16 @@ class CommunicationResolver:
     def _broadcast(
         self, action: Action, params: object, tick: int, ctx: ResolutionContext
     ) -> Sequence[Event]:
-        location = self.world.locations[action.actor_id]
-        place_id = str(_param(params, "place_id") or location.place_id)
+        requested_place = _param(params, "place_id")
+        location = (
+            None if requested_place is not None else self.world.locations.get(action.actor_id)
+        )
+        resolved_place = requested_place or (
+            None if location is None else getattr(location, "place_id", None)
+        )
+        if resolved_place is None:
+            return ()
+        place_id = str(resolved_place)
         place = self.world.place(place_id)
         audience = tuple(
             sorted(

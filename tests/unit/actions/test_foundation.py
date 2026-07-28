@@ -34,7 +34,14 @@ from polis.agents.actions import (
     make_action,
 )
 from polis.agents.actions.params.exchange import SubmitOrderParams
+from polis.agents.actions.params.media import (
+    FollowParams,
+    PostParams,
+    RepostParams,
+    UnfollowParams,
+)
 from polis.agents.actions.params.meta import NullActionParams
+from polis.agents.actions.params.speech import SayParams
 from polis.agents.actions.params.ventures import DeclareDividendParams
 from polis.agents.actions.params.world import IdleParams, MoveToParams
 from polis.config.settings import ActionSettings
@@ -163,6 +170,35 @@ def test_enum_and_params_models_are_closed_and_frozen() -> None:
     idle = IdleParams()
     with pytest.raises(ValidationError):
         idle.extra = "mutated"  # type: ignore[attr-defined]
+
+
+def test_social_targets_reject_empty_and_ambiguous_aliases() -> None:
+    for model in (FollowParams, UnfollowParams):
+        with pytest.raises(ValidationError):
+            model()
+        with pytest.raises(ValidationError):
+            model(target_id="ag_target", followee_id="ag_followee")
+        assert model(followee_id="ag_followee").followee_id == "ag_followee"
+
+    with pytest.raises(ValidationError):
+        RepostParams()
+    with pytest.raises(ValidationError):
+        RepostParams(post_id="po_one", repost_of="po_two")
+    assert RepostParams(repost_of="po_one").repost_of == "po_one"
+
+
+def test_strict_action_params_accept_json_arrays_in_json_mode() -> None:
+    say = SayParams.model_validate_json(
+        '{"text":"hello","addressed_to":["ag_peer"],"claims":[{"predicate":"x"}]}'
+    )
+    post = PostParams.model_validate_json(
+        '{"text":"hello","media_urls":["https://example.test/a"],"claims":[{"predicate":"x"}]}'
+    )
+
+    assert say.addressed_to == ("ag_peer",)
+    assert say.claims == ({"predicate": "x"},)
+    assert post.media_urls == ("https://example.test/a",)
+    assert post.claims == ({"predicate": "x"},)
 
 
 def test_slot_ledger_uses_the_single_profile_configuration() -> None:

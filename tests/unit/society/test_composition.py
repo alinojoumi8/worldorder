@@ -127,6 +127,31 @@ def test_say_locality_uses_the_committed_observation_not_live_occupancy() -> Non
     assert failure.reason == "locality"
 
 
+def test_speech_snapshot_cache_prunes_entries_from_prior_ticks() -> None:
+    communications = resolver()
+    action = make_action(
+        actor_id="ag_a",
+        tick=1,
+        action_type=ActionType.SAY,
+        params={"text": "hello"},
+    )
+    observation = SimpleNamespace(
+        place=SimpleNamespace(place_id="pl_square"),
+        co_located=(SimpleNamespace(agent_id="ag_b"),),
+    )
+    assert (
+        communications.check_locality(
+            action,
+            ValidationContext(observation, object(), 1),
+        )
+        is None
+    )
+
+    communications.resolve((), 2, ResolutionContext(emit=lambda draft: None))
+
+    assert communications._speech_snapshots == {}
+
+
 def test_utterance_delivery_is_visible_only_after_its_speech_tick() -> None:
     repo = MemoryCommsRepository()
     repo.add_utterance(UtteranceDelivery("ag_a", "ag_b", 8, "not before the boundary"))

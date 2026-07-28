@@ -247,6 +247,27 @@ class SocietySettings(FrozenModel):
     comms_attention: Literal["tie_weighted", "uniform"] = "tie_weighted"
     feed: SocietyFeedSettings = SocietyFeedSettings()
 
+    @model_validator(mode="after")
+    def validate_tie_halflives(self) -> SocietySettings:
+        expected = {
+            "acquaintance",
+            "friend",
+            "colleague",
+            "rival",
+            "kin",
+            "partner",
+            "creditor",
+        }
+        actual = set(self.tie_halflife_sim_days)
+        if actual != expected:
+            missing = sorted(expected - actual)
+            unknown = sorted(actual - expected)
+            raise ValueError(
+                "society.tie_halflife_sim_days must define every tie type exactly once; "
+                f"missing={missing}, unknown={unknown}"
+            )
+        return self
+
 
 class EconomySettings(FrozenModel):
     enabled: bool = False

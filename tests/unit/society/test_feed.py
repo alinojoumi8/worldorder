@@ -114,6 +114,27 @@ def test_engagement_refit_is_deterministic_and_keeps_feature_order() -> None:
     assert len(first.beta) == 11
 
 
+def test_engagement_checkpoint_restores_full_training_state() -> None:
+    source = EngagementModel(
+        beta_prior=(0.123456789,) * 11,
+        eta=0.125,
+        passes=7,
+        n0=42,
+    )
+    source.beta = (0.987654321,) * 11
+    source.n_observations = 19
+    restored = EngagementModel()
+
+    restored.load(source.dump())
+
+    assert restored.beta == (0.987654,) * 11
+    assert restored.n_observations == 19
+    assert restored.eta == 0.125
+    assert restored.passes == 7
+    assert restored.n0 == 42
+    assert restored.beta_prior == (0.123457,) * 11
+
+
 def test_build_all_freezes_features_before_writing_any_same_tick_views() -> None:
     clock, log, graph, platform = fixture()
     for reader_id in ("reader_1", "reader_2"):
@@ -145,3 +166,32 @@ def test_build_all_freezes_features_before_writing_any_same_tick_views() -> None
     }
     assert {row[2].pop for row in impressions} == {0.0}
     assert len(view_events) == 30
+    assert service.impressions_for_refit(clock.sim_day(100)) == ()
+
+
+def test_platform_reach_and_impressions_are_isolated_per_instance() -> None:
+    _, _, _, first = fixture()
+    _, _, _, second = fixture()
+
+    first.engage("reader", "po_00", "view", 100)
+
+    assert first.reach("po_00") == 1
+    assert first.impressions("po_00") == 1
+    assert second.reach("po_00") == 0
+    assert second.impressions("po_00") == 0
+
+
+def test_platform_restores_reach_state_from_repository() -> None:
+    clock, log, graph, platform = fixture()
+    platform.engage("reader", "po_00", "view", 100)
+
+    restored = Platform(
+        log=log,
+        clock=clock,
+        repo=platform.repo,
+        graph=graph,
+        cfg=SocietySettings(),
+    )
+
+    assert restored.reach("po_00") == 1
+    assert restored.impressions("po_00") == 1

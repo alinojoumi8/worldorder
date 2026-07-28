@@ -71,13 +71,24 @@ class PlatformRepository(Protocol):
 
     def engagements(self, post_id: str | None = None) -> tuple[Engagement, ...]: ...
 
+    def engagements_by_agent_author(
+        self,
+        agent_id: str,
+        author_id: str,
+    ) -> tuple[Engagement, ...]: ...
+
 
 class MemoryPlatformRepository:
     def __init__(self) -> None:
         self._posts: dict[str, Post] = {}
         self._deleted: set[str] = set()
         self._follows: dict[tuple[str, str], tuple[int, int | None]] = {}
-        self._engagements: list[Engagement] = []
+        self._engagements_by_post: dict[str, list[Engagement]] = defaultdict(list)
+        self._engagement_keys: set[tuple[str, str, int, EngagementType]] = set()
+        self._engagements_by_agent_author: dict[
+            tuple[str, str],
+            list[Engagement],
+        ] = defaultdict(list)
 
     def put_post(self, post: Post) -> None:
         self._posts[post.post_id] = post
@@ -129,34 +140,42 @@ class MemoryPlatformRepository:
         )
 
     def add_engagement(self, engagement: Engagement) -> bool:
-        if any(
-            row.post_id == engagement.post_id
-            and row.agent_id == engagement.agent_id
-            and row.tick == engagement.tick
-            and row.type == engagement.type
-            for row in self._engagements
-        ):
+        key = (
+            engagement.post_id,
+            engagement.agent_id,
+            engagement.tick,
+            engagement.type,
+        )
+        if key in self._engagement_keys:
             return False
-        self._engagements.append(engagement)
+        self._engagement_keys.add(key)
+        self._engagements_by_post[engagement.post_id].append(engagement)
+        post = self._posts.get(engagement.post_id)
+        if post is not None:
+            self._engagements_by_agent_author[(engagement.agent_id, post.author_id)].append(
+                engagement
+            )
         return True
 
     def engagements(self, post_id: str | None = None) -> tuple[Engagement, ...]:
-        rows = self._engagements
-        if post_id is not None:
-            rows = [row for row in rows if row.post_id == post_id]
+        rows = (
+            [row for post_rows in self._engagements_by_post.values() for row in post_rows]
+            if post_id is None
+            else list(self._engagements_by_post.get(post_id, ()))
+        )
         return tuple(sorted(rows, key=lambda row: (row.tick, row.agent_id, row.engagement_id)))
 
-
-_REACH: dict[str, set[str]] = defaultdict(set)
-_IMPRESSIONS: dict[str, int] = defaultdict(int)
-
-
-def reach(post_id: str) -> int:
-    return len(_REACH[post_id])
-
-
-def impressions(post_id: str) -> int:
-    return _IMPRESSIONS[post_id]
+    def engagements_by_agent_author(
+        self,
+        agent_id: str,
+        author_id: str,
+    ) -> tuple[Engagement, ...]:
+        return tuple(
+            sorted(
+                self._engagements_by_agent_author.get((agent_id, author_id), ()),
+                key=lambda row: (row.tick, row.post_id, row.engagement_id),
+            )
+        )
 
 
 def _value(params: object, name: str, default: Any = None) -> Any:
@@ -182,6 +201,12 @@ class Platform:
         self.cfg = cfg
         self.cascades = CascadeTracker(log=log, clock=clock, platform=self, cfg=cfg)
         self._post_ordinal: dict[tuple[int, str], int] = defaultdict(int)
+        self._reach: dict[str, set[str]] = defaultdict(set)
+        self._impressions: dict[str, int] = defaultdict(int)
+        for engagement in self.repo.engagements():
+            if engagement.type == "view":
+                self._reach[engagement.post_id].add(engagement.agent_id)
+                self._impressions[engagement.post_id] += 1
 
     def _emit(
         self,
@@ -219,8 +244,6 @@ class Platform:
         cause_seq: int | None,
     ) -> tuple[Post, Sequence[Event]]:
         post_id = self._new_post_id(author_id, tick)
-        _REACH.pop(post_id, None)
-        _IMPRESSIONS.pop(post_id, None)
         in_reply_to = _value(params, "in_reply_to")
         parent = self.repo.post(str(in_reply_to)) if in_reply_to else None
         root_id = parent.root_post_id if parent is not None else post_id
@@ -274,8 +297,6 @@ class Platform:
         if source is None:
             raise KeyError(f"unknown post: {source_id}")
         post_id = self._new_post_id(author_id, tick)
-        _REACH.pop(post_id, None)
-        _IMPRESSIONS.pop(post_id, None)
         comment = _value(params, "comment")
         if comment is None:
             comment = _value(params, "text", "")
@@ -361,10 +382,10 @@ class Platform:
         if not self.repo.add_engagement(row):
             return None
         if type == "view":
-            _REACH[post_id].add(agent_id)
-            _IMPRESSIONS[post_id] += 1
-            if post.reach != len(_REACH[post_id]):
-                self.repo.put_post(replace(post, reach=len(_REACH[post_id])))
+            self._reach[post_id].add(agent_id)
+            self._impressions[post_id] += 1
+            if post.reach != len(self._reach[post_id]):
+                self.repo.put_post(replace(post, reach=len(self._reach[post_id])))
         return self._emit(
             POST_ENGAGED,
             {
@@ -426,6 +447,12 @@ class Platform:
     def follower_count(self, agent_id: str) -> int:
         return len(self.repo.followers(agent_id))
 
+    def reach(self, post_id: str) -> int:
+        return len(self._reach.get(post_id, ()))
+
+    def impressions(self, post_id: str) -> int:
+        return self._impressions.get(post_id, 0)
+
     def posts_in_window(self, tick: int, window_ticks: int) -> tuple[Post, ...]:
         return tuple(post for post in self.repo.posts() if tick - window_ticks < post.tick <= tick)
 
@@ -434,6 +461,8 @@ class Platform:
         if post is None:
             raise KeyError(f"unknown post: {post_id}")
         self.repo.delete_post(post_id)
+        self._reach.pop(post_id, None)
+        self._impressions.pop(post_id, None)
         return self._emit(
             POST_DELETED,
             {"post_id": post_id, "author_id": post.author_id, "reason": reason},
@@ -498,8 +527,9 @@ class CascadeTracker:
             breadth = max((len(value) for value in children.values()), default=0)
             views = [
                 row
-                for row in self.platform.repo.engagements()
-                if row.post_id in nodes and row.type == "view"
+                for node in nodes
+                for row in self.platform.repo.engagements(node)
+                if row.type == "view"
             ]
             payload = {
                 "root_post_id": root_id,
@@ -558,6 +588,4 @@ __all__ = [
     "Platform",
     "PlatformRepository",
     "Post",
-    "impressions",
-    "reach",
 ]

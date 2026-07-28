@@ -22,8 +22,26 @@ class EconomyLedgerAdapter:
             )
         )
 
-    def can_pay_broadcast(self, payer_id: str, amount_cents: int) -> bool:
-        return amount_cents >= 0 and self.ledger.liquid(payer_id) >= amount_cents
+    def _compatible_balance(self, payer_id: str, payee_id: str) -> int:
+        destinations = self._liquid_accounts(payee_id)
+        if not destinations:
+            return 0
+        return sum(
+            max(0, self.ledger.balance(source))
+            for source in self._liquid_accounts(payer_id)
+            if any(
+                (bank_of(source) is None) == (bank_of(destination) is None)
+                for destination in destinations
+            )
+        )
+
+    def can_pay_broadcast(
+        self,
+        payer_id: str,
+        payee_id: str,
+        amount_cents: int,
+    ) -> bool:
+        return amount_cents >= 0 and self._compatible_balance(payer_id, payee_id) >= amount_cents
 
     def next_broadcast_txn_id(self, tick: int) -> str:
         return str(self.ledger.next_txn_id(tick))

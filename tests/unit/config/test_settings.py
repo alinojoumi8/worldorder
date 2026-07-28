@@ -4,7 +4,13 @@ import pytest
 import yaml
 
 from polis.config.errors import ConfigError
-from polis.config.settings import Settings, config_hash, config_yaml, load_settings
+from polis.config.settings import (
+    Settings,
+    SocietySettings,
+    config_hash,
+    config_yaml,
+    load_settings,
+)
 
 
 def test_smoke_and_baseline_load() -> None:
@@ -53,3 +59,13 @@ def test_config_yaml_round_trips_aliased_fields() -> None:
 def test_unknown_key_is_rejected() -> None:
     with pytest.raises(ConfigError, match="unknown"):
         load_settings(Path("configs/smoke.yaml"), overrides={"run": {"unknown": True}})
+
+
+def test_society_tie_halflives_reject_partial_and_unknown_maps() -> None:
+    with pytest.raises(ValueError, match="missing"):
+        SocietySettings(tie_halflife_sim_days={"friend": 60.0})
+
+    values = dict(SocietySettings().tie_halflife_sim_days)
+    values["stranger"] = 10.0
+    with pytest.raises(ValueError, match="unknown"):
+        SocietySettings(tie_halflife_sim_days=values)

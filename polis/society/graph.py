@@ -21,6 +21,15 @@ from polis.kernel.clock import Clock
 from polis.kernel.rng import RngRegistry
 
 TieType = Literal["kin", "partner", "friend", "colleague", "rival", "creditor", "acquaintance"]
+TIE_TYPES: tuple[TieType, ...] = (
+    "kin",
+    "partner",
+    "friend",
+    "colleague",
+    "rival",
+    "creditor",
+    "acquaintance",
+)
 SYMMETRIC_TYPES = frozenset({"kin", "partner", "friend", "colleague", "rival", "acquaintance"})
 
 
@@ -89,6 +98,8 @@ type AgentState = AgentProfile
 class GraphRepository(Protocol):
     def all(self) -> tuple[Tie, ...]: ...
 
+    def for_pair(self, a_id: str, b_id: str) -> tuple[Tie, ...]: ...
+
     def put(self, tie: Tie) -> None: ...
 
 
@@ -98,6 +109,19 @@ class MemoryGraphRepository:
 
     def all(self) -> tuple[Tie, ...]:
         return tuple(sorted(self._ties.values(), key=lambda row: (row.a_id, row.b_id, row.type)))
+
+    def for_pair(self, a_id: str, b_id: str) -> tuple[Tie, ...]:
+        rows: list[Tie] = []
+        for tie_type in TIE_TYPES:
+            key = (
+                (*_pair(a_id, b_id), tie_type)
+                if tie_type in SYMMETRIC_TYPES
+                else (a_id, b_id, tie_type)
+            )
+            row = self._ties.get(key)
+            if row is not None:
+                rows.append(row)
+        return tuple(sorted(rows, key=lambda row: row.type))
 
     def put(self, tie: Tie) -> None:
         self._ties[(tie.a_id, tie.b_id, tie.type)] = tie
@@ -116,7 +140,6 @@ class ContactLedger:
         for index, a_id in enumerate(ordered):
             for b_id in ordered[index + 1 :]:
                 self._contacts[(a_id, b_id)].append(tick)
-        self._prune(tick)
 
     def joint_place_ticks(self, a_id: str, b_id: str, tick: int) -> int:
         key = _pair(a_id, b_id)
@@ -217,13 +240,8 @@ class SocialGraph:
     def tie(self, a_id: str, b_id: str, type: TieType | None = None) -> Tie | None:
         candidates = [
             row
-            for row in self.repo.all()
-            if row.ended_tick is None
-            and (
-                (row.a_id == a_id and row.b_id == b_id)
-                or (row.type in SYMMETRIC_TYPES and row.a_id == b_id and row.b_id == a_id)
-            )
-            and (type is None or row.type == type)
+            for row in self.repo.for_pair(a_id, b_id)
+            if row.ended_tick is None and (type is None or row.type == type)
         ]
         if not candidates:
             return None
@@ -296,6 +314,56 @@ class SocialGraph:
             },
             tick,
             subjects=(a_id, b_id),
+        )
+
+    def end(self, row: Tie, reason: str, tick: int) -> Event:
+        self.repo.put(replace(row, ended_tick=tick))
+        self._last_decay_tick.pop(
+            self._key(row.a_id, row.b_id, row.type),
+            None,
+        )
+        return self._emit(
+            TIE_ENDED,
+            {
+                "a_id": row.a_id,
+                "b_id": row.b_id,
+                "type": row.type,
+                "reason": reason,
+                "final_strength": row.strength,
+            },
+            tick,
+            subjects=(row.a_id, row.b_id),
+        )
+
+    def transition(
+        self,
+        row: Tie,
+        target: TieType,
+        trigger: str,
+        tick: int,
+    ) -> Event:
+        existing_target = self.tie(row.a_id, row.b_id, target)
+        if existing_target is not None:
+            return self.end(row, f"merged_into_{target}", tick)
+        self.repo.put(replace(row, ended_tick=tick))
+        replacement = replace(row, type=target, formed_tick=tick, ended_tick=None)
+        self.repo.put(replacement)
+        old_key = self._key(row.a_id, row.b_id, row.type)
+        self._last_decay_tick.pop(old_key, None)
+        self._last_decay_tick[self._key(replacement.a_id, replacement.b_id, replacement.type)] = (
+            tick
+        )
+        return self._emit(
+            TIE_TYPE_CHANGED,
+            {
+                "a_id": row.a_id,
+                "b_id": row.b_id,
+                "from_type": row.type,
+                "to_type": target,
+                "trigger": trigger,
+            },
+            tick,
+            subjects=(row.a_id, row.b_id),
         )
 
     def apply_tick(self, tick: int, contacts: ContactLedger) -> Sequence[Event]:
@@ -412,44 +480,9 @@ class SocialGraph:
             else:
                 self._rival_recovery_since.pop(key, None)
         if target is not None:
-            self.repo.put(replace(row, ended_tick=tick))
-            replacement = replace(row, type=target, formed_tick=tick, ended_tick=None)
-            self.repo.put(replacement)
-            old_key = self._key(row.a_id, row.b_id, row.type)
-            self._last_decay_tick.pop(old_key, None)
-            self._last_decay_tick[
-                self._key(replacement.a_id, replacement.b_id, replacement.type)
-            ] = tick
-            return self._emit(
-                TIE_TYPE_CHANGED,
-                {
-                    "a_id": row.a_id,
-                    "b_id": row.b_id,
-                    "from_type": row.type,
-                    "to_type": target,
-                    "trigger": trigger,
-                },
-                tick,
-                subjects=(row.a_id, row.b_id),
-            )
+            return self.transition(row, target, trigger, tick)
         if row.strength < 0.02 and row.type not in {"kin", "partner", "creditor"}:
-            self.repo.put(replace(row, ended_tick=tick))
-            self._last_decay_tick.pop(
-                self._key(row.a_id, row.b_id, row.type),
-                None,
-            )
-            return self._emit(
-                TIE_ENDED,
-                {
-                    "a_id": row.a_id,
-                    "b_id": row.b_id,
-                    "type": row.type,
-                    "reason": "decay",
-                    "final_strength": row.strength,
-                },
-                tick,
-                subjects=(row.a_id, row.b_id),
-            )
+            return self.end(row, "decay", tick)
         return None
 
     def snapshot(self, tick: int) -> Event:
@@ -573,11 +606,10 @@ class SocialGraph:
 @mechanism(
     "graph_homophily",
     entails=(
-        "with homophily_bias = 0 the graph imposes no similarity preference, so measured "
-        "assortativity is attributable to space, institutions, and the platform. Setting "
-        "homophily_bias > 0 multiplies BEFRIEND acceptance and acquaintance→friend upgrade "
-        "probability by exp(β · sim(i,j)) and thereby entails positive belief assortativity; "
-        "any B1 result must be reported with the value used."
+        "with homophily_bias = 0, formation_multiplier returns exactly 1.0 and imposes no "
+        "similarity preference. Nonzero values expose exp(beta * similarity) for calibrated "
+        "callers, but the current runtime does not apply that multiplier to BEFRIEND or tie "
+        "transitions; no B1 result may attribute assortativity to this inactive knob."
     ),
 )
 def formation_multiplier(a: AgentState, b: AgentState, beta: float) -> float:
@@ -594,6 +626,7 @@ def formation_multiplier(a: AgentState, b: AgentState, beta: float) -> float:
 
 
 __all__ = [
+    "TIE_TYPES",
     "AgentState",
     "ContactLedger",
     "GraphRepository",

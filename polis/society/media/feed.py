@@ -14,7 +14,7 @@ from polis.events.types import NewEvent
 from polis.kernel.clock import Clock
 from polis.kernel.rng import RngRegistry
 from polis.society.graph import SocialGraph
-from polis.society.media.platform import Platform, Post, impressions, reach
+from polis.society.media.platform import Platform, Post
 from polis.society.protocols import BeliefChannel
 
 FeedAlgorithm = Literal["chronological", "engagement", "random", "adversarial"]
@@ -328,11 +328,30 @@ class EngagementModel:
         beta = tuple(float(value) for value in raw_beta)
         if len(beta) != 11:
             raise ValueError("checkpoint beta must contain 11 entries")
-        self.beta = beta
+        self.beta = tuple(round6(value) for value in beta)
         raw_count = state["n_observations"]
-        if not isinstance(raw_count, int):
-            raise ValueError("checkpoint n_observations must be an integer")
+        if not isinstance(raw_count, int) or isinstance(raw_count, bool) or raw_count < 0:
+            raise ValueError("checkpoint n_observations must be a non-negative integer")
         self.n_observations = raw_count
+        raw_eta = state["eta"]
+        if not isinstance(raw_eta, (int, float)) or isinstance(raw_eta, bool) or raw_eta <= 0:
+            raise ValueError("checkpoint eta must be positive")
+        raw_passes = state["passes"]
+        if not isinstance(raw_passes, int) or isinstance(raw_passes, bool) or raw_passes < 1:
+            raise ValueError("checkpoint passes must be a positive integer")
+        raw_n0 = state["n0"]
+        if not isinstance(raw_n0, int) or isinstance(raw_n0, bool) or raw_n0 < 0:
+            raise ValueError("checkpoint n0 must be a non-negative integer")
+        raw_prior = state["beta_prior"]
+        if not isinstance(raw_prior, Sequence):
+            raise ValueError("checkpoint beta_prior must be a sequence")
+        prior = tuple(round6(float(value)) for value in raw_prior)
+        if len(prior) != 11:
+            raise ValueError("checkpoint beta_prior must contain 11 entries")
+        self.eta = float(raw_eta)
+        self.passes = raw_passes
+        self.n0 = raw_n0
+        self.beta_prior = prior
 
 
 class FeedService:
@@ -380,13 +399,7 @@ class FeedService:
             math.log1p(len(engagement_rows)) / math.log1p(self.cfg.feed.pop_norm),
         )
         tie = self.graph.strength(agent_id, post.author_id)
-        past = [
-            row
-            for row in self.platform.repo.engagements()
-            if row.agent_id == agent_id
-            and (candidate := self.platform.repo.post(row.post_id)) is not None
-            and candidate.author_id == post.author_id
-        ]
+        past = self.platform.repo.engagements_by_agent_author(agent_id, post.author_id)
         engaged = sum(row.type in {"like", "repost", "comment"} for row in past)
         rate = 0.0 if not past else engaged / len(past)
         affinity = 0.5 * tie + 0.5 * rate
@@ -555,6 +568,9 @@ class FeedService:
                 for row in self.platform.repo.engagements(post_id)
             )
             rows.append((agent_id, post_id, feature, engaged))
+        self._impression_features = [
+            row for row in self._impression_features if self.clock.sim_day(row[0]) > sim_day
+        ]
         return tuple(sorted(rows, key=lambda row: (row[0], row[1])))
 
 
@@ -571,6 +587,4 @@ __all__ = [
     "FeedService",
     "PostBrief",
     "RandomRanker",
-    "impressions",
-    "reach",
 ]
