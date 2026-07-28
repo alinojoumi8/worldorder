@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from polis.agents.actions.budget import SlotLedger
 from polis.agents.actions.compat import LEGACY_PARAM_MODELS
-from polis.agents.actions.legal import REFLEX_ALLOWED
+from polis.agents.actions.legal import CHILD_ALLOWED, REFLEX_ALLOWED
 from polis.agents.actions.params import PARAMS_MODELS
 from polis.agents.actions.params.base import ActionParams
 from polis.agents.actions.protocol import (
@@ -191,13 +191,7 @@ def validate_action(
         return _reject_legacy(action, "schema", gates, {"error": str(exc)})
     gates["schema"] = "pass"
 
-    if agent.employment_status == "child" and action.type not in {
-        ActionType.IDLE,
-        ActionType.SLEEP,
-        ActionType.EAT,
-        ActionType.STUDY,
-        ActionType.NULL_ACTION,
-    }:
+    if agent.employment_status == "child" and action.type not in CHILD_ALLOWED:
         gates["capability"] = "fail"
         return _reject_legacy(action, "capability", gates)
     gates["capability"] = "pass"
@@ -293,6 +287,7 @@ class ActionValidator:
         reason: RejectReason,
         detail: str,
         cause_seq: int | None = None,
+        slot_consumed: bool = True,
     ) -> Rejection:
         substitute = null_action(action, reasoning=reason)
         rejection = Rejection(
@@ -315,7 +310,7 @@ class ActionValidator:
                     "reason": reason,
                     "detail": detail,
                     "origin": action.origin,
-                    "slot_consumed": True,
+                    "slot_consumed": slot_consumed,
                     "substituted_with": ActionType.NULL_ACTION.value,
                 },
                 actor_id=action.actor_id,
@@ -349,6 +344,7 @@ class ActionValidator:
                 f"reflex action {action.type.value} is outside REFLEX_ALLOWED"
             )
 
+        self.slots.reset(ctx.tick)
         slot_index = self.slots.consume(action.actor_id, ctx.tick)
         if slot_index is None:
             return self._reject(
@@ -356,6 +352,7 @@ class ActionValidator:
                 gate=None,
                 reason="no_slots",
                 detail="the actor has exhausted this tick's action slots",
+                slot_consumed=False,
             )
 
         submitted = self._emit(

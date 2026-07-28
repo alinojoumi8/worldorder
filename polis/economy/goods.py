@@ -8,7 +8,11 @@ from typing import Any, Literal, cast
 
 import yaml
 
-from polis.agents.actions.types import Action, ActionType, make_action
+from polis.agents.actions.types import (
+    Action,
+    ActionType,
+    make_legacy_action,
+)
 from polis.agents.state import AgentPopulation
 from polis.agents.types import AgentState
 from polis.config.mechanisms import mechanism
@@ -574,7 +578,7 @@ class GoodsEngine:
                 if self.ctx.economy.ledger.liquid(agent.agent_id) < total_price:
                     continue
                 actions.append(
-                    make_action(
+                    make_legacy_action(
                         actor_id=agent.agent_id,
                         tick=tick,
                         action_type=ActionType.BUY_GOOD,

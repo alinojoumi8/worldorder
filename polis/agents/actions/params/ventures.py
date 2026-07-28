@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from polis.agents.actions.params.base import ActionParams, Cents
+from polis.agents.actions.params.base import ActionParams, PositiveCents
 
 
 class FoundCompanyParams(ActionParams):
@@ -70,8 +70,8 @@ class FileBankruptcyParams(ActionParams):
 
 class DeclareDividendParams(ActionParams):
     firm_id: str
-    total_cents: Cents | None = None
-    per_share_cents: Cents | None = None
+    total_cents: PositiveCents | None = None
+    per_share_cents: PositiveCents | None = None
 
     @model_validator(mode="after")
     def exactly_one_dividend_basis(self) -> DeclareDividendParams:

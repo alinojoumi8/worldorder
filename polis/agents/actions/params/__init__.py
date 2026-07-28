@@ -178,8 +178,10 @@ PARAMS_MODELS: Final[Mapping[ActionType, type[ActionParams]]] = MappingProxyType
     }
 )
 
-assert len(ActionType) == 71, "the C10 action protocol is closed at 71 types"
-assert set(PARAMS_MODELS) == set(ActionType), "every action type needs a params model"
+if len(ActionType) != 71:
+    raise RuntimeError("the C10 action protocol is closed at 71 types")
+if set(PARAMS_MODELS) != set(ActionType):
+    raise RuntimeError("every action type needs a params model")
 
 __all__ = [
     "PARAMS_MODELS",

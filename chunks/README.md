@@ -119,10 +119,17 @@ consecutive sim-years.
          C13 exchange      C15 ventures ───────── M3 complete
               └────────┬────────┘
                        ▼
-       ┌───────┬───────┴───────┬────────┐
-       ▼       ▼               ▼        ▼
-   C16 social C17 news     C18 polity  C19 law ── M4 complete
-       └───────┴───────┬───────┴────────┘
+                  C16 social
+                       │
+                       ▼
+                   C17 news
+                       │
+                       ▼
+                  C18 polity
+                       │
+                       ▼
+                   C19 law ────────────────────── M4 complete
+                       │
                        ▼
                   C20 demography ──────────────── M5 complete
                        │

@@ -8,7 +8,11 @@ from fractions import Fraction
 from typing import Any
 
 from polis.agents.actions.compat import LEGACY_ACTION_TYPES
-from polis.agents.actions.types import Action, ActionType, make_action
+from polis.agents.actions.types import (
+    Action,
+    ActionType,
+    make_legacy_action,
+)
 from polis.agents.state import AgentPopulation
 from polis.config.canon import canonical_json
 from polis.config.mechanisms import mechanism
@@ -475,7 +479,7 @@ class VentureEngine:
                 while remaining:
                     qty = min(remaining, max_order_qty)
                     actions.append(
-                        make_action(
+                        make_legacy_action(
                             actor_id=case.entity_id,
                             tick=tick,
                             action_type=ActionType.SUBMIT_ORDER,

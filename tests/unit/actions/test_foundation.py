@@ -33,7 +33,9 @@ from polis.agents.actions import (
     legal_actions,
     make_action,
 )
+from polis.agents.actions.params.exchange import SubmitOrderParams
 from polis.agents.actions.params.meta import NullActionParams
+from polis.agents.actions.params.ventures import DeclareDividendParams
 from polis.agents.actions.params.world import IdleParams, MoveToParams
 from polis.config.settings import ActionSettings
 from polis.events.kinds import ACTION_REJECTED, ACTION_SUBMITTED
@@ -130,11 +132,11 @@ class StubResolver:
         return ({"type": action_type.value},)
 
 
-def _ctx(actor_id: str = "ag_test") -> ValidationContext:
+def _ctx(actor_id: str = "ag_test", tick: int = 1) -> ValidationContext:
     return ValidationContext(
         observation=SimpleNamespace(place=SimpleNamespace(place_id="pl_test")),
         state=SimpleNamespace(agent_id=actor_id, stage="adult"),
-        tick=1,
+        tick=tick,
     )
 
 
@@ -175,6 +177,47 @@ def test_slot_ledger_uses_the_single_profile_configuration() -> None:
     assert microscope.remaining("ag_test", 2) == 1
     microscope.reset(2)
     assert microscope.remaining("ag_test", 1) == 1
+
+
+def test_action_ids_canonicalize_nested_mapping_order() -> None:
+    first = make_action(
+        actor_id="ag_test",
+        tick=1,
+        action_type=ActionType.IDLE,
+        params={"outer": {"beta": 2, "alpha": 1}, "zeta": 3},
+        origin="deliberate",
+    )
+    second = make_action(
+        actor_id="ag_test",
+        tick=1,
+        action_type=ActionType.IDLE,
+        params={"zeta": 3, "outer": {"alpha": 1, "beta": 2}},
+        origin="deliberate",
+    )
+
+    assert first.action_id == second.action_id
+
+
+def test_money_params_require_positive_values_and_limit_prices() -> None:
+    with pytest.raises(ValidationError):
+        SubmitOrderParams.model_validate({"symbol": "POLIS", "side": "buy", "qty": 1})
+    with pytest.raises(ValidationError):
+        SubmitOrderParams.model_validate(
+            {
+                "symbol": "POLIS",
+                "side": "buy",
+                "qty": 1,
+                "limit_price_cents": 0,
+            }
+        )
+    assert (
+        SubmitOrderParams.model_validate(
+            {"symbol": "POLIS", "side": "buy", "order_type": "market", "qty": 1}
+        ).limit_price_cents
+        is None
+    )
+    with pytest.raises(ValidationError):
+        DeclareDividendParams.model_validate({"firm_id": "fm_test", "total_cents": 0})
 
 
 def test_native_and_external_actions_share_one_validator_and_gate_order() -> None:
@@ -223,6 +266,27 @@ def test_native_and_external_actions_share_one_validator_and_gate_order() -> Non
     ]
 
 
+def test_validator_prunes_slot_counters_when_the_tick_advances() -> None:
+    resolver = StubResolver(InstitutionSlot.MISC, frozenset({ActionType.IDLE}))
+    slots = SlotLedger(1)
+    validator = ActionValidator(_registry(resolver), slots)
+
+    for tick in (1, 2):
+        result = validator.validate(
+            make_action(
+                actor_id="ag_test",
+                tick=tick,
+                action_type=ActionType.IDLE,
+                origin="deliberate",
+            ),
+            _ctx(tick=tick),
+        )
+        assert isinstance(result, ValidatedAction)
+
+    assert slots.remaining("ag_test", 1) == 1
+    assert slots.remaining("ag_test", 2) == 0
+
+
 def test_schema_rejection_spends_a_slot_and_substitutes_null_action() -> None:
     resolver = StubResolver(InstitutionSlot.MISC, frozenset({ActionType.IDLE}))
     collector = Collector()
@@ -269,6 +333,7 @@ def test_schema_rejection_spends_a_slot_and_substitutes_null_action() -> None:
     )
     assert isinstance(exhausted, Rejection)
     assert exhausted.reason == "no_slots"
+    assert collector.drafts[-1].payload["slot_consumed"] is False
 
 
 def test_stale_action_is_rejected_against_the_context_tick_budget() -> None:
@@ -416,6 +481,36 @@ def test_legal_actions_keep_enum_order_and_exclude_unregistered_types() -> None:
     ]
 
 
+def test_legal_actions_match_the_legacy_child_capability_gate() -> None:
+    child_only = frozenset(
+        {
+            ActionType.IDLE,
+            ActionType.SAY,
+            ActionType.TAKE_EXAM,
+            ActionType.BEFRIEND,
+            ActionType.NULL_ACTION,
+        }
+    )
+    resolver = StubResolver(InstitutionSlot.MISC, child_only)
+    child_ctx = ValidationContext(
+        observation=_ctx().observation,
+        state=SimpleNamespace(agent_id="ag_child", stage="child"),
+        tick=1,
+    )
+
+    available = legal_actions(
+        child_ctx.observation,
+        child_ctx.state,
+        _registry(resolver),
+        child_ctx,
+    )
+
+    assert [item.type for item in available] == [
+        ActionType.IDLE,
+        ActionType.NULL_ACTION,
+    ]
+
+
 def test_outcome_ledger_only_exposes_the_previous_tick() -> None:
     ledger = RejectionLedger()
     action = make_action(
@@ -426,17 +521,29 @@ def test_outcome_ledger_only_exposes_the_previous_tick() -> None:
     )
     validated = ValidatedAction(action, IdleParams(), LegalityVerdict(False), 0)
     ledger.record_applied(validated, 1, ("TICK_STARTED",))
+    later_action = make_action(
+        actor_id="ag_test",
+        tick=1,
+        action_type=ActionType.IDLE,
+        origin="deliberate",
+        ordinal=1,
+    )
+    ledger.record_applied(
+        ValidatedAction(later_action, IdleParams(), LegalityVerdict(False), 1),
+        1,
+        ("TICK_ENDED",),
+    )
 
     assert ledger.last_action_outcome("ag_test", 1) is None
     outcome = ledger.last_action_outcome("ag_test", 2)
     assert outcome == ActionOutcome(
-        action_id=action.action_id,
+        action_id=later_action.action_id,
         tick=1,
         type=ActionType.IDLE,
         status="applied",
         reason=None,
         detail=None,
-        effects=("TICK_STARTED",),
+        effects=("TICK_ENDED",),
     )
     ledger.prune(4)
     assert ledger.last_action_outcome("ag_test", 2) is None

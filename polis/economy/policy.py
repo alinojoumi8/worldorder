@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
-from polis.agents.actions.types import Action, ActionType, make_action
+from polis.agents.actions.types import (
+    Action,
+    ActionType,
+    make_legacy_action,
+)
 from polis.agents.state import AgentPopulation
 from polis.config.mechanisms import mechanism
 from polis.config.settings import Settings
@@ -267,7 +271,7 @@ class MechanicalPolicy:
             ordinal: int,
         ) -> None:
             actions.append(
-                make_action(
+                make_legacy_action(
                     actor_id=actor_id,
                     tick=tick,
                     action_type=action_type,
@@ -644,7 +648,7 @@ class MechanicalPolicy:
     ) -> Action:
         ordinal = ordinals.get(actor_id, 0)
         ordinals[actor_id] = ordinal + 1
-        return make_action(
+        return make_legacy_action(
             actor_id=actor_id,
             tick=tick,
             action_type=action_type,

@@ -141,8 +141,10 @@ def _synthesise(schema: Mapping[str, Any], digest: bytes, prompt: str, path: str
     if prefix_match is not None:
         prefix = prefix_match.group(1)
         prompted = ids_from_prompt(prompt).get(prefix, [])
-        if prompted:
-            return prompted[0]
+        candidate_pattern = re.compile(f"^{prefix}_[a-z0-9_]{{1,32}}$")
+        for candidate in prompted:
+            if candidate_pattern.fullmatch(candidate):
+                return candidate
         suffix = hashlib.sha256(digest + path.encode()).hexdigest()[:12]
         return f"{prefix}_{suffix}"
     minimum_length = int(schema.get("minLength", 1))

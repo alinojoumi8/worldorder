@@ -28,10 +28,7 @@ CHILD_ALLOWED: Final[frozenset[ActionType]] = frozenset(
         ActionType.IDLE,
         ActionType.SLEEP,
         ActionType.EAT,
-        ActionType.SAY,
         ActionType.STUDY,
-        ActionType.TAKE_EXAM,
-        ActionType.BEFRIEND,
         ActionType.NULL_ACTION,
     }
 )

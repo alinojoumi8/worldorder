@@ -1,5 +1,6 @@
 import json
 import math
+import re
 
 import pytest
 
@@ -121,6 +122,35 @@ async def test_stub_honours_every_typed_action_contract(action_type: ActionType)
     response = await StubProvider().complete(typed_request)
 
     assert json.loads(response.text)["action"]["type"] == action_type.value
+
+
+@pytest.mark.asyncio
+async def test_stub_replaces_prompted_ids_that_violate_the_schema_pattern() -> None:
+    typed_request = CompletionRequest(
+        purpose="DELIBERATE",
+        system="Return a place.",
+        user="Places: pl_BAD-ID",
+        schema={
+            "type": "object",
+            "required": ["place_id"],
+            "additionalProperties": False,
+            "properties": {
+                "place_id": {
+                    "type": "string",
+                    "pattern": r"^pl_[a-z0-9_]{1,32}$",
+                }
+            },
+        },
+        sampling=SamplingParams(temperature=0.8, seed=10),
+        call_seed=10,
+        timeout_s=1,
+    )
+
+    response = await StubProvider().complete(typed_request)
+    place_id = json.loads(response.text)["place_id"]
+
+    assert place_id != "pl_BAD-ID"
+    assert re.fullmatch(r"pl_[a-z0-9_]{1,32}", place_id)
 
 
 def test_legal_action_parser_is_scoped() -> None:

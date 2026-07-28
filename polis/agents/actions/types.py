@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
+from polis.config.canon import canonical_json
 from polis.kernel.det import det_uuid
 
 if TYPE_CHECKING:
@@ -200,6 +201,44 @@ def make_action(
     sig: str | None = None,
     ordinal: int = 0,
 ) -> Action:
+    normalized_params = dict(params or {})
+    action_id = det_uuid(
+        "polis.action",
+        actor_id,
+        tick,
+        ordinal,
+        action_type.value,
+        canonical_json(normalized_params),
+    )
+    return Action(
+        action_id,
+        actor_id,
+        tick,
+        action_type,
+        normalized_params,
+        origin,
+        salience,
+        reasoning,
+        speech,
+        sig,
+    )
+
+
+def make_legacy_action(
+    *,
+    actor_id: str,
+    tick: int,
+    action_type: ActionType,
+    params: Mapping[str, Any] | None = None,
+    origin: ActionOrigin = "reflex",
+    salience: float = 0,
+    reasoning: str | None = "",
+    speech: str | None = None,
+    sig: str | None = None,
+    ordinal: int = 0,
+) -> Action:
+    """Preserve the M1-M3 action-id representation for frozen replay hashes."""
+
     normalized_params = dict(params or {})
     action_id = det_uuid(
         "polis.action",

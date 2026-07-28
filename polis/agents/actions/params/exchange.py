@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from polis.agents.actions.params.base import ActionParams, Cents
+from polis.agents.actions.params.base import ActionParams, PositiveCents
 
 
 class SubmitOrderParams(ActionParams):
@@ -12,8 +12,14 @@ class SubmitOrderParams(ActionParams):
     side: Literal["buy", "sell"]
     order_type: Literal["limit", "market"] = "limit"
     qty: int = Field(ge=1)
-    limit_price_cents: Cents | None = None
+    limit_price_cents: PositiveCents | None = None
     flags: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def limit_orders_require_price(self) -> SubmitOrderParams:
+        if self.order_type == "limit" and self.limit_price_cents is None:
+            raise ValueError("limit_price_cents is required for limit orders")
+        return self
 
 
 class CancelOrderParams(ActionParams):
