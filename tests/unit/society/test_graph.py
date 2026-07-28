@@ -191,3 +191,12 @@ def test_end_all_for_closes_every_live_tie_for_agent() -> None:
     assert len(events) == 2
     assert {event.kind for event in events} == {TIE_ENDED}
     assert graph.neighbours("a") == ()
+
+
+def test_strong_ties_deduplicates_counterparts_across_tie_types() -> None:
+    repo = MemoryGraphRepository()
+    graph = make_graph("microscope", repo)
+    repo.put(Tie("a", "b", "friend", 0.8, 0.2, 0.8, 0, None, 0))
+    repo.put(Tie("a", "b", "colleague", 0.7, 0.1, 0.7, 0, None, 0))
+
+    assert graph.strong_ties("a", 0.5) == ("b",)

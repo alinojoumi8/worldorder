@@ -978,7 +978,7 @@ class ObservatorySettings(FrozenModel):
 
 
 class FertilitySettings(FrozenModel):
-    peak_age: int = Field(default=28, ge=16, le=45)
+    peak_age: int = Field(default=28, ge=0, le=120)
     band: tuple[int, int] = (16, 45)
     kappa_income: dict[str, float] = {"a": 0.6, "b": 0.8}
     kappa_parity: tuple[float, ...] = (1.0, 0.85, 0.6, 0.35, 0.15, 0.05)

@@ -579,8 +579,10 @@ class SocialGraph:
     def strong_ties(self, agent_id: str, threshold: float) -> tuple[str, ...]:
         return tuple(
             sorted(
-                row.b_id if row.a_id == agent_id else row.a_id
-                for row in self.neighbours(agent_id, min_strength=threshold)
+                {
+                    row.b_id if row.a_id == agent_id else row.a_id
+                    for row in self.neighbours(agent_id, min_strength=threshold)
+                }
             )
         )
 

@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import pytest
 
+from polis.agents.demography import Household
 from polis.economy.fiscal import government_transfer_legs
 from polis.economy.ledger import parse_account_id
-from polis.events.kinds import HOUSEHOLD_FORMED, UNION_DISSOLVED, UNION_FORMED
+from polis.events.kinds import (
+    HOUSEHOLD_FORMED,
+    HOUSEHOLD_LEFT,
+    UNION_DISSOLVED,
+    UNION_FORMED,
+)
 from tests.demography_support import demography_result
 
 
@@ -41,6 +47,13 @@ async def test_unilateral_dissolution_splits_only_post_union_gains() -> None:
     assert household is not None
     assert partner_household is not None
     assert household.household_id == partner_household.household_id
+    observer = next(
+        agent
+        for agent in adults[1:]
+        if agent.agent_id not in {a.agent_id, b.agent_id}
+        and agent.household_id != household.household_id
+    )
+    households.join(observer.agent_id, household.household_id, "shared_home", 2)
     principal = {
         agent_id: result.economy.ledger.liquid(agent_id) for agent_id in (a.agent_id, b.agent_id)
     }
@@ -72,8 +85,11 @@ async def test_unilateral_dissolution_splits_only_post_union_gains() -> None:
     events = registry.dissolve_union(a.agent_id, b.agent_id, 3)
 
     assert any(event.kind == UNION_DISSOLVED for event in events)
-    assert sum(event.kind == HOUSEHOLD_FORMED for event in events) == 2
+    assert sum(event.kind == HOUSEHOLD_FORMED for event in events) == 3
     assert result.demography.graph.live_partner(a.agent_id) is None
+    observer_household = households.of(observer.agent_id)
+    assert observer_household is not None
+    assert observer_household.member_ids == (observer.agent_id,)
     assert result.economy.ledger.liquid(a.agent_id) == (
         principal[a.agent_id] + expected_gains[a.agent_id]
     )
@@ -132,3 +148,43 @@ async def test_agent_leaves_home_when_crossing_independence_threshold() -> None:
     new_household = households.of(candidate.agent_id)
     assert new_household is not None
     assert new_household.member_ids == (candidate.agent_id,)
+
+
+@pytest.mark.asyncio
+async def test_state_care_uses_only_the_canonical_headless_household() -> None:
+    result = await demography_result()
+    assert result.demography is not None
+    households = result.demography.households
+    shelter = result.world.places_of_type("shelter")[0]
+    households.households["hh_private_shelter"] = Household(
+        "hh_private_shelter",
+        1,
+        None,
+        shelter.place_id,
+        (),
+        None,
+        "shelter",
+        0,
+    )
+
+    state = households.state_household(2)
+    child = next(agent for agent in result.population.alive() if agent.age_years < 18)
+    joined = households.join(child.agent_id, state.household_id, "state_care", 2)
+    updated = households.households[state.household_id]
+
+    assert state.household_id != "hh_private_shelter"
+    assert updated.head_agent_id is None
+    assert joined.payload["household_id"] == state.household_id
+
+
+@pytest.mark.asyncio
+async def test_household_reformation_records_departures_before_formation() -> None:
+    result = await demography_result()
+    assert result.demography is not None
+    households = result.demography.households
+    members = tuple(agent.agent_id for agent in result.population.alive()[:2])
+
+    _, events = households.form(members, 2, reason="test_reformation")
+
+    assert sum(event.kind == HOUSEHOLD_LEFT for event in events) == 2
+    assert events[-1].kind == HOUSEHOLD_FORMED

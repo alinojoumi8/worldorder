@@ -14,6 +14,9 @@ from polis.events.kinds import (
     ESTATE_DEBTS_SETTLED,
     ESTATE_DISTRIBUTED,
     ESTATE_OPENED,
+    HOUSEHOLD_LEFT,
+    LOAN_PAYMENT_MADE,
+    LOAN_REPAID,
     LOAN_WRITTEN_OFF,
     PAYROLL_SHORTFALL,
     WAGE_PAID,
@@ -69,6 +72,54 @@ async def test_death_settles_accrued_wages_before_closing_accounts() -> None:
     assert employment.ended_tick == 6
     assert any(event.kind == WAGE_PAID for event in events)
     assert check_money(result.economy.ledger, result.economy).invariant_id == "INV-MONEY"
+
+
+@pytest.mark.asyncio
+async def test_terminal_wage_reopens_a_missing_deposit_account() -> None:
+    result = await demography_result(ticks=5)
+    assert result.demography is not None and result.economy is not None
+    settler = result.demography.institution.estate
+    employment = next(
+        row
+        for row in result.economy.employments.values()
+        if row.ended_tick is None and settler.estate.case_for(row.agent_id, 6) != "A"
+    )
+    treasury = next(
+        account
+        for account in result.economy.ledger.accounts_of("gv_treasury")
+        if parse_account_id(account)[0] == "dep"
+    )
+    cause = settler.log.stage(
+        NewEvent(
+            HOUSEHOLD_LEFT,
+            {
+                "agent_id": employment.agent_id,
+                "household_id": result.population[employment.agent_id].household_id,
+                "reason": "test_account_cleanup",
+            },
+            actor_id=employment.agent_id,
+            subject_ids=(employment.agent_id,),
+        ),
+        tick=6,
+        sim_time=settler.clock.sim_time_at(6),
+    )
+    for account in result.economy.ledger.accounts_of(employment.agent_id):
+        if parse_account_id(account)[0] != "dep":
+            continue
+        balance = result.economy.ledger.balance(account)
+        if balance:
+            result.economy.ledger.post_transaction(
+                result.economy.ledger.transfer(account, treasury, balance, "transfer"),
+                tick=6,
+                cause=cause,
+            )
+        result.economy.ledger.close_account(account, tick=6)
+    employment.accrued_wage_cents = 1_000
+
+    _estate, events = settler.settle(employment.agent_id, "mortality", 6)
+
+    assert any(event.kind == WAGE_PAID for event in events)
+    assert employment.accrued_wage_cents == 0
 
 
 @pytest.mark.asyncio
@@ -160,6 +211,48 @@ async def test_insolvent_death_writes_off_credit_without_moving_cash() -> None:
     assert estate.written_off_cents == 1_000_000
     assert any(event.kind == LOAN_WRITTEN_OFF for event in events)
     assert money_after == money_before
+
+
+@pytest.mark.asyncio
+async def test_fully_recovered_estate_loan_reports_payment_and_repayment() -> None:
+    result = await demography_result()
+    assert result.demography is not None and result.economy is not None
+    settler = result.demography.institution.estate
+    port = settler.estate
+    borrower = max(
+        (agent for agent in result.population.alive() if port.case_for(agent.agent_id, 2) == "C"),
+        key=lambda agent: result.economy.ledger.liquid(agent.agent_id),
+    )
+    lender = min(bank.bank_id for bank in result.economy.banks.values() if not bank.is_central)
+
+    def emit(draft: NewEvent):
+        return settler.log.stage(
+            draft,
+            tick=2,
+            sim_time=settler.clock.sim_time_at(2),
+        )
+
+    originate(
+        LoanRequest(
+            borrower.agent_id,
+            lender,
+            1_000,
+            "consumer",
+            360,
+            {},
+            1_000_000,
+        ),
+        LoanDecision(True, 8_000, {}, 1_000, 500, 360, ()),
+        2,
+        ctx=port.credit,
+        emit=emit,
+    )
+
+    estate, events = settler.settle(borrower.agent_id, "mortality", 3)
+
+    assert estate.debts_cents == 1_000
+    assert any(event.kind == LOAN_PAYMENT_MADE for event in events)
+    assert any(event.kind == LOAN_REPAID for event in events)
 
 
 @pytest.mark.asyncio

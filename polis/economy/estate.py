@@ -279,16 +279,16 @@ class EconomyEstatePort:
             available = self._estate_liquid(agent_id)
             recovery = min(available, loan.outstanding_cents)
             if recovery:
-                event = self._pay_loan(
+                payment_events = self._pay_loan(
                     loan,
                     recovery,
                     tick,
                     emit,
                     cause=ctx.cause_event,
                 )
-                events.append(event)
+                events.extend(payment_events)
                 ctx.paid_cents += recovery
-                ctx.txn_ids.append(str(event.payload["txn_id"]))
+                ctx.txn_ids.append(str(payment_events[0].payload["txn_id"]))
             residual = loan.outstanding_cents
             if residual:
                 written = write_off_loan(
@@ -542,10 +542,10 @@ class EconomyEstatePort:
                 subject_ids=(employment.agent_id,),
             )
         )
-        destination = next(
-            account
-            for account in self.economy.ledger.accounts_of(employment.agent_id)
-            if parse_account_id(account)[0] == "dep" and self.economy.ledger.is_open(account)
+        destination = self._ensure_liquid_account(
+            employment.agent_id,
+            bank_of(firm.ledger_account_id),
+            tick,
         )
         legs: list[Leg] = []
         if gross > income_tax:
@@ -559,10 +559,10 @@ class EconomyEstatePort:
             )
         tax_total = income_tax + employer_tax
         if tax_total:
-            treasury = next(
-                account
-                for account in self.economy.ledger.accounts_of("gv_treasury")
-                if parse_account_id(account)[0] == "dep" and self.economy.ledger.is_open(account)
+            treasury = self._ensure_liquid_account(
+                "gv_treasury",
+                bank_of(firm.ledger_account_id),
+                tick,
             )
             legs.extend(
                 self.economy.ledger.transfer(
@@ -596,7 +596,7 @@ class EconomyEstatePort:
         emit: Emit,
         *,
         cause: Event | None,
-    ) -> Event:
+    ) -> tuple[Event, ...]:
         source = (
             self._source_with_balance(loan.borrower_id, cents)
             if loan.lender_id == "gv_treasury"
@@ -644,23 +644,26 @@ class EconomyEstatePort:
             raise RuntimeError("estate loan payment ordinal diverged")
         loan.outstanding_cents -= cents
         loan.payments_made += 1
+        events = [event]
         if loan.outstanding_cents == 0:
             loan.status = "repaid"
             loan.closed_tick = tick
-            emit(
-                NewEvent(
-                    LOAN_REPAID,
-                    {
-                        "loan_id": loan.loan_id,
-                        "total_interest_cents": loan.total_interest_paid_cents,
-                        "ticks_to_repay": tick - loan.originated_tick,
-                        "early": tick < loan.matures_tick,
-                    },
-                    actor_id=loan.borrower_id,
-                    subject_ids=(loan.lender_id,),
+            events.append(
+                emit(
+                    NewEvent(
+                        LOAN_REPAID,
+                        {
+                            "loan_id": loan.loan_id,
+                            "total_interest_cents": loan.total_interest_paid_cents,
+                            "ticks_to_repay": tick - loan.originated_tick,
+                            "early": tick < loan.matures_tick,
+                        },
+                        actor_id=loan.borrower_id,
+                        subject_ids=(loan.lender_id,),
+                    )
                 )
             )
-        return event
+        return tuple(events)
 
     def _source_with_balance(self, owner_id: str, cents: int) -> str:
         source = next(

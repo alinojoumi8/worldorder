@@ -15,6 +15,7 @@ from polis.agents.types import (
     Traits,
 )
 from polis.config.settings import PopulationSettings
+from polis.kernel.det import det_id
 from polis.kernel.rng import RngRegistry
 from polis.world.api import Location, World
 
@@ -121,6 +122,10 @@ def advance_age(
 ) -> float:
     if elapsed_sim_days < 0:
         raise ValueError("elapsed_sim_days must be non-negative")
+    if demographic_acceleration < 0:
+        raise ValueError("demographic_acceleration must be non-negative")
+    if days_per_sim_year <= 0:
+        raise ValueError("days_per_sim_year must be positive")
     agent.age_years += elapsed_sim_days * demographic_acceleration / days_per_sim_year
     return agent.age_years
 
@@ -155,6 +160,17 @@ def inherit_traits(
 
 def mark_dead(*_args: object, **_kwargs: object) -> None:
     raise RuntimeError("C20 EstateSettler is the only supported death path")
+
+
+def assign_genesis_household_ids(population: AgentPopulation) -> None:
+    members_by_home: dict[str, list[str]] = {}
+    for agent in population.alive():
+        members_by_home.setdefault(agent.home_place_id, []).append(agent.agent_id)
+    for home_place_id, member_ids in sorted(members_by_home.items()):
+        ordered = tuple(sorted(member_ids))
+        household_id = det_id("hh", "demography.genesis", home_place_id, *ordered)
+        for agent_id in ordered:
+            population[agent_id].household_id = household_id
 
 
 def generate_agents(
@@ -207,7 +223,9 @@ def generate_agents(
             home.y,
         )
     world.freeze_occupancy()
-    return AgentPopulation(agents)
+    population = AgentPopulation(agents)
+    assign_genesis_household_ids(population)
+    return population
 
 
 initialise_population = generate_agents

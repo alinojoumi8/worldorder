@@ -19,6 +19,7 @@ from polis.agents.actions import (
 )
 from polis.agents.genesis import (
     advance_age,
+    assign_genesis_household_ids,
     derive_reflex_profile,
     inherit_traits,
     population_mean_traits,
@@ -61,6 +62,7 @@ from polis.events.kinds import (
     MORTALITY_HAZARD_DRAWN,
     PREGNANCY_ENDED,
     STATE_CARE_STARTED,
+    TIE_ENDED,
     UNION_DISSOLVED,
     UNION_FORMED,
 )
@@ -191,12 +193,15 @@ class HouseholdRegistry:
         self.households: dict[str, Household] = {}
 
     def bootstrap(self) -> None:
+        assign_genesis_household_ids(self.agents)
         grouped: dict[str, list[str]] = defaultdict(list)
         for agent in self.agents.alive():
-            grouped[agent.home_place_id].append(agent.agent_id)
-        for home_place_id, members in sorted(grouped.items()):
+            if agent.household_id is None:
+                raise RuntimeError(f"genesis household was not assigned for {agent.agent_id}")
+            grouped[agent.household_id].append(agent.agent_id)
+        for household_id, members in sorted(grouped.items()):
             ordered = tuple(sorted(members))
-            household_id = det_id("hh", "demography.genesis", home_place_id, *ordered)
+            home_place_id = self.agents[ordered[0]].home_place_id
             head = min(
                 ordered,
                 key=lambda agent_id: (-self.agents[agent_id].age_years, agent_id),
@@ -280,10 +285,11 @@ class HouseholdRegistry:
             self._baseline(members),
         )
         self.households[household_id] = row
+        events: list[Event] = []
         for agent_id in members:
             prior = self.of(agent_id)
             if prior is not None and prior.household_id != household_id:
-                self._remove_member(prior, agent_id)
+                events.append(self.leave(agent_id, f"reformed:{reason}", tick))
             agent = self.agents[agent_id]
             agent.household_id = household_id
             agent.home_place_id = home_place_id
@@ -305,7 +311,7 @@ class HouseholdRegistry:
             },
             subjects=members,
         )
-        return row, (event,)
+        return row, (*events, event)
 
     def join(self, agent_id: str, household_id: str, reason: str, tick: int) -> Event:
         row = self.households[household_id]
@@ -313,7 +319,7 @@ class HouseholdRegistry:
             raise ValueError("cannot join a dissolved household")
         prior = self.of(agent_id)
         if prior is not None and prior.household_id != household_id:
-            self._remove_member(prior, agent_id)
+            self.leave(agent_id, f"joined:{reason}", tick)
         members = tuple(sorted({*row.member_ids, agent_id}))
         self.households[household_id] = Household(
             row.household_id,
@@ -321,7 +327,9 @@ class HouseholdRegistry:
             None,
             row.home_place_id,
             members,
-            row.head_agent_id or agent_id,
+            row.head_agent_id
+            if row.head_agent_id is not None
+            else (None if row.tenure == "shelter" else agent_id),
             row.tenure,
             row.rent_cents,
             {**row.joint_baseline_cents, agent_id: self._baseline((agent_id,))[agent_id]},
@@ -468,21 +476,14 @@ class HouseholdRegistry:
         return len(row.member_ids) < self.world.place(row.home_place_id).capacity
 
     def state_household(self, tick: int) -> Household:
-        existing = next(
-            (
-                row
-                for row in self.households.values()
-                if row.tenure == "shelter" and row.dissolved_at_tick is None
-            ),
-            None,
-        )
-        if existing is not None:
-            return existing
         shelters = self.world.places_of_type("shelter")
         if not shelters:
             raise RuntimeError("state household requires a shelter place")
         place = shelters[0]
         household_id = det_id("hh", "demography.state", place.place_id)
+        existing = self.households.get(household_id)
+        if existing is not None and existing.dissolved_at_tick is None:
+            return existing
         row = Household(
             household_id,
             tick,
@@ -598,10 +599,13 @@ class CourtshipRegistry:
     def court(self, initiator_id: str, target_id: str, tick: int) -> Sequence[Event]:
         key = self._key(initiator_id, target_id)
         row = self.rows.get(key)
+        created = row is None
         if row is None:
             row = Courtship(key[0], key[1], tick)
             self.rows[key] = row
         row.latest[initiator_id] = tick
+        if not created:
+            return ()
         location = self.world.locations.get(initiator_id)
         return (
             _stage(
@@ -671,16 +675,19 @@ class CourtshipRegistry:
         row = self.rows[key]
         if self.graph.live_partner(a_id) is not None or self.graph.live_partner(b_id) is not None:
             return ()
+        household_ids = {
+            household_id
+            for household_id in (
+                self.agents[a_id].household_id,
+                self.agents[b_id].household_id,
+            )
+            if household_id is not None
+        }
         dependants = tuple(
             sorted(
                 agent.agent_id
                 for agent in self.agents.alive()
-                if agent.age_years < 18
-                and agent.household_id
-                in {
-                    self.agents[a_id].household_id,
-                    self.agents[b_id].household_id,
-                }
+                if agent.age_years < 18 and agent.household_id in household_ids
             )
         )
         household, household_events = self.households.form(
@@ -753,6 +760,13 @@ class CourtshipRegistry:
             self.pending,
             key=lambda item: (item[0].value, item[1], item[2]),
         ):
+            actor = self.agents.agents.get(actor_id)
+            if actor is None or not actor.alive:
+                continue
+            if action_type != ActionType.HAVE_CHILD_INTENT:
+                target = self.agents.agents.get(target_id)
+                if target is None or not target.alive:
+                    continue
             if action_type == ActionType.COURT:
                 events.extend(self.court(actor_id, target_id, tick))
             elif action_type == ActionType.PROPOSE_UNION:
@@ -775,6 +789,14 @@ class CourtshipRegistry:
                 for agent_id in household.member_ids
                 if agent_id not in {initiator_id, target_id}
                 and self.agents[agent_id].age_years < 18
+            )
+        )
+        other_adults = tuple(
+            sorted(
+                agent_id
+                for agent_id in household.member_ids
+                if agent_id not in {initiator_id, target_id, *dependants}
+                and self.agents[agent_id].alive
             )
         )
         custody_parent = self.households.custody_parent(
@@ -830,6 +852,13 @@ class CourtshipRegistry:
         for parent_id in sorted((initiator_id, target_id)):
             _, formed = self.households.form(
                 (parent_id, *dependants) if parent_id == custody_parent else (parent_id,),
+                tick,
+                reason="dissolution",
+            )
+            events.extend(formed)
+        for adult_id in other_adults:
+            _, formed = self.households.form(
+                (adult_id,),
                 tick,
                 reason="dissolution",
             )
@@ -1035,6 +1064,8 @@ class Fertility:
         self.heritability_beliefs = heritability_beliefs
         self.hazard_mode = hazard_mode
         self.pregnancies: dict[str, Pregnancy] = {}
+        self._income_cache_tick: int | None = None
+        self._income_distribution: tuple[int, ...] = ()
 
     @mechanism(
         "fertility_hazard",
@@ -1051,11 +1082,16 @@ class Fertility:
         income = (
             0 if household is None else self.households.income_cents(household.household_id, tick)
         )
-        incomes = sorted(
-            self.households.income_cents(row.household_id, tick)
-            for row in self.households.households.values()
-            if row.dissolved_at_tick is None
-        )
+        if self._income_cache_tick != tick:
+            self._income_distribution = tuple(
+                sorted(
+                    self.households.income_cents(row.household_id, tick)
+                    for row in self.households.households.values()
+                    if row.dissolved_at_tick is None
+                )
+            )
+            self._income_cache_tick = tick
+        incomes = self._income_distribution
         rank = sum(value < income for value in incomes)
         q = 0.5 if not incomes else rank / max(1, len(incomes) - 1)
         income_multiplier = (
@@ -1465,7 +1501,7 @@ class ChildCosts:
                 if government_due:
                     self.ledger.record_government_spending(government_due, tick)
             events.append(charged)
-            if updated.arrears_cents > (self.cfg.child.arrears_tolerance_sim_days * max(1, due)):
+            if updated.arrears_cents > (self.cfg.child.arrears_tolerance_sim_days * max(1, amount)):
                 for child_id in children:
                     child = self.agents[child_id]
                     child.health = max(0.0, child.health - 0.002)
@@ -1570,6 +1606,8 @@ class EstateSettler:
         self.graph = graph
         self.memories = memories
         self.cfg = cfg
+        self._wealth_cache_tick: int | None = None
+        self._wealth_distribution: tuple[int, ...] = ()
 
     @mechanism(
         "mortality_hazard",
@@ -1577,29 +1615,37 @@ class EstateSettler:
         config_key="mechanisms.mortality_hazard",
     )
     def mortality_hazard(self, agent: AgentState, tick: int) -> float:
-        del tick
         if not agent.alive:
             return 0.0
         age_component = 0.000001 + 0.0000002 * math.exp(min(12.0, 0.095 * agent.age_years))
-        wealths = sorted(row.wealth_cents for row in self.agents.alive())
+        wealths = self._wealths_at(tick)
         wealth_rank = sum(value < agent.wealth_cents for value in wealths)
         wealth_pct = 0.5 if len(wealths) < 2 else wealth_rank / (len(wealths) - 1)
         health_component = 2.0 - max(0.0, min(1.0, agent.health))
         wealth_component = 1.25 - 0.5 * wealth_pct
-        location = self.world.locations.get(agent.agent_id)
-        district_crime = 0.0
-        if location is not None:
-            district = next(
-                (row for row in self.world.districts if row.district_id == location.district_id),
-                None,
-            )
-            district_crime = (
-                0.0 if district is None else float(getattr(district, "crime_rate", 0.0))
-            )
+        district_crime = self._district_crime(agent)
         return min(
             0.25,
             age_component * health_component * wealth_component * (1.0 + district_crime),
         )
+
+    def _wealths_at(self, tick: int) -> tuple[int, ...]:
+        if self._wealth_cache_tick != tick:
+            self._wealth_distribution = tuple(
+                sorted(row.wealth_cents for row in self.agents.alive())
+            )
+            self._wealth_cache_tick = tick
+        return self._wealth_distribution
+
+    def _district_crime(self, agent: AgentState) -> float:
+        location = self.world.locations.get(agent.agent_id)
+        if location is None:
+            return 0.0
+        district = next(
+            (row for row in self.world.districts if row.district_id == location.district_id),
+            None,
+        )
+        return 0.0 if district is None else float(getattr(district, "crime_rate", 0.0))
 
     def mortality_draw(self, agent: AgentState, tick: int) -> tuple[float, float]:
         hazard = self.mortality_hazard(agent, tick)
@@ -1616,8 +1662,8 @@ class EstateSettler:
                 "components": {
                     "age": agent.age_years,
                     "health": agent.health,
-                    "wealth_pct": self._wealth_percentile(agent),
-                    "district_crime": 0.0,
+                    "wealth_pct": self._wealth_percentile(agent, tick),
+                    "district_crime": self._district_crime(agent),
                 },
                 "routed_mode": agent.cognition_mode,
             },
@@ -1626,8 +1672,8 @@ class EstateSettler:
         )
         return hazard, draw
 
-    def _wealth_percentile(self, agent: AgentState) -> float:
-        wealths = sorted(row.wealth_cents for row in self.agents.alive())
+    def _wealth_percentile(self, agent: AgentState, tick: int) -> float:
+        wealths = self._wealths_at(tick)
         if len(wealths) < 2:
             return 0.5
         return sum(value < agent.wealth_cents for value in wealths) / (len(wealths) - 1)
@@ -2095,7 +2141,12 @@ class Migration:
 
     def depart(self, agent_id: str, tick: int) -> Sequence[Event]:
         exit_wealth = max(0, self.estate.ledger.liquid(agent_id))
-        _estate, settlement_events = self.estate.settle(agent_id, "emigrated", tick)
+        strong_ties = self.estate.graph.strong_ties(
+            agent_id,
+            self.estate.cfg.bereavement.strong_tie_threshold,
+        )
+        estate, settlement_events = self.estate.settle(agent_id, "emigrated", tick)
+        ties_severed = sum(event.kind == TIE_ENDED for event in settlement_events)
         event = _stage(
             self.log,
             self.clock,
@@ -2105,12 +2156,12 @@ class Migration:
                 "agent_id": agent_id,
                 "hazard_components": {
                     "wealth_cents": self.agents[agent_id].wealth_cents,
-                    "strong_ties": 0,
+                    "strong_ties": len(strong_ties),
                 },
                 "exit_wealth_cents": exit_wealth,
-                "ties_severed": 0,
-                "debts_settled_cents": 0,
-                "debts_defaulted_cents": 0,
+                "ties_severed": ties_severed,
+                "debts_settled_cents": estate.debts_cents,
+                "debts_defaulted_cents": estate.written_off_cents,
             },
             actor_id=agent_id,
             subjects=(agent_id,),

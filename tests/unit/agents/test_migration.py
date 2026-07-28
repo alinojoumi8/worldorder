@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from polis.events.kinds import MIGRATION_IN
+from polis.events.kinds import MIGRATION_IN, MIGRATION_OUT
+from polis.society.graph import Tie
 from tests.demography_support import demography_result
 
 
@@ -17,3 +18,34 @@ async def test_monthly_migrants_have_numeric_ids_and_zero_ties() -> None:
     for agent_id in migrant_ids:
         assert agent_id.removeprefix("ag_").isdigit()
         assert result.demography.graph.strong_ties(agent_id, 0.0) == ()
+
+
+@pytest.mark.asyncio
+async def test_emigration_reports_ties_severed_from_the_settlement() -> None:
+    result = await demography_result()
+    assert result.demography is not None
+    migration = result.demography.institution.migration
+    adults = sorted(
+        (agent for agent in result.population.alive() if agent.age_years >= 18),
+        key=lambda row: row.agent_id,
+    )
+    emigrant, partner = adults[:2]
+    result.demography.graph.repo.put(
+        Tie(
+            emigrant.agent_id,
+            partner.agent_id,
+            "partner",
+            0.8,
+            0.5,
+            0.8,
+            2,
+            None,
+            2,
+        )
+    )
+
+    events = migration.depart(emigrant.agent_id, 2)
+    migrated = next(event for event in events if event.kind == MIGRATION_OUT)
+
+    assert migrated.payload["hazard_components"]["strong_ties"] == 1
+    assert migrated.payload["ties_severed"] == 1

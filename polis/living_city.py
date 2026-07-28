@@ -52,7 +52,6 @@ from polis.events.log import EphemeralSink, EventLog, EventSink, MemoryEventSink
 from polis.events.sampling import CognitionSampler
 from polis.events.types import Event, NewEvent
 from polis.kernel.clock import Clock, profile_from_settings
-from polis.kernel.det import det_id
 from polis.kernel.invariants import InvariantRunner
 from polis.kernel.rng import RngRegistry
 from polis.kernel.scheduler import Scheduler
@@ -698,14 +697,6 @@ async def run_living_city(
     rng = RngRegistry(settings.run.seed)
     world = generate_world(settings.world, rng)
     population = generate_agents(settings.population, world, rng)
-    members_by_home: dict[str, list[str]] = {}
-    for agent in population:
-        members_by_home.setdefault(agent.home_place_id, []).append(agent.agent_id)
-    for home_place_id, member_ids in sorted(members_by_home.items()):
-        ordered = tuple(sorted(member_ids))
-        household_id = det_id("hh", "demography.genesis", home_place_id, *ordered)
-        for agent_id in ordered:
-            population[agent_id].household_id = household_id
     memory = MemoryStore(settings.memory)
     metrics = MetricCollector()
     actual_sink: EventSink

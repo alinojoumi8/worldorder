@@ -32,7 +32,15 @@ async def test_intestacy_is_exact_for_ten_thousand_odd_and_even_estates() -> Non
         cents = stream.randrange(0, 10_000_000)
         shares = dict(estate.intestacy_shares(decedent.agent_id, cents))
         assert sum(shares.values()) == cents
+        assert set(shares) == {
+            partner.agent_id,
+            child_a.agent_id,
+            child_b.agent_id,
+        }
         assert shares[partner.agent_id] in {cents // 2, (cents + 1) // 2}
+        assert (
+            shares[child_a.agent_id] + shares[child_b.agent_id] == cents - shares[partner.agent_id]
+        )
         assert abs(shares[child_a.agent_id] - shares[child_b.agent_id]) <= 1
 
 

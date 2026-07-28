@@ -115,11 +115,10 @@ class DemographyGraphPort:
         return self.graph.live_partner(agent_id)
 
     def dump(self) -> Mapping[str, Any]:
-        return copy.deepcopy(self.graph.__dict__)
+        return {"ties": copy.deepcopy(self.graph.repo.all())}
 
     def load(self, state: Mapping[str, object]) -> None:
-        self.graph.__dict__.clear()
-        self.graph.__dict__.update(copy.deepcopy(cast(dict[str, Any], state)))
+        self.graph.repo = MemoryGraphRepository(copy.deepcopy(cast(Sequence[Any], state["ties"])))
 
 
 @dataclass(slots=True)
