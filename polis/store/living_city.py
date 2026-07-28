@@ -107,6 +107,7 @@ async def _clear_projections(db: Database, run_id: Any) -> None:
         "metrics",
         "beliefs",
         "memories",
+        "households",
         "agents",
         "tiles",
         "places",
@@ -140,6 +141,23 @@ async def write_living_city_projections(
         if event.kind in {ORDER_CANCELLED, ORDER_EXPIRED, ORDER_FILLED}
         and "order_id" in event.payload
     }
+
+    def projected_location(
+        agent_id: str, home_place_id: str
+    ) -> tuple[str, str, int, int, str | None, int | None]:
+        location = result.world.locations.get(agent_id)
+        if location is not None:
+            return (
+                location.district_id,
+                location.place_id or home_place_id,
+                location.x,
+                location.y,
+                location.dest_place_id,
+                location.path_cursor,
+            )
+        home = result.world.place(home_place_id)
+        return home.district_id, home.place_id, home.x, home.y, None, 0
+
     async with db.txn() as connection, connection.cursor() as cursor:
         await cursor.executemany(
             """
@@ -211,21 +229,22 @@ async def write_living_city_projections(
                 state,as_of_tick,as_of_seq,display_name,kind,traits,needs,health,
                 home_place_id,current_place_id,pos_x,pos_y,dest_place_id,path_cursor,
                 education_level,employment_status,wealth_cents,reputation,
-                reflex_profile,goals,cognition_mode
+                reflex_profile,goals,cognition_mode,household_id,mother_id,
+                father_id,generation,died_at_tick,death_cause
             ) VALUES(
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                %s,%s,%s,%s,%s,%s,%s,%s
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
             )
             """,
             [
                 (
                     run_id,
                     agent.agent_id,
-                    0,
-                    None,
+                    agent.born_tick,
+                    agent.died_at_tick,
                     int(agent.age_years),
-                    result.world.locations[agent.agent_id].district_id,
-                    result.world.locations[agent.agent_id].place_id or "",
+                    location[0],
+                    location[1],
                     Jsonb(
                         {
                             "skills": agent.skills,
@@ -241,11 +260,11 @@ async def write_living_city_projections(
                     Jsonb(agent.needs.as_dict()),
                     agent.health,
                     agent.home_place_id,
-                    result.world.locations[agent.agent_id].place_id,
-                    result.world.locations[agent.agent_id].x,
-                    result.world.locations[agent.agent_id].y,
-                    result.world.locations[agent.agent_id].dest_place_id,
-                    result.world.locations[agent.agent_id].path_cursor,
+                    location[1],
+                    location[2],
+                    location[3],
+                    location[4],
+                    location[5],
                     agent.education_level,
                     agent.employment_status,
                     agent.wealth_cents,
@@ -253,10 +272,48 @@ async def write_living_city_projections(
                     Jsonb(agent.reflex_profile.as_dict()),
                     Jsonb(agent.goals),
                     agent.cognition_mode,
+                    agent.household_id,
+                    agent.mother_id,
+                    agent.father_id,
+                    agent.generation,
+                    agent.died_at_tick,
+                    agent.death_cause,
                 )
                 for agent in result.population
+                for location in (projected_location(agent.agent_id, agent.home_place_id),)
             ],
         )
+        if result.demography is not None:
+            await cursor.executemany(
+                """
+                INSERT INTO households(
+                    run_id,household_id,formed_at_tick,dissolved_at_tick,
+                    home_place_id,member_ids,head_agent_id,tenure,rent_cents,
+                    joint_baseline_cents,arrears_cents,as_of_tick,as_of_seq
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        household.household_id,
+                        household.formed_at_tick,
+                        household.dissolved_at_tick,
+                        household.home_place_id,
+                        list(household.member_ids),
+                        household.head_agent_id,
+                        household.tenure,
+                        household.rent_cents,
+                        Jsonb(dict(household.joint_baseline_cents)),
+                        household.arrears_cents,
+                        result.report.last_tick,
+                        as_of_seq,
+                    )
+                    for household in sorted(
+                        result.demography.households.households.values(),
+                        key=lambda row: row.household_id,
+                    )
+                ],
+            )
         if result.economy is not None:
             await cursor.executemany(
                 """

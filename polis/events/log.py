@@ -45,6 +45,15 @@ class CommitResult:
     chain_hash: str
 
 
+@dataclass(frozen=True, slots=True)
+class EventSavepoint:
+    staged_len: int
+    last_seq: int
+    chain_hash: str
+    dropped_sampled: int
+    batch_token: object
+
+
 class EventLog:
     def __init__(
         self,
@@ -68,6 +77,7 @@ class EventLog:
         self._dropped_sampled = 0
         self._rollback_seq = start_seq
         self._rollback_hash = start_prev_hash
+        self._batch_token = object()
 
     @property
     def last_seq(self) -> int:
@@ -135,6 +145,25 @@ class EventLog:
     def staged(self) -> tuple[Event, ...]:
         return tuple(self._staged)
 
+    def savepoint(self) -> EventSavepoint:
+        return EventSavepoint(
+            len(self._staged),
+            self._last_seq,
+            self._chain_hash,
+            self._dropped_sampled,
+            self._batch_token,
+        )
+
+    def rollback_to(self, savepoint: EventSavepoint) -> None:
+        if savepoint.batch_token is not self._batch_token or not 0 <= savepoint.staged_len <= len(
+            self._staged
+        ):
+            raise ValueError("event savepoint is not valid for the current staged batch")
+        del self._staged[savepoint.staged_len :]
+        self._last_seq = savepoint.last_seq
+        self._chain_hash = savepoint.chain_hash
+        self._dropped_sampled = savepoint.dropped_sampled
+
     async def commit(self, tick: int) -> CommitResult:
         persisted = [event for event in self._staged if event.seq != EPHEMERAL_SEQ]
         ephemeral = [event for event in self._staged if event.seq == EPHEMERAL_SEQ]
@@ -158,6 +187,7 @@ class EventLog:
         self._dropped_sampled = 0
         self._rollback_seq = self._last_seq
         self._rollback_hash = self._chain_hash
+        self._batch_token = object()
         return result
 
     def rollback(self) -> None:
@@ -165,3 +195,4 @@ class EventLog:
         self._chain_hash = self._rollback_hash
         self._staged.clear()
         self._dropped_sampled = 0
+        self._batch_token = object()

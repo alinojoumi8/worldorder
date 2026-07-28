@@ -977,6 +977,123 @@ class ObservatorySettings(FrozenModel):
     live: ObservatoryLiveSettings = ObservatoryLiveSettings()
 
 
+class FertilitySettings(FrozenModel):
+    peak_age: int = Field(default=28, ge=0, le=120)
+    band: tuple[int, int] = (16, 45)
+    kappa_income: dict[str, float] = {"a": 0.6, "b": 0.8}
+    kappa_parity: tuple[float, ...] = (1.0, 0.85, 0.6, 0.35, 0.15, 0.05)
+    phi_single: float = Field(default=0.15, ge=0)
+    iota_intent: float = Field(default=2.0, ge=0)
+    intent_window_sim_days: int = Field(default=90, ge=1)
+    psi_child_benefit: float = Field(default=0.4, ge=0)
+    kappa_housing_penalty: float = Field(default=0.4, ge=0, le=1)
+    gestation_sim_days: int = Field(default=270, ge=1)
+    loss_base: float = Field(default=0.03, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_fertility(self) -> FertilitySettings:
+        if self.band[0] >= self.band[1]:
+            raise ValueError("demography.fertility.band must be increasing")
+        if not self.band[0] <= self.peak_age <= self.band[1]:
+            raise ValueError("demography.fertility.peak_age must fall inside the fertility band")
+        if set(self.kappa_income) != {"a", "b"}:
+            raise ValueError("demography.fertility.kappa_income must define a and b")
+        if len(self.kappa_parity) != 6 or any(value < 0 for value in self.kappa_parity):
+            raise ValueError(
+                "demography.fertility.kappa_parity must contain six non-negative values"
+            )
+        return self
+
+
+class ChildSettings(FrozenModel):
+    base_cost_cents_per_sim_day: int = Field(default=3_500, ge=0)
+    age_multiplier: dict[str, float] = {
+        "infant": 1.0,
+        "child": 1.2,
+        "adolescent": 1.6,
+    }
+    arrears_tolerance_sim_days: int = Field(default=30, ge=0)
+    welfare_threshold_health: float = Field(default=0.35, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_age_multiplier(self) -> ChildSettings:
+        if set(self.age_multiplier) != {"infant", "child", "adolescent"}:
+            raise ValueError(
+                "demography.child.age_multiplier must define infant, child and adolescent"
+            )
+        if any(value < 0 for value in self.age_multiplier.values()):
+            raise ValueError("demography.child.age_multiplier values must be non-negative")
+        return self
+
+
+class MigrationOriginProfileSettings(FrozenModel):
+    skill_premium: float = 0.0
+    wealth_offset_cents: int = 0
+    belief_offsets: dict[str, float] = {}
+
+
+class MigrationSettings(FrozenModel):
+    cadence: Literal["monthly"] = "monthly"
+    origin_profile: MigrationOriginProfileSettings = MigrationOriginProfileSettings()
+    base_emig_per_sim_day: float = Field(default=0.00015, ge=0, le=1)
+
+
+class EstateSettings(FrozenModel):
+    liquidate_on_intestacy: bool = True
+    creditor_priority: tuple[Literal["secured", "tax", "unsecured"], ...] = (
+        "secured",
+        "tax",
+        "unsecured",
+    )
+
+    @model_validator(mode="after")
+    def validate_priority(self) -> EstateSettings:
+        if self.creditor_priority != ("secured", "tax", "unsecured"):
+            raise ValueError("demography.estate.creditor_priority must be secured, tax, unsecured")
+        return self
+
+
+class BereavementSettings(FrozenModel):
+    strong_tie_threshold: float = Field(default=0.45, ge=0, le=1)
+    health_delta: float = Field(default=-0.04, le=0)
+    social_need_delta: float = Field(default=-0.25, le=0)
+    salience_boost_ticks: int = Field(default=72, ge=0)
+
+
+class DemographySettings(FrozenModel):
+    courtship_window_sim_days: int = Field(default=60, ge=1)
+    courtship_salience_boost: float = Field(default=0.3, ge=0)
+    leave_home_age: int = Field(default=18, ge=0)
+    independence_threshold_cents: int = Field(default=180_000, ge=0)
+    housing_burden: float = Field(default=0.35, ge=0, le=1)
+    compatibility_weights: dict[str, float] = {
+        "age": 0.20,
+        "traits": 0.25,
+        "beliefs": 0.20,
+        "tie": 0.20,
+        "econ": 0.15,
+    }
+    age_norm_years: int = Field(default=20, ge=1)
+    fertility: FertilitySettings = FertilitySettings()
+    child: ChildSettings = ChildSettings()
+    migration: MigrationSettings = MigrationSettings()
+    estate: EstateSettings = EstateSettings()
+    bereavement: BereavementSettings = BereavementSettings()
+
+    @model_validator(mode="after")
+    def validate_compatibility_weights(self) -> DemographySettings:
+        expected = {"age", "traits", "beliefs", "tie", "econ"}
+        if set(self.compatibility_weights) != expected:
+            raise ValueError(
+                "demography.compatibility_weights must define age, traits, beliefs, tie and econ"
+            )
+        if any(value < 0 for value in self.compatibility_weights.values()):
+            raise ValueError("demography.compatibility_weights values must be non-negative")
+        if abs(sum(self.compatibility_weights.values()) - 1.0) > 1e-9:
+            raise ValueError("demography.compatibility_weights must sum to 1")
+        return self
+
+
 class Settings(FrozenModel):
     run: RunSettings
     clock: ClockSettings
@@ -1001,6 +1118,7 @@ class Settings(FrozenModel):
     bankruptcy: BankruptcySettings = BankruptcySettings()
     polity: PolitySettings = PolitySettings()
     law: LawSettings = LawSettings()
+    demography: DemographySettings = DemographySettings()
     ablations: AblationSettings = AblationSettings()
     store: StoreSettings
     telemetry: TelemetrySettings = TelemetrySettings()

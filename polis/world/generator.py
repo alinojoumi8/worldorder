@@ -154,8 +154,9 @@ def _scaled_types(archetype: str, count: int) -> tuple[PlaceType, ...]:
     selected = [
         expanded[min(len(expanded) - 1, index * len(expanded) // count)] for index in range(count)
     ]
-    if archetype == "core" and len(selected) >= 2:
-        for required in ("courthouse", "prison"):
+    if archetype == "core" and len(selected) >= 3:
+        required_places = {"courthouse", "prison", "shelter"}
+        for required in ("courthouse", "prison", "shelter"):
             if required in selected:
                 continue
             counts = Counter(selected)
@@ -163,8 +164,7 @@ def _scaled_types(archetype: str, count: int) -> tuple[PlaceType, ...]:
                 (
                     index
                     for index in range(len(selected) - 1, -1, -1)
-                    if selected[index] not in {"courthouse", "prison"}
-                    and counts[selected[index]] > 1
+                    if selected[index] not in required_places and counts[selected[index]] > 1
                 ),
                 None,
             )
@@ -172,7 +172,7 @@ def _scaled_types(archetype: str, count: int) -> tuple[PlaceType, ...]:
                 replace_at = next(
                     index
                     for index in range(len(selected) - 1, -1, -1)
-                    if selected[index] not in {"courthouse", "prison"}
+                    if selected[index] not in required_places
                 )
             selected[replace_at] = required
     return tuple(selected)

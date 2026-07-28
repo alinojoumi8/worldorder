@@ -62,3 +62,18 @@ async def test_failed_commit_rolls_back_chain_head() -> None:
     assert log.last_seq == 0
     assert log.chain_hash == GENESIS_PREV_HASH
     assert not log.staged()
+
+
+@pytest.mark.asyncio
+async def test_savepoints_reject_stale_and_foreign_batches() -> None:
+    log = EventLog(RUN_ID, MemoryEventSink())
+    stale = log.savepoint()
+    log.stage(NewEvent(TICK_STARTED, {"tick": 1}), tick=1, sim_time=SIM_TIME)
+    await log.commit(1)
+
+    with pytest.raises(ValueError, match="current staged batch"):
+        log.rollback_to(stale)
+
+    foreign = EventLog(RUN_ID, MemoryEventSink()).savepoint()
+    with pytest.raises(ValueError, match="current staged batch"):
+        log.rollback_to(foreign)

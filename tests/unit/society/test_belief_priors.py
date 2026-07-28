@@ -28,5 +28,11 @@ def test_birth_priors_are_deterministic_and_never_inherit_facts() -> None:
 
 def test_migrant_priors_do_not_use_entity_facts() -> None:
     beliefs, _, _ = engine()
-    rows = beliefs.priors_for_migrant("ag_new", {"policy.tax.progressivity": 0.2})
-    assert all(not proposition.startswith("fact.") for proposition, _, _ in rows)
+    first = beliefs.priors_for_migrant("ag_new", {"policy.tax.progressivity": 0.2})
+    replay = beliefs.priors_for_migrant("ag_new", {"policy.tax.progressivity": 0.2})
+    second_agent = beliefs.priors_for_migrant("ag_other", {"policy.tax.progressivity": 0.2})
+
+    assert first == replay
+    assert first != second_agent
+    assert all(not proposition.startswith("fact.") for proposition, _, _ in first)
+    assert all(confidence <= beliefs.cfg.confidence_dilution for _, _, confidence in first)

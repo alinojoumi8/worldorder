@@ -317,6 +317,7 @@ class EconomyState:
         result.update(
             {
                 bank_id: bank.capital_cents
+                - sum(self.bond_holdings_cents.get(bank_id, {}).values())
                 for bank_id, bank in sorted(self.banks.items())
                 if not bank.is_central
             }

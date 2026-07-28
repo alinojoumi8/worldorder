@@ -1730,6 +1730,17 @@ class ExchangeEngine:
         )
 
     def _escrow_id(self, owner_id: str, ref: str) -> str:
+        existing = tuple(
+            sorted(
+                value
+                for value in self.economy.ledger.accounts_of(owner_id)
+                if parse_account_id(value)[0] == "esc"
+                and parse_account_id(value)[3] == ref
+                and self.economy.ledger.is_open(value)
+            )
+        )
+        if existing:
+            return existing[0]
         deposit = self._deposit_account(owner_id)
         bank = bank_of(deposit)
         if bank is None:

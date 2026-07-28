@@ -119,6 +119,14 @@ class AgentState:
     last_reflection_tick: int = -1_000_000
     importance_since_reflection: float = 0.0
     alive: bool = True
+    born_tick: int = 0
+    household_id: str | None = None
+    mother_id: str | None = None
+    father_id: str | None = None
+    generation: int = 0
+    died_at_tick: int | None = None
+    death_cause: str | None = None
+    fertility_intent_tick: int | None = None
 
     @property
     def wellbeing(self) -> float:

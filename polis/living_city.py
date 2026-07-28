@@ -5,8 +5,10 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from polis.agents.actions.params import PARAMS_MODELS
+from polis.agents.actions.protocol import ResolutionContext, ValidationContext
 from polis.agents.actions.resolve import Resolution, resolve_actions
-from polis.agents.actions.types import Action
+from polis.agents.actions.types import Action, LegalityVerdict, ValidatedAction
 from polis.agents.actions.validate import ActionBudget, Validation, validate_action
 from polis.agents.cognition.deliberate import Deliberation, deliberate_decide
 from polis.agents.cognition.observation import Observation, build_observations
@@ -19,6 +21,7 @@ from polis.agents.memory import MemoryStore
 from polis.agents.state import AgentPopulation
 from polis.config.runtime import RuntimeConfig
 from polis.config.settings import Settings, config_hash
+from polis.demography_runtime import DemographyRuntime, build_demography_runtime
 from polis.economy.genesis import create_economy
 from polis.economy.labour import load_occupations
 from polis.economy.policy import MechanicalPolicy
@@ -94,6 +97,7 @@ class LivingCityResult:
     traces: Mapping[tuple[str, int], TraceRecord]
     as_of_seq: int
     economy: EconomyState | None
+    demography: DemographyRuntime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +144,9 @@ class LivingCityEngine:
         router: LLMRouter,
         rng: RngRegistry,
         economy: EconomyState | None = None,
+        log: EventLog | None = None,
+        clock: Clock | None = None,
+        runtime: RuntimeConfig | None = None,
     ) -> None:
         self.settings = settings
         self.world = world
@@ -148,6 +155,7 @@ class LivingCityEngine:
         self.metrics = metrics
         self.router = router
         self.rng = rng
+        self.runtime = runtime
         self.economy = economy
         self.economy_policy = (
             MechanicalPolicy(
@@ -160,6 +168,24 @@ class LivingCityEngine:
                 router,
             )
             if economy is not None
+            else None
+        )
+        self.demography = (
+            build_demography_runtime(
+                settings=settings,
+                log=log,
+                clock=clock,
+                rng=rng,
+                world=world,
+                population=population,
+                memory=memory,
+                runtime=runtime,
+                economy_policy=self.economy_policy,
+            )
+            if self.economy_policy is not None
+            and log is not None
+            and clock is not None
+            and runtime is not None
             else None
         )
         self.observations: dict[str, Observation] = {}
@@ -177,7 +203,8 @@ class LivingCityEngine:
             _Handler(Phase.VALIDATE, "living.validate", 10, self.validate),
             _Handler(Phase.RESOLVE, "living.resolve", 10, self.resolve),
             _Handler(Phase.INSTITUTIONS, "economy.institutions", 10, self.institutions),
-            _Handler(Phase.VITALS, "living.vitals", 10, self.vitals),
+            _Handler(Phase.VITALS, "demography.vitals", 10, self.demography_vitals),
+            _Handler(Phase.VITALS, "living.vitals", 20, self.vitals),
             _Handler(Phase.METRICS, "living.metrics", 10, self.measure),
         )
 
@@ -187,6 +214,13 @@ class LivingCityEngine:
                 validation.action for _agent_id, validation in sorted(self.validations.items())
             )
             await self.economy_policy.step(ctx.tick, ctx.emit, actions)
+
+    async def demography_vitals(self, ctx: TickContext) -> None:
+        if self.demography is not None:
+            await self.demography.institution.run(ctx.tick)
+        if self.economy is not None:
+            self.economy.sync_denormalised(self.population)
+            self.economy.ledger.commit_tick(ctx.tick)
 
     def _trace_kept(self, agent_id: str, tick: int, mode: str) -> bool:
         seed = self.rng.seed_for("cognition.sample", agent_id, tick)
@@ -383,6 +417,35 @@ class LivingCityEngine:
                 profile=ctx.clock.profile,
                 budget=budget,
             )
+            if (
+                validation.accepted
+                and self.demography is not None
+                and action.type in self.demography.resolver.handles
+            ):
+                relational_ctx = ValidationContext(
+                    self.observations[agent_id],
+                    self.population,
+                    ctx.tick,
+                    self.runtime,
+                )
+                for gate_name, gate in (
+                    ("capability", self.demography.resolver.check_capability),
+                    ("locality", self.demography.resolver.check_locality),
+                    ("resources", self.demography.resolver.check_resources),
+                ):
+                    failure = gate(action, relational_ctx)
+                    if failure is None:
+                        continue
+                    gates = dict(validation.gates)
+                    gates[gate_name] = "fail"
+                    validation = Validation(
+                        False,
+                        action,
+                        str(failure.reason),
+                        gates,
+                        {"reason": failure.detail},
+                    )
+                    break
             self.validations[agent_id] = validation
             if validation.accepted:
                 ctx.emit(
@@ -433,6 +496,23 @@ class LivingCityEngine:
         resolved = tuple(
             validation.action for _agent_id, validation in sorted(self.validations.items())
         )
+        if self.demography is not None:
+            relational = tuple(
+                ValidatedAction(
+                    validation.action,
+                    PARAMS_MODELS[validation.action.type].model_validate(validation.action.params),
+                    LegalityVerdict(False),
+                    0,
+                )
+                for _agent_id, validation in sorted(self.validations.items())
+                if validation.accepted
+                and validation.action.type in self.demography.resolver.handles
+            )
+            self.demography.resolver.resolve(
+                relational,
+                ctx.tick,
+                ResolutionContext(ctx.emit, self.runtime),
+            )
         self.resolution = resolve_actions(
             resolved,
             population=self.population,
@@ -567,7 +647,13 @@ class LivingCityEngine:
             )
         )
         tracked = sorted(
-            self.routing.scores.values(),
+            (
+                row
+                for row in self.routing.scores.values()
+                if row.agent_id in self.world.locations
+                and row.agent_id in self.population.agents
+                and self.population[row.agent_id].alive
+            ),
             key=lambda row: (-row.score, row.agent_id),
         )[:250]
         ctx.emit(
@@ -698,7 +784,12 @@ async def run_living_city(
                     "agent_id": agent.agent_id,
                     "display_name": agent.display_name,
                     "age_years": agent.age_years,
+                    "born_tick": agent.born_tick,
                     "home_place_id": agent.home_place_id,
+                    "household_id": agent.household_id,
+                    "mother_id": agent.mother_id,
+                    "father_id": agent.father_id,
+                    "generation": agent.generation,
                     "traits": agent.traits.as_dict(),
                     "education_level": agent.education_level,
                 },
@@ -723,6 +814,7 @@ async def run_living_city(
             ),
         ).state
     await log.commit(0)
+    runtime = RuntimeConfig(settings)
     engine = LivingCityEngine(
         settings=settings,
         world=world,
@@ -732,8 +824,10 @@ async def run_living_city(
         router=router,
         rng=rng,
         economy=economy,
+        log=log,
+        clock=clock,
+        runtime=runtime,
     )
-    runtime = RuntimeConfig(settings)
     loop = TickLoop(
         run_id=run_id,
         clock=clock,
@@ -773,4 +867,5 @@ async def run_living_city(
         engine.traces,
         log.last_seq,
         economy,
+        engine.demography,
     )
