@@ -61,6 +61,7 @@ llm:
     REFLECT: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.9, template: reflect/questions.v1.jinja}
     CREDIT_EVAL: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.2, max_tokens: 400, template: credit/eval.v1.jinja}
     IMPORTANCE: {lane: volume_text, model: qwen3.5:cloud, temperature: 0.0, template: importance/user.v1.jinja}
+    NEWS_WRITE: {lane: volume_text, model: qwen3.5:cloud, temperature: 0.2, max_tokens: 800, structured: constrain, schema: prompts/schemas/news_write.schema.json, template: news_write/user.v1.jinja}
     EMBED: {lane: volume_embed, model: embeddinggemma:cloud, temperature: 0.0, template: embedding/user.v1.jinja}
   fallback_policy: permissive
   cache:
@@ -82,10 +83,41 @@ mechanisms: {}
 society:
   feed_algorithm: engagement
   outlets: 4
+  outlet_slant_dispersion: 0.55
+  cpm_cents: 40
+  news_cycle: daily
+  stories_per_reporter_per_cycle: 1
+  claim_tolerance: 0.10
+  misinfo_audit_rate: 0.05
+  source_window_sim_days: 14
+  line_threshold: 0.25
+  correction_reach_multiplier: 0.6
+  subscription_price_cents: 0
+  reach_norm: 500
+  newsworthiness_weights: {mag: 0.25, prom: 0.20, nov: 0.15, conf: 0.20, prox: 0.10, slant: 0.10}
+  distribution_weights: {trust: 0.35, topic: 0.25, prox: 0.15, sub: 0.15, reach: 0.10}
+beliefs:
+  alpha: {experience: 0.35, social: 0.10, media: 0.08}
+  theta_backfire: 0.60
+  theta_entrench: 0.60
+  theta_trust: 0.40
+  beta_backfire: 0.05
+  delta_entrench: 0.03
+  eta_trust: 0.04
+  gamma_c: 0.02
+  max_belief_updates_per_call: 5
+  max_step: 0.35
+  genesis: {mixture_separation: 0.0, sd: 0.25}
+  heritability_beliefs: 0.40
+  confidence_dilution: 0.5
+  sigma_belief: 0.08
+  consensus_floor: 0.02
 ablations:
   reflex_only: false
   obfuscate_domain: false
   disclose_simulation: false
+  social_influence_off: false
+  backfire_off: false
 store:
   dsn: postgresql://polis_engine:polis@127.0.0.1:5432/polis
   reader_dsn: postgresql://polis_reader:polis_reader@127.0.0.1:5432/polis

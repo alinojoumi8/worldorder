@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from psycopg.types.json import Jsonb
@@ -38,10 +39,20 @@ _ACCOUNT_TYPES = {
 
 
 def _prompt_manifest(settings: Settings) -> dict[str, str]:
-    return {
-        purpose: sha256_hex(route.template.encode())
-        for purpose, route in sorted(settings.llm.routing.items())
-    }
+    prompt_root = Path(__file__).resolve().parents[2] / "prompts"
+    manifest: dict[str, str] = {}
+    for purpose, route in sorted(settings.llm.routing.items()):
+        path = prompt_root / route.template
+        material = path.read_bytes() if path.is_file() else route.template.encode()
+        manifest[purpose] = sha256_hex(material)
+    for path in sorted((prompt_root / "news_write").glob("*.jinja")):
+        manifest[f"NEWS_WRITE:{path.name}"] = sha256_hex(path.read_bytes())
+    news_route = settings.llm.routing.get("NEWS_WRITE")
+    if news_route is not None and news_route.schema_ is not None:
+        schema = prompt_root.parent / news_route.schema_
+        if schema.is_file():
+            manifest["NEWS_WRITE:schema"] = sha256_hex(schema.read_bytes())
+    return manifest
 
 
 def _model_manifest(settings: Settings) -> dict[str, dict[str, str | None]]:

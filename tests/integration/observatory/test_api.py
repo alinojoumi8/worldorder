@@ -69,7 +69,7 @@ async def test_observatory_is_read_only_fresh_and_marks_future_views_unavailable
 
         assert health.status_code == 200
         assert health.json()["database"]["role"] == "reader"
-        assert health.json()["database"]["alembic_head"] == "0014_post_viewers"
+        assert health.json()["database"]["alembic_head"] == "0015_news_beliefs"
         assert runs.status_code == 200
         assert runs.json()["as_of_seq"] > 0
         assert "engine" in runs.json()

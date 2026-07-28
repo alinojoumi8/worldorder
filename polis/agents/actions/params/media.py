@@ -147,8 +147,35 @@ class PublishArticleParams(ActionParams):
     outlet_id: str
     headline: str
     body: str
+    source_event_seqs: tuple[int, ...] = ()
+    claims: tuple[ClaimParams, ...] = ()
 
 
 class RetractParams(ActionParams):
-    article_id: str
+    model_config = ConfigDict(
+        json_schema_extra={
+            "oneOf": [
+                {
+                    "required": ["article_id"],
+                    "properties": {"article_id": {"type": "string"}},
+                    "not": {"required": ["post_id"]},
+                },
+                {
+                    "required": ["post_id"],
+                    "properties": {"post_id": {"type": "string"}},
+                    "not": {"required": ["article_id"]},
+                },
+            ]
+        }
+    )
+
+    article_id: str | None = None
+    post_id: str | None = None
     reason: str | None = None
+    correction_text: ShortText | None = None
+
+    @model_validator(mode="after")
+    def require_subject(self) -> RetractParams:
+        if (self.article_id is None) == (self.post_id is None):
+            raise ValueError("retract requires exactly one of article_id or post_id")
+        return self

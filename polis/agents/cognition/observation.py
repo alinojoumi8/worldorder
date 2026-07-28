@@ -6,6 +6,7 @@ from datetime import datetime
 
 from polis.agents.state import AgentPopulation
 from polis.config.canon import canonical_bytes, sha256_hex
+from polis.society.protocols import ArticleBrief
 from polis.world.api import World
 
 
@@ -60,14 +61,6 @@ class PostBrief:
     topic: str | None
     likes: int
     is_repost: bool
-
-
-@dataclass(frozen=True, slots=True)
-class ArticleBrief:
-    article_id: str
-    outlet_id: str
-    headline: str
-    tick: int
 
 
 @dataclass(frozen=True, slots=True)

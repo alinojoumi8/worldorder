@@ -50,6 +50,7 @@ class SocietyRuntime:
         beliefs: BeliefChannel,
         ledger: LedgerApi,
         cfg: SocietySettings,
+        news: InstitutionResolver | None = None,
     ) -> None:
         self.log = log
         self.clock = clock
@@ -106,6 +107,8 @@ class SocietyRuntime:
             repo=self.comms_repo,
             cfg=cfg,
         )
+        if news is not None:
+            self.communication.compose(news)
         self.registry = ResolverRegistry()
         self.registry.register(cast(InstitutionResolver, self.communication))
         self.contacts = ContactLedger(ticks_per_sim_day=clock.profile.ticks_per_sim_day)

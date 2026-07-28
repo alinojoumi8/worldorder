@@ -398,6 +398,46 @@ NETWORK_SNAPSHOT = register_kind(
         "n_components",
     ),
 )
+BELIEF_UPDATED = register_kind(
+    10060,
+    "BELIEF_UPDATED",
+    owner="polis.society.beliefs",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "proposition",
+        "old_value",
+        "new_value",
+        "old_confidence",
+        "new_confidence",
+        "channel",
+        "source_id",
+        "source_ref",
+        "entrenched",
+        "llm_call_id",
+    ),
+)
+BELIEF_DRIFT_APPLIED = register_kind(
+    10061,
+    "BELIEF_DRIFT_APPLIED",
+    owner="polis.society.beliefs",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "channel", "updates", "n_sources"),
+)
+BELIEF_UPDATE_REJECTED = register_kind(
+    10062,
+    "BELIEF_UPDATE_REJECTED",
+    owner="polis.society.beliefs",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "proposition", "raw_value", "gate", "llm_call_id"),
+)
+BELIEF_PRIORS_SET = register_kind(
+    10063,
+    "BELIEF_PRIORS_SET",
+    owner="polis.society.beliefs",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "source", "propositions"),
+)
 POST_PUBLISHED = register_kind(
     11010,
     "POST_PUBLISHED",
@@ -478,6 +518,131 @@ CASCADE_CLOSED = register_kind(
         "unique_reposters",
         "lifetime_ticks",
     ),
+)
+ARTICLE_PUBLISHED = register_kind(
+    11030,
+    "ARTICLE_PUBLISHED",
+    owner="polis.society.media.news",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "article_id",
+        "outlet_id",
+        "reporter_id",
+        "headline",
+        "body",
+        "body_hash",
+        "source_event_seqs",
+        "claims",
+        "slant_applied",
+        "slant_at_write",
+        "rigour_at_write",
+        "llm_call_id",
+    ),
+)
+ARTICLE_SPIKED = register_kind(
+    11031,
+    "ARTICLE_SPIKED",
+    owner="polis.society.media.news",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "draft_id",
+        "outlet_id",
+        "reporter_id",
+        "editor_id",
+        "reason",
+        "rewrite_attempts",
+    ),
+)
+ARTICLE_DISTRIBUTED = register_kind(
+    11032,
+    "ARTICLE_DISTRIBUTED",
+    owner="polis.society.media.news",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "article_id",
+        "reach",
+        "impressions",
+        "district_shares",
+        "subscriber_share",
+    ),
+)
+ARTICLE_RETRACTED = register_kind(
+    11033,
+    "ARTICLE_RETRACTED",
+    owner="polis.society.media.news",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "article_id",
+        "post_id",
+        "outlet_id",
+        "author_id",
+        "reason",
+        "correction_text",
+        "original_reach",
+        "correction_reach",
+    ),
+)
+CLAIM_CHECKED = register_kind(
+    11034,
+    "CLAIM_CHECKED",
+    owner="polis.society.media.checker",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "subject_kind",
+        "subject_id",
+        "claim_id",
+        "predicate",
+        "entity_id",
+        "claimed_value",
+        "truth_value",
+        "verdict",
+        "matched_event_seqs",
+        "score",
+    ),
+)
+SOURCE_CULTIVATED = register_kind(
+    11035,
+    "SOURCE_CULTIVATED",
+    owner="polis.society.media.news",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "reporter_id",
+        "source_id",
+        "outlet_id",
+        "message_id",
+        "subject_event_seqs",
+    ),
+)
+OUTLET_FOUNDED = register_kind(
+    11050,
+    "OUTLET_FOUNDED",
+    owner="polis.society.media.news",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("outlet_id", "firm_id", "founder_id", "slant", "rigour", "place_id"),
+)
+OUTLET_REVENUE_BOOKED = register_kind(
+    11051,
+    "OUTLET_REVENUE_BOOKED",
+    owner="polis.society.media.news",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "outlet_id",
+        "period_start_tick",
+        "impressions",
+        "cpm_cents",
+        "ad_revenue_cents",
+        "subscription_cents",
+        "campaign_cents",
+        "advertisers",
+        "txn_ids",
+    ),
+)
+OUTLET_CLOSED = register_kind(
+    11052,
+    "OUTLET_CLOSED",
+    owner="polis.society.media.news",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("outlet_id", "firm_id", "reason", "final_reach", "staff_ids"),
 )
 FOLLOW_CREATED = register_kind(
     11040,

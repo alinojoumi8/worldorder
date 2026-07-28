@@ -72,6 +72,16 @@ def test_society_tie_halflives_reject_partial_and_unknown_maps() -> None:
         SocietySettings(tie_halflife_sim_days=values)
 
 
+def test_society_weight_maps_require_exact_normalized_keys() -> None:
+    with pytest.raises(ValueError, match="define exactly"):
+        SocietySettings(newsworthiness_weights={"mag": 1.0})
+
+    weights = dict(SocietySettings().distribution_weights)
+    weights["trust"] = 0.5
+    with pytest.raises(ValueError, match=r"sum to 1\.0"):
+        SocietySettings(distribution_weights=weights)
+
+
 @pytest.mark.parametrize("length", [10, 12])
 def test_feed_beta_prior_has_exact_feature_arity(length: int) -> None:
     with pytest.raises(ValueError):
