@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
+
 from polis.agents.actions import (
     ActionType,
     ResolutionContext,
@@ -11,6 +13,7 @@ from polis.agents.actions import (
     make_action,
 )
 from polis.agents.actions.params.law import CommitCrimeParams
+from polis.events.kinds import GARNISHMENT_COLLECTED
 from polis.kernel.rng import RngRegistry
 from polis.society.graph import SocialGraph
 from polis.society.law import (
@@ -84,6 +87,56 @@ def test_fine_shortfall_becomes_a_paid_garnishment_receivable() -> None:
     assert penalties.outstanding("ag_defendant") == 800
     assert _total(ledger) == after_payroll
     assert ledger.balances["government"] == 200
+    assert event_log.staged()[-1].kind == GARNISHMENT_COLLECTED
+    assert event_log.staged()[-1].payload["remaining_cents"] == 800
+
+
+def test_garnishment_ordinal_divergence_cannot_leave_the_debt_collectible_twice() -> None:
+    class DivergingLedger(RecordingLawLedger):
+        diverge = False
+
+        def post_transfer(self, *args: object, **kwargs: object) -> str:
+            actual = super().post_transfer(*args, **kwargs)  # type: ignore[arg-type]
+            return "tx_wrong" if self.diverge else actual
+
+    event_log = log()
+    cases = MemoryCourtRepository()
+    cases.add(
+        CourtCase(
+            "ca_one",
+            "criminal",
+            "government",
+            "ag_defendant",
+            None,
+            "fraud",
+            0,
+            1,
+        )
+    )
+    ledger = DivergingLedger({"ag_defendant": 200, "government": 0})
+    penalties = PenaltyService(
+        log=event_log,
+        clock=clock(),
+        runtime=runtime(),
+        ledger=ledger,
+        cases=cases,
+        crimes=MemoryCrimeRepository(),
+        cfg=law_cfg(),
+    )
+    penalties.apply(
+        "ca_one",
+        Judgment("guilty", (), 1_000, 0, 0, 0, 0, (), "bench", None),
+        1,
+    )
+    ledger.balances["ag_defendant"] += 500
+    ledger.diverge = True
+
+    with pytest.raises(RuntimeError, match="ordinal diverged"):
+        penalties.garnish("ag_defendant", 500, 2)
+
+    assert penalties.outstanding("ag_defendant") == 700
+    assert ledger.balances["government"] == 300
+    assert event_log.staged()[-1].kind == GARNISHMENT_COLLECTED
 
 
 def test_settlement_and_public_defender_fees_conserve_every_cent() -> None:

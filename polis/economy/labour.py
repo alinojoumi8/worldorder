@@ -607,7 +607,10 @@ class LabourMarket:
             int(action.params["wage_cents"]),
         )
         if self.wage_penalty is not None:
-            wage = round(wage * self.wage_penalty.wage_multiplier(application.agent_id))
+            wage = max(
+                self.settings.labour.minimum_wage_cents,
+                round(wage * self.wage_penalty.wage_multiplier(application.agent_id)),
+            )
         offer = OfferState(
             offer_id,
             application_id,

@@ -147,9 +147,11 @@ def test_obligations_continue_and_release_returns_to_the_household() -> None:
 
 def test_capacity_overflow_converts_the_sentence_to_a_logged_fine() -> None:
     service, configured_world, home, terminated, converted = _incarceration(sentence_capacity=0)
+    service.record_conviction("ag_actor")
     events = service.commit("ag_actor", "ca_one", 4, 1)
 
     assert events[0].payload["converted_to_fine"] is True
     assert converted == [("ag_actor", "ca_one", 4 * law_cfg().fine_per_tick_cents, 1)]
     assert configured_world.locations["ag_actor"].place_id == home.place_id
     assert terminated == []
+    assert service.criminal_record("ag_actor") == 1

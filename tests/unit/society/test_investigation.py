@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
+from polis.agents.actions.params.law import ReportCrimeParams
 from polis.events.kinds import (
     ARREST_MADE,
+    CRIME_REPORTED,
     INVESTIGATION_CLOSED,
     INVESTIGATION_OPENED,
     TESTIMONY_GIVEN,
@@ -98,3 +102,37 @@ def test_queue_is_severity_ordered_budget_bounded_and_charges_at_threshold() -> 
     assert events[0].payload["crime_id"] == "higher"
     assert events[0].payload["queue_position"] == 1
     assert filed == ["higher"]
+
+
+def test_description_report_resolves_the_latest_matching_crime() -> None:
+    repo = MemoryCrimeRepository()
+    earlier = _crime("earlier", "fraud", amount_cents=10)
+    later = replace(
+        _crime("later", "fraud", amount_cents=20),
+        tick=2,
+        perpetrator_id=earlier.perpetrator_id,
+        committed_event_seq=2,
+    )
+    repo.add(earlier)
+    repo.add(later)
+    service = PoliceService(
+        log=log(),
+        clock=clock(),
+        runtime=runtime(),
+        repo=repo,
+        world=world(),
+        cfg=law_cfg(),
+    )
+
+    events = service.report(
+        "ag_reporter",
+        ReportCrimeParams(
+            description="I saw a fraudulent transfer.",
+            suspect_id=earlier.perpetrator_id,
+            crime_type="fraud",
+        ),
+        3,
+    )
+
+    assert [item.kind for item in events] == [CRIME_REPORTED]
+    assert events[0].payload["crime_id"] == later.crime_id

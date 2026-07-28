@@ -2853,6 +2853,22 @@ INCARCERATION_ENDED = register_kind(
         "agent_id", "ticks_served", "skill_delta", "ties_lost", "returns_to_household_id"
     ),
 )
+GARNISHMENT_COLLECTED = register_kind(
+    13045,
+    "GARNISHMENT_COLLECTED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "receivable_id",
+        "case_id",
+        "debtor_id",
+        "creditor_id",
+        "amount_cents",
+        "txn_id",
+        "reason",
+        "remaining_cents",
+    ),
+)
 POLICE_BUDGET_ALLOCATED = register_kind(
     13050,
     "POLICE_BUDGET_ALLOCATED",

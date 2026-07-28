@@ -26,7 +26,6 @@ class CommitCrimeParams(ActionParams):
 
 class ReportCrimeParams(ActionParams):
     crime_id: str | None = None
-    accused_id: str | None = None
     suspect_id: str | None = None
     crime_type: CrimeType | None = None
     description: str | None = None

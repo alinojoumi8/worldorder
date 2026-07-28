@@ -45,6 +45,7 @@ from polis.events.kinds import (
     DAMAGES_AWARDED,
     EVIDENCE_ADMITTED,
     FINE_LEVIED,
+    GARNISHMENT_COLLECTED,
     INCARCERATION_ENDED,
     INCARCERATION_STARTED,
     INVESTIGATION_CLOSED,
@@ -267,6 +268,41 @@ class MnpiIndex:
         self.events = events
         self.issuer_for_symbol = issuer_for_symbol or (lambda symbol: symbol)
         self.public_kinds = public_kinds
+        self._event_cache_key: tuple[int, int | None] | None = None
+        self._event_cache: tuple[Event, ...] = ()
+        self._disclosure_ticks: dict[int, int] = {}
+
+    def _snapshot(self) -> tuple[Event, ...]:
+        source = self.events
+        if source is None:
+            values: tuple[Event, ...] = ()
+        else:
+            values = tuple(source() if callable(source) else source)
+        key = (len(values), values[-1].seq if values else None)
+        if key == self._event_cache_key:
+            return self._event_cache
+        ordered = tuple(sorted(values, key=lambda item: item.seq))
+        disclosure_ticks: dict[int, int] = {}
+        for event in ordered:
+            if event.kind not in {11010, 11030} and event.kind not in self.public_kinds:
+                continue
+            payload = event.payload
+            cited = {
+                int(value)
+                for field in ("source_event_seqs", "event_seqs", "cited_event_seqs")
+                for value in payload.get(field, ())
+            }
+            single = payload.get("source_event_seq")
+            if single is not None:
+                cited.add(int(single))
+            for event_seq in cited:
+                prior = disclosure_ticks.get(event_seq)
+                if prior is None or event.tick < prior:
+                    disclosure_ticks[event_seq] = event.tick
+        self._event_cache_key = key
+        self._event_cache = ordered
+        self._disclosure_ticks = disclosure_ticks
+        return ordered
 
     def _is_mnpi_kind(self, kind: int) -> bool:
         return kind in self.MNPI_KINDS or 6000 <= kind <= 6999
@@ -274,14 +310,13 @@ class MnpiIndex:
     def holds(self, agent_id: str, symbol: str, tick: int) -> tuple[bool, int | None]:
         issuer_id = self.issuer_for_symbol(symbol)
         window = self.cfg.mnpi_window_sim_days * self.clock.profile.ticks_per_sim_day
-        candidates = (
-            event
-            for event in _event_source(self.events)
-            if issuer_id in event.subject_ids
-            and self._is_mnpi_kind(event.kind)
-            and 0 <= tick - event.tick <= window
-        )
-        for event in sorted(candidates, key=lambda item: item.seq, reverse=True):
+        for event in reversed(self._snapshot()):
+            if (
+                issuer_id not in event.subject_ids
+                or not self._is_mnpi_kind(event.kind)
+                or not 0 <= tick - event.tick <= window
+            ):
+                continue
             if not self.memories.holds_memory_of(agent_id, event.seq):
                 continue
             if not self.publicly_disclosed(event.seq, tick):
@@ -289,23 +324,9 @@ class MnpiIndex:
         return False, None
 
     def publicly_disclosed(self, event_seq: int, tick: int) -> bool:
-        for event in _event_source(self.events):
-            if event.tick > tick:
-                break
-            payload = event.payload
-            cited = {
-                int(value)
-                for key in ("source_event_seqs", "event_seqs", "cited_event_seqs")
-                for value in payload.get(key, ())
-            }
-            single = payload.get("source_event_seq")
-            if single is not None:
-                cited.add(int(single))
-            if event_seq in cited and (
-                event.kind in {11010, 11030} or event.kind in self.public_kinds
-            ):
-                return True
-        return False
+        self._snapshot()
+        disclosure_tick = self._disclosure_ticks.get(event_seq)
+        return disclosure_tick is not None and disclosure_tick <= tick
 
 
 class DerivedPredicate(Protocol):
@@ -904,13 +925,28 @@ class PoliceService:
         )
         return tuple(event.seq for event, _ in relevant), strength
 
+    def match_report(self, params: ReportCrimeParams) -> Crime | None:
+        if params.crime_id is not None:
+            return self.repo.get(params.crime_id)
+        candidates = (
+            crime
+            for crime in self.repo.all()
+            if (params.suspect_id is None or crime.perpetrator_id == params.suspect_id)
+            and (params.crime_type is None or crime.type == params.crime_type)
+            and (
+                not params.evidence_event_seqs
+                or crime.committed_event_seq in params.evidence_event_seqs
+            )
+        )
+        return max(candidates, key=lambda item: (item.tick, item.crime_id), default=None)
+
     def report(
         self,
         reporter_id: str,
         params: ReportCrimeParams,
         tick: int,
     ) -> Sequence[Event]:
-        crime = self.repo.get(params.crime_id or "")
+        crime = self.match_report(params)
         if crime is None:
             return ()
         event = self.log.stage(
@@ -1038,17 +1074,12 @@ STATUTORY: Final[Mapping[CrimeType, Range]] = MappingProxyType(
 )
 
 
-def _ticks_per_sim_day(runtime: RuntimeOverlay) -> int:
-    base = getattr(runtime, "base", None)
-    clock = getattr(base, "clock", None)
-    return max(1, int(getattr(clock, "ticks_per_sim_day", 24)))
-
-
 def statutory_range(
     crime_type: CrimeType,
     amount_cents: int | None,
     tick: int,
     runtime: RuntimeOverlay,
+    ticks_per_sim_day: int,
 ) -> Range:
     base = STATUTORY[crime_type]
     amount = max(0, amount_cents or 0)
@@ -1061,7 +1092,7 @@ def statutory_range(
     else:
         fine_lo, fine_hi = base.fine_lo, base.fine_hi
     multiplier_bp = runtime.bp("sentencing.multiplier_bp", tick)
-    ticks_per_day = _ticks_per_sim_day(runtime)
+    ticks_per_day = max(1, ticks_per_sim_day)
     return Range(
         fine_lo * multiplier_bp // 10_000,
         fine_hi * multiplier_bp // 10_000,
@@ -1221,6 +1252,8 @@ def bench_verdict(
     convicted = evidence_strength >= threshold
     if not convicted:
         return False, 0
+    if threshold >= 1.0:
+        return True, lo
     fraction = min(1.0, max(0.0, (evidence_strength - threshold) / (1 - threshold)))
     return True, round(lo + (hi - lo) * fraction)
 
@@ -1682,7 +1715,7 @@ class CourtService:
         findings: list[str] = []
         for finding in parsed.get("findings", ()):
             text = str(finding)
-            cited = {int(value) for value in re.findall(r"\b\d+\b", text)}
+            cited = {int(value) for value in re.findall(r"#(\d+)\b", text)}
             if cited and not cited.issubset(admitted):
                 clamped.append("finding_non_admitted")
                 continue
@@ -1770,6 +1803,7 @@ class CourtService:
                     crime.amount_cents if crime else case.claim_cents,
                     tick,
                     self.runtime,
+                    self.clock.profile.ticks_per_sim_day,
                 )
                 if crime_type in STATUTORY
                 else Range(0, case.claim_cents, 0, 0)
@@ -1979,6 +2013,8 @@ class PenaltyService:
         if case is None:
             return ()
         events: list[Event] = []
+        if judgment.verdict == "guilty" and self.incarceration is not None:
+            self.incarceration.record_conviction(case.defendant_id)
         if judgment.fine_cents:
             event = self._award(
                 case_id=case_id,
@@ -2059,21 +2095,49 @@ class PenaltyService:
             if amount <= 0:
                 continue
             predicted = self.ledger.next_transfer_id(tick)
-            actual = self.ledger.post_transfer(
-                agent_id,
-                row.creditor_id,
-                amount,
-                reason=row.reason,
+            remaining = row.outstanding_cents - amount
+            event = self.log.stage(
+                NewEvent(
+                    GARNISHMENT_COLLECTED,
+                    {
+                        "receivable_id": receivable_id,
+                        "case_id": row.case_id,
+                        "debtor_id": agent_id,
+                        "creditor_id": row.creditor_id,
+                        "amount_cents": amount,
+                        "txn_id": predicted,
+                        "reason": row.reason,
+                        "remaining_cents": remaining,
+                    },
+                    actor_id=agent_id,
+                    subject_ids=(row.case_id, agent_id, row.creditor_id),
+                ),
                 tick=tick,
-                cause=self._receivable_causes[receivable_id],
+                sim_time=self.clock.sim_time_at(tick),
             )
-            if actual != predicted:
-                raise RuntimeError("garnishment ledger transaction ordinal diverged")
-            diverted += amount
-            updated = replace(row, outstanding_cents=row.outstanding_cents - amount)
+            prior_cause = self._receivable_causes[receivable_id]
+            updated = replace(row, outstanding_cents=remaining)
             self._receivables[receivable_id] = updated
+            self._receivable_causes[receivable_id] = event
+            try:
+                actual = self.ledger.post_transfer(
+                    agent_id,
+                    row.creditor_id,
+                    amount,
+                    reason=row.reason,
+                    tick=tick,
+                    cause=event,
+                )
+            except Exception:
+                self._receivables[receivable_id] = row
+                self._receivable_causes[receivable_id] = prior_cause
+                self.log.rollback()
+                raise
+            diverted += amount
             if updated.outstanding_cents == 0:
                 self._receivable_causes.pop(receivable_id, None)
+            if actual != predicted:
+                raise RuntimeError("garnishment ledger transaction ordinal diverged")
         return diverted
 
     def outstanding(self, agent_id: str) -> int:
@@ -2169,7 +2233,6 @@ class Incarceration:
             tick=tick,
             sim_time=self.clock.sim_time_at(tick),
         )
-        self._records[agent_id] += 1
         events: list[Event] = [event]
         if converted:
             if self.conversion_fine is not None:
@@ -2201,6 +2264,9 @@ class Incarceration:
         )
         events.extend(self.terminate_employment(agent_id, tick))
         return tuple(events)
+
+    def record_conviction(self, agent_id: str) -> None:
+        self._records[agent_id] += 1
 
     def is_incarcerated(self, agent_id: str, tick: int) -> bool:
         sentence = self._sentences.get(agent_id)
@@ -2354,7 +2420,7 @@ class LawResolver:
             if case is None or (case.witness_ids and action.actor_id not in case.witness_ids):
                 return GateFailure("capability", "actor is not a listed witness")
         if action.type is ActionType.REPORT_CRIME and self.memories is not None:
-            crime = self.police.repo.get(str(action.params.get("crime_id", "")))
+            crime = self.police.match_report(ReportCrimeParams.model_validate(action.params))
             if (
                 crime is None
                 or crime.committed_event_seq is None

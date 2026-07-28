@@ -48,3 +48,26 @@ def test_public_disclosure_clears_mnpi_and_replays_purely() -> None:
     assert first.holds("ag_actor", "ONE", 4) == (True, 7)
     assert first.holds("ag_actor", "ONE", 5) == (False, None)
     assert replay.holds("ag_actor", "ONE", 5) == first.holds("ag_actor", "ONE", 5)
+
+
+def test_event_cache_invalidates_when_the_append_only_source_advances() -> None:
+    rows = [event(7, 1, 9010, subjects=("fi_one",))]
+    index = MnpiIndex(
+        memories=Memories({("ag_actor", 7)}),
+        cfg=law_cfg(),
+        clock=clock(),
+        events=lambda: rows,
+        issuer_for_symbol=lambda _symbol: "fi_one",
+    )
+
+    assert index.holds("ag_actor", "ONE", 4) == (True, 7)
+    rows.append(
+        event(
+            8,
+            5,
+            11010,
+            subjects=("fi_one",),
+            payload={"source_event_seqs": [7]},
+        )
+    )
+    assert index.holds("ag_actor", "ONE", 5) == (False, None)

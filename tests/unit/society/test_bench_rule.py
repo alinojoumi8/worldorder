@@ -44,6 +44,10 @@ def test_bench_rule_is_monotone_in_evidence_strength() -> None:
     )
 
 
+def test_bench_rule_handles_a_one_hundred_percent_threshold() -> None:
+    assert bench_verdict(1.0, 1.0, 10, 100) == (True, 10)
+
+
 class FailingRouter:
     def __init__(self) -> None:
         self.calls = 0

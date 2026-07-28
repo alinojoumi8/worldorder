@@ -72,7 +72,11 @@ def test_judge_output_is_clamped_and_non_admitted_findings_are_dropped() -> None
     cases.add(case)
     parsed = {
         "verdict": "guilty",
-        "findings": ["Event 7 proves the transfer.", "Event 999 is decisive."],
+        "findings": [
+            "Event #7 proves the transfer.",
+            "The transfer was 999 cents.",
+            "Event #999 is decisive.",
+        ],
         "penalty": {
             "fine_cents": 999,
             "sentence_ticks": 999,
@@ -96,7 +100,7 @@ def test_judge_output_is_clamped_and_non_admitted_findings_are_dropped() -> None
         judgment.damages_cents,
         judgment.restitution_cents,
     ) == (20, 40, 100, 50)
-    assert judgment.findings == ("Event 7 proves the transfer.",)
+    assert judgment.findings == ("Event #7 proves the transfer.", "The transfer was 999 cents.")
     assert set(judgment.clamped) == {
         "fine_cents",
         "sentence_ticks",

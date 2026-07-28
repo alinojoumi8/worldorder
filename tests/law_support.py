@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -130,7 +129,7 @@ def event(
         seq=seq,
         run_id=UUID(int=19),
         tick=tick,
-        sim_time=datetime(2100, 1, 1, tzinfo=UTC),
+        sim_time=clock().sim_time_at(tick),
         kind=kind,
         actor_id=None,
         subject_ids=subjects,
