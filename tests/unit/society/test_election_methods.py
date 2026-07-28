@@ -1,8 +1,11 @@
 from pathlib import Path
 from uuid import UUID
 
+import pytest
+
 from polis.config.runtime import RuntimeConfig
 from polis.config.settings import PolitySettings, load_settings
+from polis.events.kinds import CANDIDACY_DEPOSITS_REFUNDED
 from polis.events.log import EventLog, MemoryEventSink
 from polis.kernel.clock import PROFILES, Clock
 from polis.kernel.rng import RngRegistry
@@ -12,6 +15,7 @@ from polis.society.polity import (
     Election,
     ElectionOffice,
     ExposureLedger,
+    NullPolityLedger,
     OfficeRegister,
     PartyRegistry,
     VoteModel,
@@ -42,7 +46,7 @@ class Graph:
         return 0.0
 
 
-def _office(*, seats: int = 1) -> ElectionOffice:
+def _office(*, seats: int = 1, ledger: NullPolityLedger | None = None) -> ElectionOffice:
     clock = Clock(PROFILES["microscope"])
     cfg = PolitySettings(party_founding_fee_cents=0, candidacy_deposit_cents=0)
     log = EventLog(UUID(int=1821), MemoryEventSink())
@@ -70,6 +74,7 @@ def _office(*, seats: int = 1) -> ElectionOffice:
         vote_model=vote_model,
         exposure=exposure,
         runtime=RuntimeConfig(load_settings(Path("configs/smoke.yaml"))),
+        ledger=ledger,
     )
     elections.repo.elections["el_fixture"] = Election(
         "el_fixture",
@@ -146,3 +151,72 @@ def test_proportional_uses_dhondt_seat_allocation() -> None:
 
     assert result.rounds == ({"pt_a": 2, "pt_b": 1},)
     assert result.winner_ids == ("ca_a1", "ca_a2", "ca_b1")
+
+
+def test_turnout_excludes_abstention_ballots() -> None:
+    elections = _office()
+    elections.repo.eligible_counts["el_fixture"] = 4
+    elections.repo.ballots[("el_fixture", "ag_voter")] = Ballot("ag_voter", "ca_one")
+    elections.repo.ballots[("el_fixture", "ag_abstainer")] = Ballot("ag_abstainer", None)
+
+    assert elections.turnout("el_fixture") == 0.25
+
+
+@pytest.mark.asyncio
+async def test_deposit_refunds_are_one_audited_batch_transaction() -> None:
+    elections = _office()
+    elections.repo.candidacies["ca_one"] = Candidacy(
+        "ca_one",
+        "el_fixture",
+        "ag_candidate",
+        None,
+        {},
+        0,
+        0,
+    )
+    elections.repo.deposits["ca_one"] = ("ag_candidate", 100, False)
+    elections.repo.ballots[("el_fixture", "ag_voter")] = Ballot("ag_voter", "ca_one")
+    elections.repo.eligible_counts["el_fixture"] = 1
+
+    events = await elections.hold("el_fixture", 10)
+
+    refund = next(event for event in events if event.kind == CANDIDACY_DEPOSITS_REFUNDED)
+    assert refund.payload["txn_id"]
+    assert refund.payload["refunds"] == [
+        {
+            "candidacy_id": "ca_one",
+            "agent_id": "ag_candidate",
+            "amount_cents": 100,
+        }
+    ]
+    assert elections.repo.deposits["ca_one"] == ("ag_candidate", 100, True)
+
+
+class FailingRefundLedger(NullPolityLedger):
+    def post_transfers(self, *args, **kwargs) -> str:
+        del args, kwargs
+        raise RuntimeError("refund failed")
+
+
+@pytest.mark.asyncio
+async def test_failed_deposit_refund_restores_election_state() -> None:
+    elections = _office(ledger=FailingRefundLedger())
+    elections.repo.candidacies["ca_one"] = Candidacy(
+        "ca_one",
+        "el_fixture",
+        "ag_candidate",
+        None,
+        {},
+        0,
+        0,
+    )
+    elections.repo.deposits["ca_one"] = ("ag_candidate", 100, False)
+    elections.repo.ballots[("el_fixture", "ag_voter")] = Ballot("ag_voter", "ca_one")
+    elections.repo.eligible_counts["el_fixture"] = 1
+
+    with pytest.raises(RuntimeError, match="refund failed"):
+        await elections.hold("el_fixture", 10)
+
+    assert elections.repo.deposits["ca_one"] == ("ag_candidate", 100, False)
+    assert not elections.repo.elections["el_fixture"].resolved
+    assert elections.log.staged() == ()

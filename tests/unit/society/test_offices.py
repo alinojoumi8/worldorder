@@ -57,6 +57,6 @@ def test_appointment_requires_confirmation_and_governor_removal_needs_five_seven
     offices = _offices()
     appointed = offices.appoint("cb_governor", "ag_g", "ag_p", 2)
     assert [event.kind for event in appointed] == [APPOINTMENT_MADE, OFFICE_ASSUMED]
-    assert offices.remove("cb_governor", "ag_g", "council", 4 / 7, 3) == ()
-    removed = offices.remove("cb_governor", "ag_g", "council", 5 / 7, 3)
+    assert offices.remove("cb_governor", "ag_g", "council", 0.71, 3) == ()
+    removed = offices.remove("cb_governor", "ag_g", "council", 0.72, 3)
     assert [event.kind for event in removed] == [OFFICER_REMOVED, OFFICE_VACATED]

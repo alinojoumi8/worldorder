@@ -51,14 +51,18 @@ class Graph:
 
 
 class Ledger:
-    def can_pay(self, payer_id: str, cents: int) -> bool:
-        del payer_id
+    def can_pay(self, payer_id: str, cents: int, payee_id: str | None = None) -> bool:
+        del payer_id, payee_id
         return cents >= 0
 
     def next_transfer_id(self, tick: int) -> str:
         return f"txn_{tick}"
 
     def post_transfer(self, *args, **kwargs) -> str:
+        del args
+        return self.next_transfer_id(int(kwargs["tick"]))
+
+    def post_transfers(self, *args, **kwargs) -> str:
         del args
         return self.next_transfer_id(int(kwargs["tick"]))
 

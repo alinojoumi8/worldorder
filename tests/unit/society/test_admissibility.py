@@ -62,40 +62,44 @@ def _engine(
 
 
 @pytest.mark.parametrize(
-    ("engine", "proposal", "failed"),
+    ("engine_kwargs", "proposal", "failed"),
     (
-        (_engine(), _proposal("clock.demographic_acceleration", "bad"), "P-SCOPE"),
-        (_engine(), _proposal("tax.vat_bp", 10_001), "P-RANGE"),
-        (_engine(), _proposal("prison.capacity", -1), "P-NONNEGATIVE"),
+        ({}, _proposal("clock.demographic_acceleration", "bad"), "P-SCOPE"),
+        ({}, _proposal("tax.vat_bp", 10_001), "P-RANGE"),
+        ({}, _proposal("prison.capacity", -1), "P-NONNEGATIVE"),
         (
-            _engine(),
+            {},
             _proposal("tax.income.brackets", ((100, 1_000), (0, 2_000))),
             "P-MONOTONE",
         ),
-        (_engine(held="president"), _proposal("money.policy_rate_bp", 100), "P-SEPARATION"),
         (
-            _engine(snapshot=FiscalSnapshot(money_delta_cents=1)),
+            {"held": "president"},
+            _proposal("money.policy_rate_bp", 100),
+            "P-SEPARATION",
+        ),
+        (
+            {"snapshot": FiscalSnapshot(money_delta_cents=1)},
             _proposal("tax.vat_bp", 1_500),
             "P-MONEY",
         ),
         (
-            _engine(snapshot=FiscalSnapshot(current_balance_cents=-600_000_000)),
+            {"snapshot": FiscalSnapshot(current_balance_cents=-600_000_000)},
             _proposal("tax.vat_bp", 1_500),
             "P-SOLVENCY",
         ),
     ),
 )
 def test_admissibility_predicates_are_isolated_and_ordered(
-    engine: PolicyEngine,
+    engine_kwargs: dict[str, Any],
     proposal: Proposal,
     failed: str,
 ) -> None:
-    result = engine.admissible(proposal, 2)
+    result = _engine(**engine_kwargs).admissible(proposal, 2)
     assert not result.admissible
     assert result.failed == failed
 
 
-def test_first_failure_wins_and_blocked_proposal_never_reaches_vote() -> None:
+def test_first_failure_wins() -> None:
     engine = _engine(snapshot=FiscalSnapshot(money_delta_cents=1))
     proposal = _proposal("prison.capacity", -1)
 

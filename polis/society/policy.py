@@ -359,9 +359,12 @@ POLICY_REGISTRY: Final[Mapping[str, PolicySpec]] = MappingProxyType(
 )
 
 
-def _setting_flag(settings: Settings, path: str) -> bool:
+def _setting_flag(settings: Any, path: str) -> bool:
     current: Any = settings
-    for part in path.split("."):
+    parts = path.split(".")
+    if parts[0] == "polity" and not hasattr(current, "polity"):
+        parts = parts[1:]
+    for part in parts:
         current = getattr(current, part)
     return bool(current)
 
@@ -590,7 +593,7 @@ class PolicyEngine:
                 {
                     key: spec
                     for key, spec in POLICY_REGISTRY.items()
-                    if spec.enabled_when is None or cfg.can_regulate_feed
+                    if spec.enabled_when is None or _setting_flag(cfg, spec.enabled_when)
                 }
             )
             if registry is None
@@ -742,7 +745,10 @@ class PolicyEngine:
             )
 
         horizon = self.clock.profile.ticks_per_sim_day * self.clock.profile.days_per_sim_year
-        proposed = dict(self.runtime.as_of(tick))
+        proposed = {
+            parameter: self.runtime.get(parameter, tick) for parameter in sorted(self.registry)
+        }
+        proposed.update(self.runtime.as_of(tick))
         proposed[p.parameter] = value
         if self.fiscal.money_delta(proposed, horizon, tick) != 0:
             return Admissibility(False, "P-MONEY", "projected ledger legs are not balanced")
@@ -837,7 +843,8 @@ class PolicyEngine:
                     president_id is not None and self.vote_provider(president_id, proposal) == "nay"
                 )
                 if vetoed:
-                    overridden = yeas >= 5 and len(members) >= 7
+                    seats = self.cfg.offices["council"].seats
+                    overridden = len(members) >= seats and yeas * 3 >= seats * 2
                     events.append(
                         self._emit(
                             POLICY_VETOED,

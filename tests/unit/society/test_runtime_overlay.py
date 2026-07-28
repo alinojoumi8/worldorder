@@ -48,7 +48,11 @@ async def test_polity_runtime_rebuild_and_checkpoint_roundtrip(tmp_path) -> None
 
     assert live.bp("tax.vat_bp", 4) == settings.polity.policy.tax.vat_bp
     assert live.bp("tax.vat_bp", 5) == 1_750
-    assert live.history("tax.vat_bp") == tuple(live.history("tax.vat_bp"))
+    recorded = live.history("tax.vat_bp")
+    assert len(recorded) == 1
+    assert recorded[0].value == 1_750
+    assert (recorded[0].enacted_tick, recorded[0].effective_tick) == (2, 5)
+    assert set(live.as_of(4)) == set(settings.polity.policy.flat())
 
     rebuilt = RuntimeConfig(settings)
     project_enactment(rebuilt, event)

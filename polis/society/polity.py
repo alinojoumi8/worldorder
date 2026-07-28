@@ -31,6 +31,7 @@ from polis.events.kinds import (
     APPOINTMENT_MADE,
     CAMPAIGN_SPEND,
     CANDIDACY_ANNOUNCED,
+    CANDIDACY_DEPOSITS_REFUNDED,
     ELECTION_CALLED,
     ELECTION_RESOLVED,
     OFFICE_ASSUMED,
@@ -96,7 +97,7 @@ class WorldLookup(Protocol):
 
 
 class PolityLedger(Protocol):
-    def can_pay(self, payer_id: str, cents: int) -> bool: ...
+    def can_pay(self, payer_id: str, cents: int, payee_id: str | None = None) -> bool: ...
 
     def next_transfer_id(self, tick: int) -> str: ...
 
@@ -111,13 +112,22 @@ class PolityLedger(Protocol):
         cause: Event,
     ) -> str: ...
 
+    def post_transfers(
+        self,
+        transfers: Sequence[tuple[str, str, int]],
+        *,
+        reason: str,
+        tick: int,
+        cause: Event,
+    ) -> str: ...
+
 
 class NullPolityLedger:
     def __init__(self) -> None:
         self._ordinal_by_tick: dict[int, int] = defaultdict(int)
 
-    def can_pay(self, payer_id: str, cents: int) -> bool:
-        del payer_id
+    def can_pay(self, payer_id: str, cents: int, payee_id: str | None = None) -> bool:
+        del payer_id, payee_id
         return cents >= 0
 
     def next_transfer_id(self, tick: int) -> str:
@@ -140,6 +150,19 @@ class NullPolityLedger:
         cause: Event,
     ) -> str:
         del payer_id, payee_id, cents, reason, cause
+        transfer_id = self.next_transfer_id(tick)
+        self._ordinal_by_tick[tick] += 1
+        return transfer_id
+
+    def post_transfers(
+        self,
+        transfers: Sequence[tuple[str, str, int]],
+        *,
+        reason: str,
+        tick: int,
+        cause: Event,
+    ) -> str:
+        del transfers, reason, cause
         transfer_id = self.next_transfer_id(tick)
         self._ordinal_by_tick[tick] += 1
         return transfer_id
@@ -364,11 +387,12 @@ class PartyRegistry:
     def note_votes(self, agent_id: str, votes: int) -> None:
         self._votes_received[agent_id] += max(0, votes)
 
-    def note_candidacy(self, party_id: str | None) -> None:
-        if party_id is not None:
-            self._candidate_cycles[party_id] = 0
+    def close_election_cycle(self, party_ids: Sequence[str | None]) -> None:
+        fielded = {party_id for party_id in party_ids if party_id is not None}
         for party in self.live():
-            if party.party_id != party_id:
+            if party.party_id in fielded:
+                self._candidate_cycles[party.party_id] = 0
+            else:
                 self._candidate_cycles[party.party_id] += 1
 
     def _leader(self, members: Sequence[str]) -> str | None:
@@ -487,6 +511,7 @@ class Ballot:
     approvals: tuple[str, ...] = ()
     origin: Literal["deliberate", "reflex"] = "reflex"
     utility: Mapping[str, float] = field(default_factory=dict)
+    max_utility: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1036,7 +1061,7 @@ class VoteModel:
             )
             utilities.append((utility, candidacy, features, epsilon))
         if not utilities:
-            return Ballot(voter_id, None, utility={"epsilon": 0.0})
+            return Ballot(voter_id, None, utility={"epsilon": 0.0}, max_utility=0.0)
         best = max(utilities, key=lambda row: (row[0], row[1].candidacy_id))
         traits = self.traits(voter_id)
         threshold = (
@@ -1051,6 +1076,7 @@ class VoteModel:
             best[1].candidacy_id if best[0] >= threshold else None,
             origin="reflex",
             utility=components,
+            max_utility=round(best[0], 6),
         )
 
 
@@ -1248,13 +1274,20 @@ class ElectionOffice:
                 raise
         self.repo.candidacies[candidacy_id] = candidacy
         self.repo.deposits[candidacy_id] = (agent_id, deposit, False)
-        self.parties.note_candidacy(params.party_id)
         return candidacy, (event,)
 
     def cast(self, election_id: str, ballot: Ballot, tick: int) -> Event:
         key = (election_id, ballot.voter_id)
         if key in self.repo.ballots:
             raise ValueError("voter has already voted")
+        valid = {row.candidacy_id for row in self.repo.open_candidacies(election_id)}
+        referenced = {
+            *((ballot.choice,) if ballot.choice is not None else ()),
+            *ballot.ranking,
+            *ballot.approvals,
+        }
+        if not referenced <= valid:
+            raise ValueError("ballot references a candidacy outside this election")
         self.repo.ballots[key] = ballot
         if ballot.choice is None and not ballot.ranking and not ballot.approvals:
             return self._emit(
@@ -1263,11 +1296,11 @@ class ElectionOffice:
                     "election_id": election_id,
                     "agent_id": ballot.voter_id,
                     "reason": "below_threshold",
-                    "max_utility": sum(ballot.utility.values()),
+                    "max_utility": ballot.max_utility,
                     "origin": ballot.origin,
                     "utility": {
-                        key: float(ballot.utility.get(key, 0.0))
-                        for key in (*VoteModel.FEATURES, "epsilon")
+                        component: float(ballot.utility.get(component, 0.0))
+                        for component in (*VoteModel.FEATURES, "epsilon")
                     },
                 },
                 tick,
@@ -1283,8 +1316,8 @@ class ElectionOffice:
                 "approvals": list(ballot.approvals),
                 "origin": ballot.origin,
                 "utility": {
-                    key: float(ballot.utility.get(key, 0.0))
-                    for key in (*VoteModel.FEATURES, "epsilon")
+                    component: float(ballot.utility.get(component, 0.0))
+                    for component in (*VoteModel.FEATURES, "epsilon")
                 },
             },
             tick,
@@ -1315,8 +1348,9 @@ class ElectionOffice:
                 int(_get(outlet, "reach", 0)),
                 round(amount / max(1, self.cpm_cents) * 1_000 * self.cfg.outlet_efficiency),
             )
-            candidates = () if self.world is None else tuple(sorted(self.world.locations))
-            reached = tuple(candidates[:reach])
+            candidates = [] if self.world is None else sorted(self.world.locations)
+            self.rng.get("polity.campaign.reach", candidacy.candidacy_id, tick).shuffle(candidates)
+            reached = tuple(sorted(candidates[:reach]))
             payee = _get(outlet, "firm_id")
         elif params.channel == "rally":
             if self.world is None or params.place_id is None:
@@ -1498,12 +1532,18 @@ class ElectionOffice:
         eligible = self.repo.eligible_counts.get(election_id, 0)
         if eligible == 0:
             return 0.0
-        cast_count = sum(key[0] == election_id for key in self.repo.ballots)
+        cast_count = sum(
+            1
+            for (stored_election_id, _voter_id), ballot in self.repo.ballots.items()
+            if stored_election_id == election_id
+            and (ballot.choice is not None or ballot.ranking or ballot.approvals)
+        )
         return round(cast_count / eligible, 6)
 
     async def hold(self, election_id: str, tick: int) -> Sequence[Event]:
         election = self.repo.elections[election_id]
         candidacies = self.repo.open_candidacies(election_id)
+        prior_ballots = dict(self.repo.ballots)
         events: list[Event] = []
         deliberate: list[Ballot] = []
         reflex_voters: list[str] = []
@@ -1552,6 +1592,7 @@ class ElectionOffice:
                 rerun = replace(
                     election,
                     voting_tick=tick + self.clock.ticks_for(SimDuration(weeks=1)),
+                    campaign_ends_tick=tick,
                     resolved=False,
                 )
                 self.repo.elections[election_id] = rerun
@@ -1565,7 +1606,7 @@ class ElectionOffice:
                             "method": election.method,
                             "called_tick": tick,
                             "voting_tick": rerun.voting_tick,
-                            "campaign_ends_tick": tick,
+                            "campaign_ends_tick": rerun.campaign_ends_tick,
                             "electorate_size": len(election.electorate_ids),
                             "rerun_reason": "unusable_reflex_fit",
                         },
@@ -1613,6 +1654,61 @@ class ElectionOffice:
                 subject_ids=(election_id, *tally.winner_ids),
             )
         )
+        total_votes = sum(tally.counts.values())
+        refundable: list[tuple[str, str, int]] = []
+        for candidacy_id, (agent_id, deposit, refunded) in sorted(self.repo.deposits.items()):
+            candidacy = self.repo.candidacies[candidacy_id]
+            if candidacy.election_id != election_id or refunded or total_votes == 0:
+                continue
+            votes = tally.counts.get(candidacy_id, 0)
+            if votes / total_votes < self.cfg.deposit_refund_share:
+                continue
+            refundable.append((candidacy_id, agent_id, deposit))
+        positive_refunds = [
+            (self.treasury_id, agent_id, deposit)
+            for _candidacy_id, agent_id, deposit in refundable
+            if deposit > 0
+        ]
+        if positive_refunds:
+            predicted = self.ledger.next_transfer_id(tick)
+            refund_event = self._emit(
+                CANDIDACY_DEPOSITS_REFUNDED,
+                {
+                    "election_id": election_id,
+                    "refunds": [
+                        {
+                            "candidacy_id": candidacy_id,
+                            "agent_id": agent_id,
+                            "amount_cents": deposit,
+                        }
+                        for candidacy_id, agent_id, deposit in refundable
+                        if deposit > 0
+                    ],
+                    "txn_id": predicted,
+                },
+                tick,
+                subject_ids=(
+                    election_id,
+                    *(agent_id for _candidacy_id, agent_id, _deposit in refundable),
+                ),
+            )
+            try:
+                actual = self.ledger.post_transfers(
+                    positive_refunds,
+                    reason="transfer",
+                    tick=tick,
+                    cause=refund_event,
+                )
+                if actual != predicted:
+                    raise RuntimeError("deposit refund transaction ordinal diverged")
+            except Exception:
+                self.repo.ballots.clear()
+                self.repo.ballots.update(prior_ballots)
+                self.log.rollback()
+                raise
+            events.append(refund_event)
+        for candidacy_id, agent_id, deposit in refundable:
+            self.repo.deposits[candidacy_id] = (agent_id, deposit, True)
         for candidacy_id, votes in tally.counts.items():
             candidacy = self.repo.candidacies[candidacy_id]
             self.repo.candidacies[candidacy_id] = replace(candidacy, votes=votes)
@@ -1629,26 +1725,7 @@ class ElectionOffice:
                     salary_cents=self.cfg.offices[election.office].salary_cents,
                 )
             )
-        total_votes = sum(tally.counts.values())
-        for candidacy_id, (agent_id, deposit, refunded) in sorted(self.repo.deposits.items()):
-            candidacy = self.repo.candidacies[candidacy_id]
-            if candidacy.election_id != election_id or refunded or total_votes == 0:
-                continue
-            if candidacy.votes / total_votes < self.cfg.deposit_refund_share:
-                continue
-            if deposit <= 0:
-                self.repo.deposits[candidacy_id] = (agent_id, deposit, True)
-                continue
-            cause = events[-1]
-            self.ledger.post_transfer(
-                self.treasury_id,
-                agent_id,
-                deposit,
-                reason="transfer",
-                tick=tick,
-                cause=cause,
-            )
-            self.repo.deposits[candidacy_id] = (agent_id, deposit, True)
+        self.parties.close_election_cycle(tuple(candidacy.party_id for candidacy in candidacies))
         self.repo.elections[election_id] = replace(election, resolved=True)
         self._resolved_elections += 1
         return tuple(events)
@@ -1736,6 +1813,22 @@ class PolityResolver:
                 return GateFailure("capability", "voter is not eligible")
             if self.elections.has_voted(action.actor_id, election_id):
                 return GateFailure("capability", "voter has already voted")
+            references = {
+                str(value)
+                for value in (
+                    action.params.get("candidacy_id"),
+                    action.params.get("candidate_id"),
+                    *action.params.get("ranking", ()),
+                    *action.params.get("approvals", ()),
+                )
+                if value is not None
+            }
+            valid = {row.candidacy_id for row in self.elections.repo.open_candidacies(election_id)}
+            if not references <= valid:
+                return GateFailure(
+                    "capability",
+                    "ballot references a candidacy outside this election",
+                )
         elif action.type == ActionType.PROPOSE_POLICY:
             parameter = str(action.params.get("parameter", ""))
             if parameter not in self.policy.registry:
@@ -1763,21 +1856,35 @@ class PolityResolver:
 
     def check_resources(self, action: Action, ctx: ValidationContext) -> GateResult:
         cents = 0
+        payee_id: str | None = None
         if action.type == ActionType.FOUND_PARTY:
             cents = self.cfg.party_founding_fee_cents
+            payee_id = self.parties.treasury_id
         elif action.type == ActionType.ANNOUNCE_CANDIDACY:
             cents = self.cfg.candidacy_deposit_cents
+            payee_id = self.elections.treasury_id
         elif action.type == ActionType.CAMPAIGN:
+            channel = action.params.get("channel", "canvass")
             cents = max(
                 int(action.params.get("amount_cents", 0)),
                 int(action.params.get("spend_cents", 0)),
             )
+            if channel == "ads":
+                outlet = self.outlets.get(str(action.params.get("target_id", "")))
+                payee_id = None if outlet is None else _get(outlet, "firm_id")
+            elif channel == "rally":
+                observed = _get(_get(ctx.observation, "place"), "place_id")
+                place_id = action.params.get("place_id") or observed
+                if place_id:
+                    payee_id = _get(self.world.place(str(place_id)), "owner_id")
             cap = self.runtime.get("polity.campaign_cap_cents", ctx.tick)
             if cap is not None and cents > int(cap):
                 return GateFailure("resources", "campaign spend exceeds the live policy cap")
+            if channel == "canvass":
+                cents = 0
         elif action.type == ActionType.LOBBY:
             cents = int(action.params.get("spend_cents", 0))
-        if cents and not self.ledger.can_pay(action.actor_id, cents):
+        if cents and not self.ledger.can_pay(action.actor_id, cents, payee_id):
             return GateFailure("resources", "actor cannot fund the polity action")
         return None
 

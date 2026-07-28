@@ -2466,6 +2466,13 @@ CAMPAIGN_SPEND = register_kind(
         "txn_id",
     ),
 )
+CANDIDACY_DEPOSITS_REFUNDED = register_kind(
+    12013,
+    "CANDIDACY_DEPOSITS_REFUNDED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("election_id", "refunds", "txn_id"),
+)
 VOTE_CAST = register_kind(
     12020,
     "VOTE_CAST",

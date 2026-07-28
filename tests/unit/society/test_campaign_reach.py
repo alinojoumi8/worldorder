@@ -29,11 +29,11 @@ class ReachOutlets:
         return (self.outlet,)
 
 
-def test_ad_reach_formula_is_sorted_and_payload_is_capped() -> None:
+def test_ad_reach_formula_uses_a_deterministic_unbiased_sample_and_caps_payload() -> None:
     resolver, _runtime = _resolver()
     elections = resolver.elections
-    elections.world = ReachWorld(10_001)
-    elections.outlets = ReachOutlets(20_000)
+    elections.world = ReachWorld(20_001)
+    elections.outlets = ReachOutlets(10_001)
     elections.repo.candidacies["ca_one"] = Candidacy(
         "ca_one",
         "el_one",
@@ -58,6 +58,7 @@ def test_ad_reach_formula_is_sorted_and_payload_is_capped() -> None:
     assert event.payload["reach"] == 10_001
     assert len(event.payload["reached_agent_ids"]) == 10_000
     assert event.payload["reached_agent_ids"] == sorted(event.payload["reached_agent_ids"])
+    assert event.payload["reached_agent_ids"] != [f"ag_{index:05}" for index in range(10_000)]
     assert elections.repo.candidacies["ca_one"].spend_cents == 1_000
 
 

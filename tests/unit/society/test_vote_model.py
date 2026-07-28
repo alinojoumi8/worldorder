@@ -1,4 +1,3 @@
-import inspect
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -48,8 +47,13 @@ class Graph:
 
 
 class Platform:
+    def __init__(self, campaign_length_sim_days: int) -> None:
+        self.campaign_length_sim_days = campaign_length_sim_days
+
     def posts_in_window(self, tick: int, window_ticks: int):
-        assert window_ticks == 30 * PROFILES["microscope"].ticks_per_sim_day
+        assert (
+            window_ticks == self.campaign_length_sim_days * PROFILES["microscope"].ticks_per_sim_day
+        )
         return (
             SimpleNamespace(
                 author_id="ag_friend",
@@ -90,7 +94,7 @@ def _model() -> tuple[VoteModel, Candidacy]:
         exposure=exposure,
         cfg=cfg,
         clock=clock,
-        platform=Platform(),
+        platform=Platform(cfg.campaign_length_sim_days),
         income_statement=lambda _agent, _tick: {
             "annual_income_cents": 1_000_000,
             "hourly_wage_cents": 1_000,
@@ -125,7 +129,10 @@ def test_vote_features_cover_six_terms_and_social_reads_posts() -> None:
         "party_id": 1.0,
         "incumbency": 1.0,
     }
-    assert "votes" not in inspect.getsource(VoteModel._social)
+    before = model._social("ag_voter", candidacy, 2)
+    model.parties.note_votes(candidacy.agent_id, 999)
+    model.offices.note_votes(candidacy.agent_id, 999)
+    assert model._social("ag_voter", candidacy, 2) == before
     assert (
         model.self_interest(
             "ag_voter",
@@ -157,4 +164,5 @@ def test_reflex_ballot_records_all_components_plus_namespaced_gumbel() -> None:
 
     assert first == second
     assert set(first.utility) == {*VoteModel.FEATURES, "epsilon"}
+    assert first.max_utility == second.max_utility
     assert first.origin == "reflex"

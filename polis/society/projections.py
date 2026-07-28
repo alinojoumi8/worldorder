@@ -637,6 +637,7 @@ class PolityProjection:
                     "holdout_accuracy",
                     "first_election_prior",
                 )
+                if key in payload
             }
             await ctx.conn.execute(
                 """

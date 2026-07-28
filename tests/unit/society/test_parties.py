@@ -87,6 +87,23 @@ def test_below_three_members_dissolves_after_thirty_sim_days() -> None:
     assert registry.dissolve_stale(5 + thirty_days)[0].kind == PARTY_DISSOLVED
 
 
+def test_no_candidate_dissolution_counts_completed_election_cycles() -> None:
+    registry = _registry()
+    party_id = _found(registry)
+    registry.join("ag_b", party_id, 1)
+    registry.join("ag_c", party_id, 1)
+
+    registry.close_election_cycle((party_id,))
+    registry.close_election_cycle(())
+    assert registry.dissolve_stale(2) == ()
+
+    registry.close_election_cycle(())
+    events = registry.dissolve_stale(3)
+
+    assert [event.kind for event in events] == [PARTY_DISSOLVED]
+    assert events[0].payload["reason"] == "no_candidates"
+
+
 def test_platform_drift_and_fixed_ablation() -> None:
     values = {"ag_a": -1.0, "ag_b": 0.0, "ag_c": 1.0}
     registry = _registry(values=values)

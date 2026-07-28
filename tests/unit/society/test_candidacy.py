@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
+
 from polis.agents.actions import ActionType, GateFailure, ValidationContext, make_action
-from polis.agents.actions.params.polity import AnnounceCandidacyParams
+from polis.agents.actions.params.polity import AnnounceCandidacyParams, VoteParams
 from polis.society.polity import Ballot
 from tests.unit.society.test_polity_resolver import _ctx, _resolver
 
@@ -95,4 +97,37 @@ def test_age_and_record_bar_fail_at_capability() -> None:
     )
 
     assert isinstance(underage, GateFailure)
+    assert underage.reason == "capability"
+    assert "age, record, or election" in underage.detail
     assert isinstance(barred, GateFailure)
+    assert barred.reason == "capability"
+    assert "age, record, or election" in barred.detail
+
+
+def test_params_reject_missing_election_and_empty_ballot() -> None:
+    with pytest.raises(ValueError, match="election_id or office_id"):
+        AnnounceCandidacyParams()
+    with pytest.raises(ValueError, match="candidate, ranking, or approval"):
+        VoteParams(election_id="el_one")
+
+
+def test_ballot_must_reference_a_candidacy_in_its_election() -> None:
+    resolver, election_id = _open_election()
+    voting_tick = resolver.elections.repo.elections[election_id].voting_tick
+
+    with pytest.raises(ValueError, match="outside this election"):
+        resolver.elections.cast(
+            election_id,
+            Ballot("ag_voter", "ca_unknown"),
+            voting_tick,
+        )
+
+    action = make_action(
+        actor_id="ag_voter",
+        tick=voting_tick,
+        action_type=ActionType.VOTE,
+        params={"election_id": election_id, "candidacy_id": "ca_unknown"},
+    )
+    failure = resolver.check_capability(action, _ctx(voting_tick))
+    assert isinstance(failure, GateFailure)
+    assert "outside this election" in failure.detail

@@ -5,11 +5,14 @@ from uuid import UUID
 import pytest
 
 from polis.events.kinds import (
+    ABSTAINED,
     CAMPAIGN_SPEND,
     CANDIDACY_ANNOUNCED,
     ELECTION_CALLED,
     ELECTION_RESOLVED,
+    PARTY_DISSOLVED,
     PARTY_FOUNDED,
+    PARTY_PLATFORM_CHANGED,
     POLICY_ENACTED,
     POLICY_REPEALED,
     VOTE_CAST,
@@ -114,7 +117,6 @@ async def test_polity_projection_covers_canonical_rebuild_tables() -> None:
                 "n_reflex": 1,
                 "fitted_omega": {},
                 "holdout_accuracy": 0.0,
-                "first_election_prior": True,
             },
         ),
         _event(
@@ -136,6 +138,29 @@ async def test_polity_projection_covers_canonical_rebuild_tables() -> None:
             POLICY_REPEALED,
             {"policy_id": "py_two", "repealed_policy_id": "py_one"},
         ),
+        _event(
+            9,
+            ABSTAINED,
+            {
+                "election_id": "el_one",
+                "agent_id": "ag_abstainer",
+                "origin": "reflex",
+                "utility": {"congruence": 0.0},
+            },
+        ),
+        _event(
+            10,
+            PARTY_PLATFORM_CHANGED,
+            {
+                "party_id": "pt_one",
+                "changes": [{"proposition": "tax", "new": 0.75}],
+            },
+        ),
+        _event(
+            11,
+            PARTY_DISSOLVED,
+            {"party_id": "pt_one"},
+        ),
     )
     projection = PolityProjection()
 
@@ -148,6 +173,12 @@ async def test_polity_projection_covers_canonical_rebuild_tables() -> None:
     )
     assert any("spend_cents=spend_cents+" in query for query, _params in conn.calls)
     assert any("repealed_tick" in query for query, _params in conn.calls)
+    vote_params = next(params for query, params in conn.calls if "INSERT INTO votes" in query)
+    assert vote_params[1:5] == ("el_one", "ag_voter", "ca_one", 5)
+    assert vote_params[5:8] == ("[]", "[]", "reflex")
+    policy_params = next(params for query, params in conn.calls if "INSERT INTO policies" in query)
+    assert policy_params[1:4] == ("py_one", "tax.vat_bp", "1000")
+    assert policy_params[4:10] == ("1500", 7, 8, "council", 0.4, 1)
     assert projection.tables == (
         "parties",
         "elections",

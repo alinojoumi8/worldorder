@@ -48,7 +48,9 @@ class EconomyLedgerAdapter:
     ) -> bool:
         return amount_cents >= 0 and self.compatible_balance(payer_id, payee_id) >= amount_cents
 
-    def can_pay(self, payer_id: str, cents: int) -> bool:
+    def can_pay(self, payer_id: str, cents: int, payee_id: str | None = None) -> bool:
+        if payee_id is not None:
+            return cents >= 0 and self.compatible_balance(payer_id, payee_id) >= cents
         return (
             cents >= 0
             and sum(
@@ -68,7 +70,7 @@ class EconomyLedgerAdapter:
         payer_id: str,
         payee_id: str,
         amount_cents: int,
-        reason: str = "rent",
+        reason: str,
     ) -> tuple[Leg, ...]:
         destinations = self._liquid_accounts(payee_id)
         if not destinations:
@@ -114,7 +116,7 @@ class EconomyLedgerAdapter:
         cause: Event,
     ) -> str:
         transaction_id = self.ledger.post_transaction(
-            self.transfer_legs(payer_id, payee_id, amount_cents),
+            self.transfer_legs(payer_id, payee_id, amount_cents, "rent"),
             tick=tick,
             cause=cause,
         )
@@ -132,9 +134,33 @@ class EconomyLedgerAdapter:
         tick: int,
         cause: Event,
     ) -> str:
+        return self.post_transfers(
+            ((payer_id, payee_id, cents),),
+            reason=reason,
+            tick=tick,
+            cause=cause,
+        )
+
+    def post_transfers(
+        self,
+        transfers: Sequence[tuple[str, str, int]],
+        *,
+        reason: str,
+        tick: int,
+        cause: Event,
+    ) -> str:
+        totals: dict[tuple[str, int, str], int] = defaultdict(int)
+        for payer_id, payee_id, cents in transfers:
+            for leg in self.transfer_legs(payer_id, payee_id, cents, reason):
+                totals[(leg.account_id, leg.direction, leg.reason)] += leg.amount_cents
+        legs = tuple(
+            Leg(account_id, direction, amount, leg_reason)
+            for (account_id, direction, leg_reason), amount in sorted(totals.items())
+            if amount > 0
+        )
         return str(
             self.ledger.post_transaction(
-                self.transfer_legs(payer_id, payee_id, cents, reason),
+                legs,
                 tick=tick,
                 cause=cause,
             )
@@ -176,8 +202,8 @@ class EconomyNewsLedgerAdapter:
     def _aggregate(self, transfers: Sequence[tuple[str, str, int]]) -> tuple[Leg, ...]:
         totals: dict[tuple[str, int, str], int] = defaultdict(int)
         for payer_id, payee_id, cents in transfers:
-            for leg in self._adapter.transfer_legs(payer_id, payee_id, cents):
-                totals[(leg.account_id, leg.direction, "purchase")] += leg.amount_cents
+            for leg in self._adapter.transfer_legs(payer_id, payee_id, cents, "purchase"):
+                totals[(leg.account_id, leg.direction, leg.reason)] += leg.amount_cents
         return tuple(
             Leg(account_id, direction, amount, reason)
             for (account_id, direction, reason), amount in sorted(totals.items())

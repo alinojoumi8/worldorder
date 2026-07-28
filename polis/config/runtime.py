@@ -52,6 +52,8 @@ class RuntimeConfig:
     def __init__(self, base: Settings) -> None:
         self.base = base
         self._history: dict[str, list[Enactment]] = defaultdict(list)
+        self._policy_defaults = dict(base.polity.policy.flat())
+        self._policy_keys = frozenset(self._policy_defaults)
 
     def _static(self, parameter: str) -> Any:
         def resolve(root: Any) -> Any:
@@ -62,7 +64,7 @@ class RuntimeConfig:
                 current = getattr(current, part)
             return current
 
-        if parameter in self.base.polity.policy.flat():
+        if parameter in self._policy_keys:
             try:
                 return resolve(self.base.polity.policy)
             except AttributeError as exc:
@@ -73,7 +75,9 @@ class RuntimeConfig:
             raise RuntimeOverlayError(f"unknown runtime parameter: {parameter}") from exc
 
     def get(self, parameter: str, tick: int) -> Any:
-        candidates = [item for item in self._history[parameter] if item.effective_tick <= tick]
+        candidates = [
+            item for item in self._history.get(parameter, ()) if item.effective_tick <= tick
+        ]
         if not candidates:
             return self._static(parameter)
         return max(candidates, key=lambda item: (item.effective_tick, item.event_seq)).value
@@ -149,7 +153,8 @@ class RuntimeConfig:
         return tuple(self._history[parameter])
 
     def snapshot(self, tick: int) -> Mapping[str, Any]:
-        return {key: self.get(key, tick) for key in sorted(self._history)}
+        keys = self._policy_keys.union(self._history)
+        return {key: self.get(key, tick) for key in sorted(keys)}
 
     def dump(self) -> Mapping[str, Any]:
         return {
