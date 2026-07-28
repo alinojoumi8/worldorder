@@ -574,24 +574,7 @@ class SocialGraph:
         return result
 
     def end_all_for(self, agent_id: str, reason: str, tick: int) -> Sequence[Event]:
-        events: list[Event] = []
-        for row in self.neighbours(agent_id):
-            self.repo.put(replace(row, ended_tick=tick))
-            events.append(
-                self._emit(
-                    TIE_ENDED,
-                    {
-                        "a_id": row.a_id,
-                        "b_id": row.b_id,
-                        "type": row.type,
-                        "reason": reason,
-                        "final_strength": row.strength,
-                    },
-                    tick,
-                    subjects=(row.a_id, row.b_id),
-                )
-            )
-        return tuple(events)
+        return tuple(self.end(row, reason, tick) for row in self.neighbours(agent_id))
 
 
 @mechanism(

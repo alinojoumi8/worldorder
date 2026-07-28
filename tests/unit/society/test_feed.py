@@ -1,5 +1,7 @@
 from uuid import UUID
 
+import pytest
+
 from polis.config.settings import SocietySettings
 from polis.events.kinds import POST_ENGAGED
 from polis.events.log import EventLog, MemoryEventSink
@@ -133,6 +135,17 @@ def test_engagement_checkpoint_restores_full_training_state() -> None:
     assert restored.passes == 7
     assert restored.n0 == 42
     assert restored.beta_prior == (0.123457,) * 11
+
+    prior_state = restored.dump()
+    malformed = dict(source.dump())
+    malformed["beta"] = [0.25] * 11
+    malformed["n_observations"] = 99
+    malformed["eta"] = 0
+
+    with pytest.raises(ValueError, match="eta"):
+        restored.load(malformed)
+
+    assert restored.dump() == prior_state
 
 
 def test_build_all_freezes_features_before_writing_any_same_tick_views() -> None:

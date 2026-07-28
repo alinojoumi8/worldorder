@@ -393,13 +393,12 @@ class ActionValidator:
                 raise ValueError(
                     f"action tick {action.tick} does not match validation tick {ctx.tick}"
                 )
-            if len(canonical_bytes(action.params)) > self.max_params_bytes:
+            params_payload = canonical_bytes(action.params)
+            if len(params_payload) > self.max_params_bytes:
                 raise ValueError(f"params exceed max_params_bytes={self.max_params_bytes}")
             if action.origin == "external" and action.sig is None:
                 raise ValueError("external actions require sig")
-            params: ActionParams = PARAMS_MODELS[action.type].model_validate_json(
-                canonical_bytes(action.params)
-            )
+            params: ActionParams = PARAMS_MODELS[action.type].model_validate_json(params_payload)
         except (ConfigError, KeyError, ValidationError, ValueError) as exc:
             return self._reject(
                 action,

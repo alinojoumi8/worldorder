@@ -349,11 +349,10 @@ class EngagementModel:
         beta = tuple(float(value) for value in raw_beta)
         if len(beta) != FEED_FEATURE_COUNT:
             raise ValueError(f"checkpoint beta must contain {FEED_FEATURE_COUNT} entries")
-        self.beta = tuple(round6(value) for value in beta)
+        normalized_beta = tuple(round6(value) for value in beta)
         raw_count = state["n_observations"]
         if not isinstance(raw_count, int) or isinstance(raw_count, bool) or raw_count < 0:
             raise ValueError("checkpoint n_observations must be a non-negative integer")
-        self.n_observations = raw_count
         raw_eta = state["eta"]
         if not isinstance(raw_eta, (int, float)) or isinstance(raw_eta, bool) or raw_eta <= 0:
             raise ValueError("checkpoint eta must be positive")
@@ -369,6 +368,9 @@ class EngagementModel:
         prior = tuple(round6(float(value)) for value in raw_prior)
         if len(prior) != FEED_FEATURE_COUNT:
             raise ValueError(f"checkpoint beta_prior must contain {FEED_FEATURE_COUNT} entries")
+
+        self.beta = normalized_beta
+        self.n_observations = raw_count
         self.eta = float(raw_eta)
         self.passes = raw_passes
         self.n0 = raw_n0
