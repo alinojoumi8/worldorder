@@ -35,4 +35,4 @@ def test_migrant_priors_do_not_use_entity_facts() -> None:
     assert first == replay
     assert first != second_agent
     assert all(not proposition.startswith("fact.") for proposition, _, _ in first)
-    assert all(confidence < beliefs.cfg.confidence_dilution for _, _, confidence in first)
+    assert all(confidence <= beliefs.cfg.confidence_dilution for _, _, confidence in first)

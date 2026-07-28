@@ -510,7 +510,7 @@ class BeliefsProjection:
                     source_ref=str(
                         payload["source"]
                         if event.kind == BELIEF_PRIORS_SET
-                        else payload["cohort_id"]
+                        else f"migration:{payload['cohort_id']}"
                     ),
                 )
         else:
