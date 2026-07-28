@@ -50,6 +50,10 @@ KIND_RANGES: Final = (
     KindRange(7000, 7999, "exchange", "polis.economy", Persistence.PERSISTED),
     KindRange(8000, 8999, "banking", "polis.economy", Persistence.PERSISTED),
     KindRange(9000, 9999, "ventures", "polis.economy", Persistence.PERSISTED),
+    KindRange(10000, 10999, "communication", "polis.society", Persistence.PERSISTED),
+    KindRange(11000, 11020, "social_media", "polis.society", Persistence.PERSISTED),
+    KindRange(11021, 11021, "feed_sample", "polis.society", Persistence.SAMPLED),
+    KindRange(11022, 11999, "social_media", "polis.society", Persistence.PERSISTED),
     KindRange(14000, 14999, "education", "polis.agents", Persistence.PERSISTED),
     KindRange(90000, 90999, "ephemeral", "*", Persistence.EPHEMERAL),
     KindRange(99000, 99999, "research", "polis.research", Persistence.PERSISTED),
@@ -255,6 +259,239 @@ PATHS_PRECOMPUTED = register_kind(
     owner="polis.world",
     persistence=Persistence.PERSISTED,
     schema=_schema("world_hash", "pairs"),
+)
+
+# Society: communication, relationships, and the social platform.
+SPEECH_UTTERED = register_kind(
+    10010,
+    "SPEECH_UTTERED",
+    owner="polis.society.comms",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "speaker_id",
+        "place_id",
+        "text",
+        "addressed_to",
+        "heard_by",
+        "topic",
+        "stance_proposition",
+        "stance_value",
+        "conversation_id",
+        "turn_index",
+        "closing",
+        "claims",
+    ),
+)
+CONVERSATION_OPENED = register_kind(
+    10011,
+    "CONVERSATION_OPENED",
+    owner="polis.society.comms",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("conversation_id", "place_id", "participants", "opener_id", "topic"),
+)
+CONVERSATION_CLOSED = register_kind(
+    10012,
+    "CONVERSATION_CLOSED",
+    owner="polis.society.comms",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("conversation_id", "turns", "reason", "duration_ticks", "participants"),
+)
+MESSAGE_SENT = register_kind(
+    10020,
+    "MESSAGE_SENT",
+    owner="polis.society.comms",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "message_id",
+        "sender_id",
+        "recipient_id",
+        "text",
+        "in_reply_to",
+        "topic",
+        "stance_proposition",
+        "stance_value",
+        "claims",
+    ),
+)
+MESSAGE_READ = register_kind(
+    10021,
+    "MESSAGE_READ",
+    owner="polis.society.comms",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("message_id", "reader_id", "latency_ticks", "entered_memory"),
+)
+BROADCAST_MADE = register_kind(
+    10030,
+    "BROADCAST_MADE",
+    owner="polis.society.comms",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "broadcaster_id",
+        "place_id",
+        "text",
+        "topic",
+        "audience_ids",
+        "audience_size",
+        "venue_fee_cents",
+        "txn_id",
+        "stance_proposition",
+        "stance_value",
+    ),
+)
+TIE_FORMED = register_kind(
+    10040,
+    "TIE_FORMED",
+    owner="polis.society.graph",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("a_id", "b_id", "type", "context", "strength", "valence", "trust"),
+)
+TIE_UPDATED = register_kind(
+    10041,
+    "TIE_UPDATED",
+    owner="polis.society.graph",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "a_id",
+        "b_id",
+        "type",
+        "d_strength",
+        "d_valence",
+        "d_trust",
+        "drivers",
+    ),
+)
+TIE_ENDED = register_kind(
+    10042,
+    "TIE_ENDED",
+    owner="polis.society.graph",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("a_id", "b_id", "type", "reason", "final_strength"),
+)
+TIE_TYPE_CHANGED = register_kind(
+    10043,
+    "TIE_TYPE_CHANGED",
+    owner="polis.society.graph",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("a_id", "b_id", "from_type", "to_type", "trigger"),
+)
+NETWORK_SNAPSHOT = register_kind(
+    10050,
+    "NETWORK_SNAPSHOT",
+    owner="polis.society.graph",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "n_nodes",
+        "n_edges",
+        "mean_degree",
+        "degree_gini",
+        "powerlaw_alpha",
+        "powerlaw_ks",
+        "clustering_global",
+        "clustering_avg_local",
+        "assortativity_degree",
+        "assortativity_wealth",
+        "assortativity_belief",
+        "assortativity_district",
+        "modularity",
+        "n_communities",
+        "largest_component_share",
+        "n_components",
+    ),
+)
+POST_PUBLISHED = register_kind(
+    11010,
+    "POST_PUBLISHED",
+    owner="polis.society.media",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "post_id",
+        "author_id",
+        "text",
+        "topic",
+        "stance_proposition",
+        "stance_value",
+        "in_reply_to",
+        "repost_of",
+        "root_post_id",
+        "claims",
+        "follower_count_at_post",
+    ),
+)
+POST_DELETED = register_kind(
+    11011,
+    "POST_DELETED",
+    owner="polis.society.media",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("post_id", "author_id", "reason"),
+)
+REPOST_MADE = register_kind(
+    11012,
+    "REPOST_MADE",
+    owner="polis.society.media",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "post_id",
+        "repost_of",
+        "root_post_id",
+        "author_id",
+        "original_author_id",
+        "cascade_depth",
+        "comment",
+    ),
+)
+POST_ENGAGED = register_kind(
+    11020,
+    "POST_ENGAGED",
+    owner="polis.society.media",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("post_id", "agent_id", "type", "author_id"),
+)
+FEED_SERVED = register_kind(
+    11021,
+    "FEED_SERVED",
+    owner="polis.society.media",
+    persistence=Persistence.SAMPLED,
+    schema=_schema(
+        "agent_id",
+        "algorithm",
+        "post_ids",
+        "scores",
+        "candidate_pool_size",
+        "out_of_network_count",
+        "cross_cutting_count",
+        "mean_extremity",
+    ),
+)
+CASCADE_CLOSED = register_kind(
+    11022,
+    "CASCADE_CLOSED",
+    owner="polis.society.media",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "root_post_id",
+        "size",
+        "depth",
+        "breadth",
+        "structural_virality",
+        "reach",
+        "impressions",
+        "unique_reposters",
+        "lifetime_ticks",
+    ),
+)
+FOLLOW_CREATED = register_kind(
+    11040,
+    "FOLLOW_CREATED",
+    owner="polis.society.media",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("follower_id", "followee_id", "context"),
+)
+FOLLOW_ENDED = register_kind(
+    11041,
+    "FOLLOW_ENDED",
+    owner="polis.society.media",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("follower_id", "followee_id", "reason"),
 )
 PERCEPTION_BUILT = register_kind(
     4001,

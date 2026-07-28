@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from polis.agents.actions.params.base import ActionParams, AgentId
+from polis.agents.actions.params.base import ActionParams, AgentId, ShortText
 
 
 class BefriendParams(ActionParams):
     target_id: AgentId
+    message: ShortText | None = None
 
 
 class CourtParams(ActionParams):

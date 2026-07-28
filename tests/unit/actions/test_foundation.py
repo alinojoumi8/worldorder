@@ -34,7 +34,15 @@ from polis.agents.actions import (
     make_action,
 )
 from polis.agents.actions.params.exchange import SubmitOrderParams
+from polis.agents.actions.params.media import (
+    ClaimParams,
+    FollowParams,
+    PostParams,
+    RepostParams,
+    UnfollowParams,
+)
 from polis.agents.actions.params.meta import NullActionParams
+from polis.agents.actions.params.speech import SayParams
 from polis.agents.actions.params.ventures import DeclareDividendParams
 from polis.agents.actions.params.world import IdleParams, MoveToParams
 from polis.config.settings import ActionSettings
@@ -163,6 +171,50 @@ def test_enum_and_params_models_are_closed_and_frozen() -> None:
     idle = IdleParams()
     with pytest.raises(ValidationError):
         idle.extra = "mutated"  # type: ignore[attr-defined]
+
+
+def test_social_targets_reject_empty_and_ambiguous_aliases() -> None:
+    for model in (FollowParams, UnfollowParams):
+        with pytest.raises(ValidationError):
+            model()
+        with pytest.raises(ValidationError):
+            model(target_id="ag_target", followee_id="ag_followee")
+        assert model(followee_id="ag_followee").followee_id == "ag_followee"
+
+    with pytest.raises(ValidationError):
+        RepostParams()
+    with pytest.raises(ValidationError):
+        RepostParams(post_id="po_one", repost_of="po_two")
+    assert RepostParams(repost_of="po_one").repost_of == "po_one"
+
+
+def test_strict_action_params_accept_json_arrays_in_json_mode() -> None:
+    say = SayParams.model_validate_json(
+        '{"text":"hello","addressed_to":["ag_peer"],"claims":[{"predicate":"x"}]}'
+    )
+    post = PostParams.model_validate_json(
+        '{"text":"hello","media_urls":["https://example.test/a"],'
+        '"claims":[{"claim_id":"clm_1","text":"Acme is solvent",'
+        '"refers_to":{"entity_id":"fm_acme","predicate":"firm.solvent",'
+        '"value":true,"as_of_tick":1},"sourced_to_event_seqs":[10]}]}'
+    )
+
+    assert say.addressed_to == ("ag_peer",)
+    assert say.claims == ({"predicate": "x"},)
+    assert post.media_urls == ("https://example.test/a",)
+    assert post.claims == (
+        ClaimParams.model_validate_json(
+            '{"claim_id":"clm_1","text":"Acme is solvent",'
+            '"refers_to":{"entity_id":"fm_acme","predicate":"firm.solvent",'
+            '"value":true,"as_of_tick":1},"sourced_to_event_seqs":[10]}'
+        ),
+    )
+
+
+@pytest.mark.parametrize("stance", [-1.01, 1.01])
+def test_post_stance_rejects_values_outside_the_unit_interval(stance: float) -> None:
+    with pytest.raises(ValidationError):
+        PostParams(text="hello", stance_value=stance)
 
 
 def test_slot_ledger_uses_the_single_profile_configuration() -> None:
