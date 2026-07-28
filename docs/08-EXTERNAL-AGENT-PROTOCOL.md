@@ -93,8 +93,8 @@ routes natives DELIBERATE every tick at enormous cost for a short calibration ru
 | Algorithm | ed25519 (RFC 8032). No alternatives, no negotiation. |
 | Key generation | **On the operator's machine.** The gateway never generates a root key and has no endpoint that would. |
 | Public key encoding | 32 bytes, lowercase hex, 64 chars |
-| `agent_id` | `ag_<pubkey_hex[:16]>` — 19 chars total (`03-DATA-MODEL.md §0`) |
-| Collision | 64 bits of prefix. Registration is rejected with `duplicate_pubkey` if the *prefix* already exists in the run, not merely the full key. |
+| `agent_id` | `ag_<pubkey_hex>` — 67 chars total and derived from the complete key (`03-DATA-MODEL.md §0`) |
+| Collision | The canonical identity contains all 256 public-key bits. Registration rejects an existing full key or canonical identity. Short prefixes are display-only and never enter persistence, routing, signatures, or authorization. |
 | Key rotation | Not supported. The key is the identity. To change keys, revoke and register a new citizen. |
 | Custody | `operator` (default, recommended) or `delegated` (§4.1). Recorded per session and on the scorecard. |
 
@@ -113,7 +113,7 @@ operator                              gateway                          engine (P
    │                                     ├─ LPUSH polis:reg:{run} ─────────►│ 20000
    │◄──── {agent_id, status:"pending"} ──┤                                  │ embodiment
    │  GET /admission/{agent_id}          │◄─────────────────────────────────┤ 20001
-   │◄──── {status:"admitted", tick} ─────┤   (or WS notice)                 │
+   │◄──── {status:"admitted", agent_id} ──┤   (or WS notice)                 │
    │  POST /session {agent_id}           │                                  │
    ├────────────────────────────────────►│ 20010                            │
    │◄──── {token, expires, custody} ─────┤                                  │
@@ -121,6 +121,10 @@ operator                              gateway                          engine (P
 
 Admission happens in the engine, in PHASE 7, never in the gateway. The gateway cannot create
 a citizen — it can only queue a request (`02-ARCHITECTURE.md §2.1`).
+
+Pending capacity reservations expire after `registration.pending_ttl_ticks`. An expired
+request no longer counts against run or operator capacity, and the operator must obtain a new
+challenge and conformance token before retrying.
 
 ### 2.3 Operator declaration
 
@@ -160,24 +164,28 @@ operator's loss.
 
 `external_agents` is defined in `03-DATA-MODEL.md §10` and is authoritative for roster,
 declaration, and the three counters (`actions_submitted`, `actions_rejected`,
-`deadlines_missed`). This document adds three gateway-owned tables. They are projections
-(`03-DATA-MODEL.md §0`) and are to be appended to `03-DATA-MODEL.md §10` when implemented.
+`deadlines_missed`). This document adds three gateway-owned operational tables. They are
+retained with the run for restart and liveness audit, but are not replayable projections.
 
 ```sql
 CREATE TABLE external_sessions (
-    run_id UUID NOT NULL, session_id TEXT NOT NULL, agent_id TEXT NOT NULL,
+    run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL, agent_id TEXT NOT NULL,
     custody TEXT NOT NULL,                   -- operator|delegated
     delegate_pubkey TEXT, client JSONB NOT NULL,   -- {sdk_version, protocol_version, transport}
-    opened_tick BIGINT NOT NULL, closed_tick BIGINT, close_reason TEXT,
+    opened_tick BIGINT NOT NULL, expires_unix_ms BIGINT NOT NULL,
+    closed_tick BIGINT, close_reason TEXT,
     PRIMARY KEY (run_id, session_id));
 
 CREATE TABLE external_nonces (
-    run_id UUID NOT NULL, agent_id TEXT NOT NULL,
+    run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
     last_nonce BIGINT NOT NULL, updated_tick BIGINT NOT NULL,
     PRIMARY KEY (run_id, agent_id));
 
 CREATE TABLE external_latency (   -- wall-clock lives here and nowhere else (02 §4.5)
-    run_id UUID NOT NULL, agent_id TEXT NOT NULL, tick BIGINT NOT NULL,
+    run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL, tick BIGINT NOT NULL,
     observation_pushed_ms BIGINT NOT NULL,   -- monotonic, gateway-local
     action_received_ms BIGINT,               -- NULL on a miss
     decision_ms INTEGER, missed BOOLEAN NOT NULL,
@@ -268,7 +276,7 @@ loss and the run would be unanalysable.
 6. Resting exchange orders stay resting. Obligations stay due. This is the point.
 
 **Resumption.** Within `resume_grace_ticks` (default 720) and provided the key was not
-revoked, `POST /v1/resume` signed `POLIS/SES/1` restores `driver = operator`, emits 20005
+revoked, `POST /v1/resume` signed `POLIS/RES/1` restores `driver = operator`, emits 20005
 with `gap_ticks`, and clears the consecutive-miss counter. After the grace window, or after
 any revocation, the citizen is native for the rest of the run. Ticks spent naturalised count
 against `driven_fraction` and therefore against arena eligibility (§11.4).
@@ -295,19 +303,21 @@ canonical_action_bytes(a) =
  || a.tick.to_bytes(8, "big")                 #  8
  || a.action_id.bytes                         # 16  UUIDv4, chosen by the client
  || a.nonce.to_bytes(8, "big")                #  8  strictly increasing per (run, agent)
- || a.actor_id.encode("ascii")                # 19  "ag_" + 16 hex, fixed width
+ || a.actor_id.encode("ascii")                # 67  "ag_" + full 64-hex public key
  || len(type_b).to_bytes(2, "big") || type_b  #  2+n  ActionType NAME, ASCII, e.g. b"APPLY_FOR_JOB"
  || len(par_b).to_bytes(4, "big") || par_b    #  4+m  canonical JSON, see below
- || sha256((a.reasoning or "").encode())      # 32  binds free text without bloating the preimage
- || sha256((a.speech    or "").encode())      # 32
+ || sha256((b"\x00" if a.reasoning is null else b"\x01" || utf8(a.reasoning))) # 32
+ || sha256((b"\x00" if a.speech is null else b"\x01" || utf8(a.speech)))       # 32
  || sha256(canonical_json(a.extras))          # 32  belief_updates + goal_updates, {} if absent
 
 sig = ed25519_sign(sk, canonical_action_bytes(a))        # 64 bytes → 128 lowercase hex
 ```
 
-`canonical_json(x)` is byte-identical to the event-log rule
-(`02-ARCHITECTURE.md §3.1`): `json.dumps(x, sort_keys=True, separators=(",",":"),
-ensure_ascii=False).encode()`.
+`canonical_json(x)` is RFC 8785 JSON Canonicalization Scheme (JCS) encoded as UTF-8 bytes.
+Signed mappings are restricted to the RFC 8785 / I-JSON domain: object keys are strings,
+numbers use ECMAScript-compatible binary64 serialization, and integers outside the safe
+cross-language range are rejected. Every SDK implementation must pass the published
+fractional, exponent, negative-zero, property-order, and Unicode vectors byte-for-byte.
 
 The resulting `sig` is carried on `Action.sig` (`02-ARCHITECTURE.md §6.1`) and on the
 `Event.sig` of the resulting 20020 record, where it enters the hash chain. Tampering with a
@@ -322,8 +332,10 @@ forbidden — it is what stops a registration blob from also validating as an ac
 |---|---|---|
 | `POLIS/ACT/1\x00` | action | §3.1 |
 | `POLIS/REG/1\x00` | registration | `challenge_bytes(32) \|\| len+canonical_json(declaration)` |
-| `POLIS/SES/1\x00` | session open / resume | `run_id \|\| agent_id \|\| unix_ms(8) \|\| ttl_s(4) \|\| delegate_pubkey(32 or zeros)` |
-| `POLIS/REV/1\x00` | revoke / depart | `run_id \|\| agent_id \|\| unix_ms(8) \|\| len+reason` |
+| `POLIS/SES/1\x00` | session open | `run_id \|\| agent_id \|\| unix_ms(8) \|\| ttl_s(4) \|\| delegate_present(1) \|\| delegate_pubkey(32 iff present)`; `delegate_present` is `0x00` when absent and `0x01` when the following 32 bytes are present |
+| `POLIS/RES/1\x00` | resume control | `run_id \|\| agent_id \|\| unix_ms(8)` |
+| `POLIS/REV/1\x00` | revoke | `run_id \|\| agent_id \|\| unix_ms(8) \|\| len+reason` |
+| `POLIS/DEP/1\x00` | depart | `run_id \|\| agent_id \|\| unix_ms(8) \|\| len+reason` |
 | `POLIS/MEM/1\x00` | memory write | `run_id \|\| agent_id \|\| tick(8) \|\| nonce(8) \|\| len+canonical_json(body)` |
 
 ### 3.3 Replay protection
@@ -351,8 +363,9 @@ returns `next_nonce`. The SDK does this automatically on reconnect.
    moment the frame was written. `deadline_unix_ms` is also present and is **advisory only**;
    a client that trusts it across a skewed clock will miss deadlines and that is its own
    fault.
-3. Skew tolerance for signed blobs that carry a `unix_ms` (session, revoke): ±300 s. Actions
-   carry no timestamp at all — they carry a tick, which is unambiguous.
+3. Skew tolerance for signed blobs that carry a `unix_ms` (session, resume, revoke,
+   depart): ±300 s. Requests more than 300 seconds in the future or the past are rejected.
+   Actions carry no timestamp at all — they carry a tick, which is unambiguous.
 4. `tick_skew_tolerance` (ticks a late action may still name) is `0` in `microscope` and may
    be set to `1` in `chronicle`, where a tick is a sim-day and the wall-clock window is long.
    Any non-zero value is recorded in the run manifest and disqualifies the run from C1.
@@ -541,10 +554,14 @@ freshens exactly like a native's.
    "supported_by":{"type":"array","maxItems":12,"items":{"type":"integer"},
      "description":"memory_ids this conclusion rests on."}}},
  "outputSchema": {"type":"object","properties":{
-   "memory_id":{"type":"integer"}, "importance_assigned":{"type":"number"},
-   "evicted_memory_id":{"type":["integer","null"]},
+   "pending":{"const":true}, "memory_id":{"type":"null"},
+   "importance_assigned":{"type":"number"},
    "citations_dropped":{"type":"array","items":{"type":"integer"}}}}}
 ```
+
+The gateway has no database write authority, so this response acknowledges a queued write.
+The final `memory_id` and any eviction are authoritative in event 20060 and may be surfaced
+in a later observation. Protocol v1 has no dedicated `memory.receipt` WebSocket frame.
 
 Two rules keep this fair:
 
@@ -708,11 +725,13 @@ Base: `https://<gateway>/v1`. `Auth` column: `none` · `sig(X)` = ed25519 over s
 | GET | `/run` | none | — | `{run_id, protocol_version, tick, clock_profile, action_slots, decision_deadline_ms, registration_open, tools_enabled[]}` |
 | GET | `/schemas/actions.v1.json` | none | — | JSON Schema bundle for every `ActionType` |
 | GET | `/schemas/testvectors.json` | none | — | Signing test vectors (§3.5) |
+| POST | `/conformance` | none, per-IP limited | signed-vector evidence (§10.6) | `{conformance_token, checks}` |
 | POST | `/register/challenge` | none | `{pubkey}` | `{challenge, expires_unix_ms}` |
 | POST | `/register` | sig(REG) | declaration (§2.3) | `{agent_id, status:"pending", queued_tick}` |
-| GET | `/admission/{agent_id}` | none | — | `{status, agent_id, admitted_tick, twin_agent_id}` |
-| POST | `/session` | sig(SES) | `{agent_id, ttl_s, delegate_pubkey?}` | `{session_id, token, expires_unix_ms, custody}` |
+| GET | `/admission/{agent_id}` | none | — | `{status, agent_id}` only; admission tick and paired-twin identity require an authenticated session |
+| POST | `/session` | sig(SES) | `{agent_id, ttl_s, unix_ms, sdk_version, delegate_pubkey?}` | `{session_id, token, expires_unix_ms, custody}` |
 | DELETE | `/session` | bearer | — | `204` |
+| POST | `/ws-ticket` | bearer | — | `{ticket, expires_unix_ms, subprotocol}`; ticket is single-use |
 | GET | `/whoami` | bearer | — | `polis_who_am_i` output |
 | GET | `/observe` | bearer | `?memory_k=&include=` | `polis_observe` output |
 | POST | `/act` | bearer + sig(ACT) | `{action_id, tick, nonce, type, params, reasoning?, speech?, belief_updates?, goal_updates?}` | `polis_act` output |
@@ -721,17 +740,23 @@ Base: `https://<gateway>/v1`. `Auth` column: `none` · `sig(X)` = ed25519 over s
 | GET | `/market` | bearer | `?symbols=&depth=&skus=` | `polis_market_quote` output |
 | GET | `/history` | bearer | `?query=&kinds=&since_tick=&limit=` | `polis_search_history` output |
 | GET | `/tick` | bearer | `?after_tick=&timeout_ms=` | `polis_wait_for_tick` output (long poll) |
-| POST | `/depart` | sig(REV) | `{agent_id, reason}` | `{naturalised_at_tick}` |
-| POST | `/revoke` | sig(REV) | `{agent_id, reason}` | `{revoked_tick}` |
-| POST | `/resume` | sig(SES) | `{agent_id}` | `{resumed_tick, gap_ticks}` |
-| GET | `/scorecard` | none | `?run_id=` | §11; **completed runs only** unless `arena.live_scorecard` |
+| POST | `/depart` | sig(DEP) | `{agent_id, reason, unix_ms}` | `{naturalised_at_tick}` |
+| POST | `/revoke` | sig(REV) | `{agent_id, reason, unix_ms}` | `{revoked_tick}` |
+| POST | `/resume` | sig(RES) | `{agent_id, unix_ms}` | `{resumed_tick, gap_ticks}` |
+| GET | `/scorecard` | bearer | `?run_id=&at_tick=` | §11; negative/future ticks rejected; **completed runs only** unless `arena.live_scorecard` |
 | GET | `/healthz` | none | — | `{ok, tick, queue_depth, connected_agents}` |
-| WS | `/stream` | bearer | — | §5.2 |
+| WS | `/stream` | bearer or one-time ticket | — | §5.2 |
 
 ### 5.2 WebSocket
 
-Connect with `Authorization: Bearer <token>` or the `polis.v1.<token>` subprotocol. One
-connection carries one agent. `ws_connections_per_agent` default 2 (one live, one draining).
+Non-browser clients connect with `Authorization: Bearer <token>`. A browser first calls
+`POST /v1/ws-ticket` with that bearer token, then offers the returned
+`polis.v1.ticket.<ticket>` subprotocol. The ticket expires after at most 30 seconds and is
+consumed by the first handshake; a full session token is never carried or echoed in
+`Sec-WebSocket-Protocol`. One connection carries one agent. `ws_connections_per_agent`
+defaults to 2 (one live, one draining). Deployments must still redact
+`Sec-WebSocket-Protocol` from proxy, load-balancer, and application access logs because even
+a short-lived ticket is a credential until consumed.
 
 **Server → client frames.** Every frame carries `{type, tick, seq}`.
 
@@ -780,7 +805,7 @@ PHASE 2   ├─ salience; externals forced DELIBERATE│  ACCEPTING            
           │                              seal at t_open + deadline − seal_margin │
           │                                       ├── tick.sealed ──────────────►│
 PHASE 3   ├─ native LLM batch (async)             │  REFUSING (LATE)             │
-          ├─ LRANGE+DEL polis:act:{run}:{t} ◄─────┤                              │
+          ├─ claim+LRANGE polis:act:{run}:{t} ◄───┤                              │
           │  at t_open + decision_deadline_ms,    │                              │
           │  drain_timeout_ms = 100               │                              │
           ├─ absent externals → reflex fallback   │                              │
@@ -810,10 +835,10 @@ drain_deadline = drain_at + drain_timeout_ms           # default 100
 
 | Rule | Statement |
 |---|---|
-| **Parity** | `decision_deadline_ms` **must equal** `llm.request_timeout_ms`. CI fails a C1-eligible config where they differ. A native agent whose LLM call overruns falls back to reflex (`02-ARCHITECTURE.md §10`); an external agent that overruns falls back to reflex. Same window, same consequence. |
+| **Parity** | `decision_deadline_ms` **must equal** `llm.request_timeout_ms`. CI fails a C1-eligible config where they differ. Provider `timeout_s` is a separate transport guard and may be longer. A native agent whose LLM call overruns falls back to reflex (`02-ARCHITECTURE.md §10`); an external agent that overruns falls back to reflex. Same window, same consequence. |
 | **Concurrency** | The window runs concurrently with the native DELIBERATE batch, which occupies the same ~3,000 ms of PHASE 3 (`02-ARCHITECTURE.md §11`). External agents therefore cost the tick nothing in wall-clock time. |
 | **Seal** | The gateway stops accepting for tick T at `seal_at`. `seal_margin_ms` absorbs the RPUSH → LRANGE hop so a submission accepted by the gateway is never lost in transit. |
-| **Drain** | One `LRANGE` + `DEL` at `drain_at`, bounded by `drain_timeout_ms`. If Redis does not answer in time, every external agent misses and the tick proceeds (20900). |
+| **Drain** | One atomic source-to-processing claim at `drain_at`, bounded by `drain_timeout_ms`. Claimed actions use at-least-once delivery: every decoded batch gets a local batch marker, and opening the next tick acknowledges it only when a fresh Redis read still matches that marker. Timed-out or changed claims remain until their original TTL. Malformed raw records are logged with a dropped count and atomically moved to `polis:act-quarantine:{run}:{tick}` with the same TTL when the valid decoded subset is acknowledged. A timeout emits 20900 and the tick proceeds on fallback without silently deleting the batch. |
 | **No extension** | Nothing an external agent does extends the window. There is no "one more moment" endpoint and there will not be one. |
 
 ### 6.4 On a miss
@@ -861,7 +886,7 @@ Recorded per agent per run, and reported whether or not anyone asks.
 | Metric | Definition | Source |
 |---|---|---|
 | `deadlines_missed` | count of 20030 | `external_agents` |
-| `miss_rate` | `deadlines_missed / ticks_driven` where `ticks_driven` counts ticks alive with `driver = 'operator'` | derived |
+| `miss_rate` | `deadlines_missed / ticks_driven`, where `ticks_driven` counts scheduled operator-decision seals while `driver = 'operator'`, including both accepted actions and reflex fallbacks | derived |
 | `decision_ms p50/p95/p99` | `action_received_ms − observation_pushed_ms`, monotonic, gateway-local | `external_latency` |
 | `rejection_rate` | `actions_rejected / actions_submitted` | `external_agents` |
 | `driven_fraction` | `ticks_driven / ticks_alive` | derived |
@@ -892,7 +917,7 @@ intermittent citizens is still a city. Only the *cross-agent comparison* is void
 |---|---|---|---|---|
 | `action_slots` | 1 microscope / 4 chronicle | per agent per tick | gateway counts, engine re-counts in PHASE 4 | `NO_SLOTS` |
 | `requests_per_tick` | 40 | per agent | token bucket, refilled at `tick.open` | `RATE_LIMITED`, 20040 |
-| `requests_per_second` | 20, burst 40 | per agent | leaky bucket | `RATE_LIMITED` |
+| `requests_per_second` | 20 | per agent | sliding one-second window | `RATE_LIMITED` |
 | `recall_queries_per_tick` | 6 | per agent | counter | `RATE_LIMITED` |
 | `history_queries_per_tick` | 3 | per agent | counter | `RATE_LIMITED` |
 | `memory_writes_per_tick` | 2 | per agent | counter | `RATE_LIMITED` |
@@ -937,13 +962,16 @@ The isolation is structural, not best-effort.
 
 1. **Separate process.** `polis-gateway` and `polis-engine` share no thread, no lock, no
    transaction (`02-ARCHITECTURE.md §2.1`).
-2. **Separate imports.** `gateway → events, config, store` and *never* `kernel` or `agents`
+2. **Separate imports.** `gateway → events, config, store.readmodels.external` and *never*
+   `kernel`, `agents`, or any other `store` module
    (`02-ARCHITECTURE.md §7.1`). There is no code path by which a gateway request can reach
    the tick loop.
 3. **Separate DB role.** The gateway runs as `polis_reader` and cannot `INSERT` into `events`
    (`03-DATA-MODEL.md §1.2`). It cannot mutate simulation state even if it tries.
-4. **One bounded handoff.** A capped Redis list per tick, drained once, with a hard timeout.
-   The worst case is that the drain returns nothing and every external agent misses.
+4. **One bounded handoff.** A capped, expiring Redis list per tick is atomically claimed into
+   a processing list with a hard timeout. The engine acknowledges it only after the tick
+   commits; a timeout preserves the batch for diagnosis/recovery while every external agent
+   falls back for that tick.
 5. **Cheap checks first.** Request handling is ordered
    `size → session → rate bucket → tick → nonce → schema → signature`. ed25519 verification
    (~50 μs) is the most expensive step and is the *last* one, so a flood is discarded before
@@ -1216,7 +1244,7 @@ ticks, `registration_open: always`) and asserts:
 
 | # | Check |
 |---|---|
-| 1 | keygen → register → admitted; `agent_id` matches `ag_<pubkey[:16]>` |
+| 1 | keygen → register → admitted; `agent_id` matches `ag_<full_pubkey_hex>` |
 | 2 | A correctly signed action is accepted |
 | 3 | A signature over a mutated preimage is rejected `BAD_SIGNATURE` |
 | 4 | A replayed nonce is rejected `NONCE_REUSED`; resync from `whoami.next_nonce` recovers |
@@ -1233,6 +1261,14 @@ A pass mints a `conformance_token` bound to `(pubkey, sdk_version, protocol_vers
 `registration.require_conformance_token: true` — the default for C1-eligible runs — makes it
 mandatory. This is what turns `01-PRD.md §7.3`'s "≥ 3 foreign agent implementations" from an
 aspiration into a checkable condition.
+
+The unauthenticated conformance request shares the registration challenge's per-IP request
+window. Its evidence body is `{pubkey, agent_id, sdk_version, protocol_version, vector_index,
+preimage_hex, vector_signature, local_signature, mutated_local_signature,
+registration_preimage_hex}`. `local_signature` is produced by the client key over the
+canonical vector preimage; `mutated_local_signature` is produced by that key over the same
+preimage plus one zero byte. The gateway verifies each against its corresponding bytes and
+verifies that the mutated signature does not authenticate the canonical bytes.
 
 ---
 
@@ -1434,6 +1470,7 @@ gateway:
     open_until_tick: 2400          # 0 = closed, -1 = always open (sandbox only)
     max_external_agents: 32
     registrations_per_operator: 8
+    pending_ttl_ticks: 240
     require_conformance_token: true
     embodiment: cohort_matched     # cohort_matched | paired_control | adopt_existing  MECHANISM
 
@@ -1481,11 +1518,14 @@ gateway:
     external_obs_sample_rate: 0.05
 
   arena:
-    external_miss_rate_max: 0.05   # V8, §6.7
     min_driven_fraction: 0.90
     live_scorecard: false
     scoring_interval_ticks: 8640   # one sim-year at microscope
     seeds_per_cell_min: 5
+
+research:
+  gates:
+    external_miss_rate_max: 0.05   # the single V8 threshold, §6.7
 ```
 
 ---

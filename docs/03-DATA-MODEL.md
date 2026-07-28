@@ -12,10 +12,10 @@
 |---|---|
 | **Money** | Always `BIGINT`, always minor units (cents), always suffixed `_cents`. Never `NUMERIC`, never `FLOAT`. |
 | **Prices on the exchange** | `BIGINT` in price ticks (1 tick = 1 cent by default). |
-| **IDs** | Entity IDs are `TEXT` with a typed prefix: `ag_`, `fm_`, `bk_`, `hh_`, `pl_`, `st_`, `pt_`, `ol_`. External agents use `ag_<pubkey_hex[:16]>`. Rationale: IDs appear in LLM prompts and event payloads; a readable prefix prevents entire classes of confusion. |
-| **Time** | `tick BIGINT` is authoritative. `sim_time TIMESTAMP` is a convenience projection. Wall-clock time appears only in `llm_calls` and `runs`. |
-| **Run scoping** | Every table carries `run_id UUID NOT NULL`. All queries are run-scoped. There is no cross-run state. |
-| **Projections** | Every table except `events`, `llm_calls`, `runs`, and `checkpoints` is a **projection** — rebuildable from the log by replay. Never store anything in a projection that cannot be derived. |
+| **IDs** | Entity IDs are `TEXT` with a typed prefix: `ag_`, `fm_`, `bk_`, `hh_`, `pl_`, `st_`, `pt_`, `ol_`. External agents use the collision-resistant canonical identity `ag_<full_pubkey_hex>`, with the exact 32-byte Ed25519 public key encoded as 64 lowercase hexadecimal characters and no `0x` prefix. The separately verified public-key field must match it. A UI may shorten the ID for display, but persistence, routing, signatures, and authorization always use the full identity. Rationale: typed prefixes prevent entity-class confusion while the complete authenticated key avoids identity collisions. |
+| **Time** | `tick BIGINT` is authoritative. `sim_time TIMESTAMP` is a convenience projection. Wall-clock time appears only in `llm_calls`, `runs`, and operational gateway metadata (`external_sessions`, `external_conformance_tokens`, `external_latency`); it never enters simulated state. |
+| **Run scoping** | Every run-owned table carries `run_id UUID NOT NULL`; queries against them are run-scoped. Shared `completion_cache` entries and pre-admission `external_conformance_tokens` are explicit exceptions. There is no cross-run simulated state. |
+| **Projections** | Simulation-state tables are **projections** rebuildable from the log. Non-replayable exceptions are `events`, `llm_calls`, `runs`, `checkpoints`, `completion_cache`, and the operational gateway tables `external_sessions`, `external_nonces`, `external_conformance_tokens`, and `external_latency`. Never store anything non-derived in a projection. |
 | **Soft delete** | Entities are never deleted. `dissolved_at_tick`, `died_at_tick`, `closed_at_tick` mark the end of life. History is the product. |
 | **JSONB** | Used for open-ended payloads (event payloads, trait vectors, LLM params). Never for anything that is queried in a hot path or joined on. |
 
@@ -46,13 +46,28 @@ CREATE TABLE runs (
     total_cost_usd    NUMERIC(12,6) NOT NULL DEFAULT 0,
     parent_run_id     UUID REFERENCES runs(run_id),   -- for sweeps and re-runs
     sweep_id          UUID,
-    tags              TEXT[] NOT NULL DEFAULT '{}'
+    tags              TEXT[] NOT NULL DEFAULT '{}',
+    metric_manifest   JSONB NOT NULL DEFAULT '{}',    -- {metric_id: definition_hash}
+    mechanism_manifest JSONB NOT NULL DEFAULT '{}',   -- {mechanism_id: entails_hash}
+    completion_cache_manifest JSONB NOT NULL DEFAULT '{}',
+                                                    -- {cache_key: completion_content_hash}
+    completion_cache_manifest_hash CHAR(64) NOT NULL,
+                                                    -- sha256(canonical manifest)
+    ablations         JSONB NOT NULL DEFAULT '{}',    -- active ablation flags
+    scale             INTEGER                         -- initial agent count, for the
+                                                      --   finite-size ladder (threat T7)
 );
 ```
 
-`config_hash`, `prompt_manifest`, `model_manifest`, and `code_git_sha` together form the
-**reproducibility tuple**. A result is only comparable to another result with the same
-tuple (mitigates T4, T5).
+`(config_hash, prompt_manifest, model_manifest, code_git_sha, master_seed,
+completion_cache_manifest_hash)` is the **reproducibility tuple**. A result is only
+comparable to another result with the same tuple (mitigates T4, T5). At launch, the manifest
+maps every compatible cache entry already available in the run namespace to the canonical
+hash of its persisted completion record (rendered prompt hash, provider response, and cost);
+it is empty only for an explicitly cold `live` cache. The terminal manifest covers that
+launch snapshot plus completions used or produced by the run. It is not bounded by the
+in-process LRU. Its hash therefore identifies the run-specific cache snapshot rather than
+a mutable shared cache.
 
 ### 1.2 `events` — the log
 
@@ -121,7 +136,9 @@ CREATE TABLE llm_calls (
     cost_usd         NUMERIC(12,8) NOT NULL,
     latency_ms       INTEGER NOT NULL,
     error            TEXT,
-    sim_aware_flag   BOOLEAN NOT NULL DEFAULT FALSE   -- T3 detector
+    sim_aware_flag   BOOLEAN NOT NULL DEFAULT FALSE,  -- T3 detector
+    lane             TEXT NOT NULL,                   -- provider concurrency lane
+    cache_mode       TEXT NOT NULL                    -- live|replay|hybrid at call time
 );
 CREATE INDEX llm_run_tick ON llm_calls (run_id, tick);
 CREATE INDEX llm_actor    ON llm_calls (run_id, actor_id, tick);
@@ -310,7 +327,7 @@ CREATE TABLE households (
     home_place_id TEXT NOT NULL,
     member_ids   TEXT[] NOT NULL,
     head_agent_id TEXT,
-    tenure       TEXT NOT NULL,       -- own|rent
+    tenure       TEXT NOT NULL,       -- own|rent|shelter
     rent_cents   BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (run_id, household_id)
 );
@@ -361,8 +378,8 @@ CREATE TABLE places (
     place_id    TEXT NOT NULL,
     district_id TEXT NOT NULL,
     type        TEXT NOT NULL,     -- home|office|factory|shop|school|university|bank|
-                                   -- exchange|town_hall|courthouse|police|hospital|
-                                   -- park|bar|newsroom|studio
+                                   -- exchange|town_hall|courthouse|police|prison|hospital|
+                                   -- park|bar|newsroom|studio|shelter
     name        TEXT NOT NULL,
     x           SMALLINT NOT NULL,
     y           SMALLINT NOT NULL,
@@ -421,7 +438,10 @@ CREATE TABLE ledger_accounts (
     owner_id   TEXT NOT NULL,        -- agent|firm|bank|government|market|external
     owner_type TEXT NOT NULL,
     account_type TEXT NOT NULL,      -- cash|deposit|loan_receivable|loan_payable|
-                                     -- equity|reserve|tax_receivable|escrow
+                                     -- equity|reserve|tax_receivable|escrow|issuance
+                                     -- `issuance` is the central bank's sole money-creation
+                                     -- account. It is the ONLY account permitted to run an
+                                     -- unbounded contra balance; see §4.2 rule 2.
     currency   TEXT NOT NULL DEFAULT 'POL',
     balance_cents BIGINT NOT NULL DEFAULT 0,
     opened_tick BIGINT NOT NULL,
@@ -443,7 +463,9 @@ CREATE TABLE ledger_entries (
     direction   SMALLINT NOT NULL,    -- +1 debit, -1 credit
     amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
     reason      TEXT NOT NULL,        -- wage|purchase|trade|loan|interest|tax|rent|
-                                      -- dividend|inheritance|fine|transfer|issuance
+                                      -- dividend|inheritance|fine|transfer|issuance|
+                                      -- write_off|escrow|tuition|legal_fee|campaign|
+                                      -- ad_revenue|welfare|damages
     event_seq   BIGINT NOT NULL,
     PRIMARY KEY (run_id, entry_id)
 ) PARTITION BY LIST (run_id);
@@ -819,37 +841,117 @@ and the Parquet export is what analysis actually reads.
 
 ```sql
 CREATE TABLE external_agents (
-    run_id UUID NOT NULL, agent_id TEXT NOT NULL,
-    pubkey TEXT NOT NULL UNIQUE, operator TEXT NOT NULL,
-    declared_model TEXT, declared_scaffold TEXT,
-    registered_tick BIGINT NOT NULL, revoked_tick BIGINT,
+    run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    pubkey TEXT NOT NULL, operator TEXT NOT NULL,
+    contact TEXT NOT NULL, display_name TEXT NOT NULL,
+    declared_model TEXT NOT NULL, declared_model_version TEXT NOT NULL,
+    declared_scaffold TEXT NOT NULL, scaffold_notes TEXT NOT NULL,
+    memory TEXT NOT NULL, sdk_version TEXT NOT NULL, protocol_version INTEGER NOT NULL,
+    requested_embodiment TEXT
+        CHECK (requested_embodiment IN ('cohort_matched','paired_control','adopt_existing')),
+    embodiment TEXT NOT NULL
+        CHECK (embodiment IN ('cohort_matched','paired_control','adopt_existing')),
+    conformance_token TEXT, twin_agent_id TEXT,
+    registered_tick BIGINT NOT NULL, admitted_tick BIGINT NOT NULL,
+    revoked_tick BIGINT, naturalised_tick BIGINT, resume_grace_until_tick BIGINT,
+    consecutive_misses INTEGER NOT NULL DEFAULT 0,
+    ticks_driven BIGINT NOT NULL DEFAULT 0,
     actions_submitted BIGINT NOT NULL DEFAULT 0,
     actions_rejected BIGINT NOT NULL DEFAULT 0,
     deadlines_missed BIGINT NOT NULL DEFAULT 0,
+    sim_aware_count BIGINT NOT NULL DEFAULT 0,
+    strikes INTEGER NOT NULL DEFAULT 0,
+    suspensions INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (run_id, agent_id),
+    UNIQUE (run_id, pubkey)
+);
+
+-- This is an admitted-agent projection, not a pending-registration table.
+-- Kind 20001 creates the row, so embodiment and admitted_tick remain NOT NULL.
+CREATE TABLE external_sessions (
+    run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL, agent_id TEXT NOT NULL,
+    custody TEXT NOT NULL, delegate_pubkey TEXT, client JSONB NOT NULL,
+    opened_tick BIGINT NOT NULL, expires_unix_ms BIGINT NOT NULL,
+    closed_tick BIGINT, close_reason TEXT,
+    PRIMARY KEY (run_id, session_id)
+);
+
+CREATE TABLE external_nonces (
+    run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    last_nonce BIGINT NOT NULL, updated_tick BIGINT NOT NULL,
     PRIMARY KEY (run_id, agent_id)
 );
 
+CREATE TABLE external_latency (
+    run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL, tick BIGINT NOT NULL,
+    observation_pushed_ms BIGINT NOT NULL, action_received_ms BIGINT,
+    decision_ms INTEGER, missed BOOLEAN NOT NULL,
+    PRIMARY KEY (run_id, agent_id, tick)
+) PARTITION BY LIST (run_id);
+```
+
+Pending declarations remain in the gateway registration handoff until the engine records kind
+20000. Kind 20001 creates the admitted `external_agents` row; kind 20002 records rejection
+without creating one. Consequently, row existence itself proves admission, and a projection
+rebuild creates `external_agents` rows only from kind 20001.
+
+These three tables are **operational gateway records**, not replayable projections.
+`external_sessions` is retained for the live run and expires sessions against the gateway
+server's Unix clock; replay never re-opens a bearer session. `external_nonces` is retained
+with the run so a restarted gateway cannot accept an already-used nonce; an offline rebuild
+may recover its maximum accepted value from 20020 events, but replay itself never consults
+the table. `external_latency` is retained with the original run for liveness audit and is
+not rebuildable because its gateway-local timing measurements are deliberately absent from
+the event log. Removing a run removes these operational records (or its latency partition).
+`external_conformance_tokens` is likewise operational and non-replayable: it is a short-lived,
+single-use pre-admission credential with no run ownership until redemption records
+`used_run_id`.
+
+The expiry and latency values are control-plane metadata only. They never enter an event
+payload, simulated state, an RNG seed, or deterministic resolution. This preserves
+`02-ARCHITECTURE.md §4.5`: wall-clock time may be recorded for run/LLM operations and
+gateway operation, but never as world state.
+
+```sql
 CREATE TABLE scenario_injections (
     run_id UUID NOT NULL, injection_id TEXT NOT NULL, scenario_id TEXT NOT NULL,
     tick BIGINT NOT NULL, kind TEXT NOT NULL,
     payload JSONB NOT NULL, researcher_pubkey TEXT NOT NULL, sig TEXT NOT NULL,
+    step_id TEXT NOT NULL,            -- which step of the scenario produced this
+    event_seq BIGINT,                 -- the event this injection generated
+    scenario_hash TEXT NOT NULL,      -- sha256 of the scenario YAML
     PRIMARY KEY (run_id, injection_id)
 );
 
 CREATE TABLE sweeps (
     sweep_id UUID PRIMARY KEY, name TEXT NOT NULL,
     base_config_hash TEXT NOT NULL, grid JSONB NOT NULL,
-    seeds INTEGER[] NOT NULL, created_at TIMESTAMPTZ NOT NULL, status TEXT NOT NULL
+    seeds INTEGER[] NOT NULL, created_at TIMESTAMPTZ NOT NULL, status TEXT NOT NULL,
+    preregistration TEXT,                    -- the analysis plan, written BEFORE the run
+    analysis_plan_hash TEXT,                 -- sha256, frozen at launch
+    cost_estimate_usd NUMERIC(12,2)          -- pre-launch estimate; launch is refused
+                                             --   above the cap without an explicit override
 );
 ```
+
+`v_agent_control` exposes only the current native/operator driver, `v_market_visible`
+exposes aggregated top-of-book rows without counterparty identity, and
+`v_public_record` is the closed public-history surface. The gateway connects as
+`polis_reader`; it has `SELECT` on these objects and no mutation privilege. Engine-side
+adapters apply queued actions, memory writes, touches, and registrations.
 
 ---
 
 ## 11. Storage estimates and retention
 
-At 1,000 agents, `microscope`, one sim-year (43,200 ticks):
+At 1,000 agents, `microscope`, **five sim-years (43,200 ticks — one sim-year is 8,640
+ticks: 24 ticks/day × 360 days, per `02-ARCHITECTURE.md §5.2`)**:
 
-| Table | Rows/sim-year | Approx size |
+| Table | Rows / 43,200 ticks | Approx size |
 |---|---|---|
 | `events` | ~150 M | ~90 GB |
 | `ledger_entries` | ~40 M | ~4 GB |

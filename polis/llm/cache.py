@@ -14,6 +14,8 @@ from polis.config.canon import canonical_bytes
 from polis.config.errors import PolisError
 from polis.llm.providers.base import CompletionResponse, SamplingParams
 
+EMPTY_COMPLETION_CACHE_MANIFEST_HASH = hashlib.sha256(canonical_bytes({})).hexdigest()
+
 
 class CacheRenderMismatch(PolisError):
     """Cached content was rendered from different prompt text."""
@@ -86,6 +88,7 @@ class CompletionCache:
         self.schema_version = schema_version
         self.strict_version = strict_version
         self._records: OrderedDict[str, CacheRecord] = OrderedDict()
+        self._manifest: dict[str, str] = {}
         self._replay_accesses: dict[str, int] = {}
         self.hits = 0
         self.misses = 0
@@ -117,9 +120,61 @@ class CompletionCache:
                 # run-scoped cache that an offline replay can consume.
                 self._database.execute("DELETE FROM completions")
             self._database.commit()
+            if mode in {"hybrid", "replay"}:
+                try:
+                    self._load_persistent_manifest()
+                except Exception:
+                    self._database.close()
+                    self._database = None
+                    raise
+
+    @staticmethod
+    def _manifest_digest(
+        *,
+        rendered_hash: str,
+        response: Mapping[str, Any],
+        cost_usd: str,
+    ) -> str:
+        return hashlib.sha256(
+            canonical_bytes(
+                {
+                    "rendered_hash": rendered_hash,
+                    "response": response,
+                    "cost_usd": cost_usd,
+                }
+            )
+        ).hexdigest()
+
+    def _load_persistent_manifest(self) -> None:
+        if self._database is None:
+            return
+        rows = self._database.execute(
+            """
+            SELECT key,schema_version,rendered_hash,response_json,cost_usd
+            FROM completions ORDER BY key
+            """
+        ).fetchall()
+        for key, version, rendered_hash, response_json, cost_usd in rows:
+            if int(version) != self.schema_version:
+                if self.strict_version:
+                    raise CacheVersionMismatch(
+                        f"cache record {key} is schema {version}, expected {self.schema_version}"
+                    )
+                continue
+            response = json.loads(str(response_json))
+            self._manifest[str(key)] = self._manifest_digest(
+                rendered_hash=str(rendered_hash),
+                response=response,
+                cost_usd=str(cost_usd),
+            )
 
     def _remember(self, record: CacheRecord) -> None:
         self._records[record.key] = record
+        self._manifest[record.key] = self._manifest_digest(
+            rendered_hash=record.rendered_hash,
+            response=asdict(record.response),
+            cost_usd=str(record.cost_usd),
+        )
         self._records.move_to_end(record.key)
         while len(self._records) > self.l0_entries:
             self._records.popitem(last=False)
@@ -203,7 +258,17 @@ class CompletionCache:
         return dict(self._records)
 
     def restore(self, records: Mapping[str, CacheRecord]) -> None:
-        self._records = OrderedDict(sorted(records.items()))
+        self._records.clear()
+        self._manifest.clear()
+        for _, record in sorted(records.items()):
+            self._remember(record)
+
+    def manifest(self) -> dict[str, str]:
+        """Return every completion used by this run, independent of L0 eviction."""
+        return dict(sorted(self._manifest.items()))
+
+    def manifest_hash(self) -> str:
+        return hashlib.sha256(canonical_bytes(self.manifest())).hexdigest()
 
     async def close(self) -> None:
         if self._database is not None:

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 Cents = Annotated[int, Field(ge=0)]
 PositiveCents = Annotated[int, Field(ge=1)]
-AgentId = Annotated[str, StringConstraints(pattern=r"^ag_[a-z0-9_]{1,32}$")]
+AgentId = Annotated[str, StringConstraints(pattern=r"^ag_[a-z0-9_]{1,64}$")]
 FirmId = Annotated[str, StringConstraints(pattern=r"^fm_[a-z0-9_]{1,32}$")]
 PlaceId = Annotated[str, StringConstraints(pattern=r"^pl_[a-z0-9_]{1,32}$")]
 ShortText = Annotated[str, StringConstraints(max_length=1_000)]

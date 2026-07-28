@@ -148,6 +148,7 @@ class LLMSettings(BaseModel):
     fallback_policy: Literal["permissive", "strict"] = "permissive"
     cache: CacheSettings
     prompt_variant: str | None = None
+    request_timeout_ms: int = 3000                        # native PHASE 3 decision window
 
 class StoreSettings(BaseModel):
     dsn: str; reader_dsn: str | None = None
@@ -176,7 +177,9 @@ def load_settings(path: Path, *, profiles: Sequence[str] = (),
 def config_yaml(s: Settings) -> str: ...                   # round-trippable, -> runs.config_yaml
 def config_hash(s: Settings) -> str: ...                   # sha256_hex(canonical_bytes(s.model_dump(mode="json")))
 def reproducibility_tuple(s: Settings, *, prompt_manifest: Mapping[str, str],
-                          model_manifest: Mapping[str, Any]) -> dict[str, str]: ...
+                          model_manifest: Mapping[str, Any],
+                          completion_cache_manifest_hash: str,
+                          code_git_sha: str) -> dict[str, Any]: ...
 ```
 
 ```python
@@ -329,6 +332,7 @@ clock: {profile: microscope, ticks_per_sim_day: 24, days_per_sim_year: 360,
         demographic_acceleration: 4.0}
 llm:
   est_tokens_per_call: 3300
+  request_timeout_ms: 3000
   budget:
     lines:
       cognition: {calls_per_tick: 90,  tokens_per_tick: 300_000}   # 90 x 3,300 = 297,000

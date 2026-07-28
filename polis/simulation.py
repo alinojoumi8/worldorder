@@ -15,6 +15,8 @@ from polis.kernel.invariants import InvariantRunner, NullWorldState
 from polis.kernel.rng import RngRegistry
 from polis.kernel.scheduler import Scheduler
 from polis.kernel.tick import RunReport, TickLoop
+from polis.llm.cache import EMPTY_COMPLETION_CACHE_MANIFEST_HASH
+from polis.run_identity import RunIdentity, build_run_identity, validate_run_identity
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +37,7 @@ async def run_empty(
     *,
     ticks: int | None = None,
     resume_events: Sequence[Event] = (),
+    run_identity: RunIdentity | None = None,
 ) -> SimulationResult:
     run_id = run_id_for(settings)
     sink = MemoryEventSink()
@@ -58,14 +61,19 @@ async def run_empty(
     state = NullWorldState()
     invariants = InvariantRunner(clock)
     if last is None:
+        if run_identity is None:
+            identity = build_run_identity(settings)
+        else:
+            validate_run_identity(
+                settings,
+                run_identity,
+                completion_cache_manifest_hash=EMPTY_COMPLETION_CACHE_MANIFEST_HASH,
+            )
+            identity = run_identity
         log.stage(
             NewEvent(
                 RUN_STARTED,
-                {
-                    "config_hash": config_hash(settings),
-                    "seed": settings.run.seed,
-                    "scale": settings.population.initial_agents,
-                },
+                identity.event_payload(),
             ),
             tick=0,
             sim_time=clock.sim_time,

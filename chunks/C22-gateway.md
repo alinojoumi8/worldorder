@@ -25,7 +25,7 @@ Polis is open to agents from other systems. The principle, taken from Buzz, is t
 
 ## 3. Scope — in
 
-1. **Identity and registration** — challenge/response, ed25519 keys, `agent_id = ag_<pubkey_hex[:16]>`, operator declaration, roster and per-operator caps, conformance tokens, admission queued to the engine.
+1. **Identity and registration** — challenge/response, ed25519 keys, `agent_id = ag_<pubkey_hex>`, operator declaration, roster and per-operator caps, conformance tokens, admission queued to the engine.
 2. **Canonical serialisation** — `polis/gateway/sdk/canonical.py`, the *single* implementation of `08 §3.1–3.2`; run binding, tick binding, strictly-increasing nonce, action-id LRU, seal.
 3. **MCP server** — the eight tools of `08 §4.2` with their JSON schemas and their verbatim descriptions, remote Streamable HTTP at `/mcp`, plus the local stdio server in the SDK.
 4. **REST + WebSocket** — every row of `08 §5.1`, the seven server frames and three client frames of `08 §5.2`.
@@ -67,10 +67,12 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Mapping
 from uuid import UUID
 
+# All signed mappings use RFC 8785 JCS bytes; language-default JSON is forbidden.
 PROTOCOL_VERSION: Final[int] = 1
 DOMAIN_ACT: Final[bytes] = b"POLIS/ACT/1\x00"
 DOMAIN_REG: Final[bytes] = b"POLIS/REG/1\x00"
 DOMAIN_SES: Final[bytes] = b"POLIS/SES/1\x00"
+DOMAIN_RES: Final[bytes] = b"POLIS/RES/1\x00"
 DOMAIN_REV: Final[bytes] = b"POLIS/REV/1\x00"
 DOMAIN_MEM: Final[bytes] = b"POLIS/MEM/1\x00"
 
@@ -80,7 +82,7 @@ class SignableAction:
     tick:      int
     action_id: UUID
     nonce:     int
-    actor_id:  str                                   # exactly 19 ascii chars, "ag_" + 16 hex
+    actor_id:  str                                   # exactly 67 ascii chars, "ag_" + 64 hex
     type:      str                                   # ActionType NAME, ascii
     params:    Mapping[str, Any]
     reasoning: str | None = None
@@ -97,7 +99,7 @@ def canonical_memory_bytes(run_id: UUID, agent_id: str, tick: int, nonce: int,
 
 def sign(sk_bytes: bytes, preimage: bytes) -> str: ...          # 128 lowercase hex
 def verify(pubkey_hex: str, preimage: bytes, sig_hex: str) -> bool: ...
-def agent_id_for(pubkey_hex: str) -> str: ...                   # "ag_" + pubkey_hex[:16]
+def agent_id_for(pubkey_hex: str) -> str: ...                   # "ag_" + full pubkey_hex
 def test_vectors() -> list[Mapping[str, Any]]: ...              # 24; served at /v1/schemas/testvectors.json
 
 # polis/gateway/sdk/keys.py
@@ -161,7 +163,7 @@ class Session:
 class Registrar:
     async def challenge(self, pubkey_hex: str, *, client_ip: str) -> Mapping[str, Any]: ...
     async def register(self, declaration: Mapping[str, Any], sig_hex: str) -> Mapping[str, Any]:
-        """Verifies POLIS/REG/1, checks window/roster/operator cap/duplicate-prefix/conformance
+        """Verifies POLIS/REG/1, checks window/roster/operator cap/duplicate-key/conformance
         token, LPUSHes polis:reg:{run}. Returns {agent_id, status:'pending', queued_tick}.
         NEVER creates a citizen — PHASE 7 does (08 §2.2)."""
     async def admission(self, agent_id: str) -> Mapping[str, Any]: ...
@@ -188,7 +190,9 @@ class LimitSet:
 ```python
 # polis/gateway/queue.py — pure Redis. Imports NOTHING from polis.kernel or polis.agents.
 OBS_KEY:   Final[str] = "polis:obs:{run}:{tick}:{agent}"     # SETEX, TTL = 3 ticks
-ACT_KEY:   Final[str] = "polis:act:{run}:{tick}"             # RPUSH / LRANGE+DEL
+ACT_KEY: Final[str] = "polis:act:{run}:{tick}"                  # RPUSH / atomic claim
+ACT_PROCESSING_KEY: Final[str] = "polis:act-processing:{run}:{tick}"  # commit-delayed ack
+ACT_QUARANTINE_KEY: Final[str] = "polis:act-quarantine:{run}:{tick}"  # malformed raw TTL
 MEM_KEY:   Final[str] = "polis:mem:{run}:{tick}"
 TOUCH_KEY: Final[str] = "polis:touch:{run}:{tick}"
 REG_KEY:   Final[str] = "polis:reg:{run}"
@@ -213,8 +217,8 @@ class ObservationPublisher:            # engine side; pure Redis, byte-passthrou
 
 class ActionDrain(Protocol):
     async def drain(self, tick: int, *, timeout_ms: int) -> tuple[DrainedAction, ...]:
-        """ONE LRANGE + DEL, bounded. On timeout/unavailability returns () and the caller
-        emits 20900; every external agent misses and the tick proceeds."""
+        """Atomically claim source to processing, then read it, bounded by timeout_ms.
+        Timeout/unavailability raises OSError; the engine emits 20900 and falls back."""
 
 class RedisActionDrain(ActionDrain): ...
 class ReplayActionDrain(ActionDrain):
@@ -261,7 +265,7 @@ async def public_record(db: Database, run_id: UUID, agent_id: str, query: str, *
 
 ### 5.6 REST + WebSocket
 
-Every row of `08 §5.1` under `/v1`, unchanged, plus `GET /healthz` and `GET /metrics` (Prometheus text, gateway-local only). Auth column: `none` · `sig(X)` in `X-Polis-Signature` · `bearer`. WS at `/v1/stream`, frames exactly `08 §5.2`, `max_frame_bytes` 256 KiB, send queue bounded at 64 frames, overflow drops oldest `observation` frames first and emits `notice: degraded`.
+Every row of `08 §5.1` under `/v1`, unchanged, plus `GET /healthz` and `GET /metrics` (Prometheus text, gateway-local only). Auth column: `none` · `sig(X)` in `X-Polis-Signature` · `bearer`. WS at `/v1/stream`, frames exactly `08 §5.2`, `max_frame_bytes` 256 KiB, send queue bounded at 64 frames, overflow drops oldest `observation` frames first and emits `notice: degraded`. Browser WebSockets exchange the bearer at `POST /v1/ws-ticket` for a 30-second, single-use `polis.v1.ticket.*` subprotocol credential; the full session token never enters `Sec-WebSocket-Protocol`.
 
 ```python
 # polis/gateway/app.py
@@ -341,7 +345,10 @@ def wrap(text: str, *, channel: str, source_ref: str, author_id: str, tick: int,
 | `events` | **never** | `polis_reader` has no `INSERT`; a `WriteForbidden` here is the intended failure |
 | `v_public_record`, `v_market_visible`, `v_agent_control` | **R** | created by this chunk's migration; neither view can express a column outside `08 §8.2` |
 
-Three new tables and three views are additive. `external_sessions`, `external_nonces` and `external_latency` are projections and rebuildable from 20010/20011/20020/20030.
+Three new tables and three views are additive. `external_sessions`, `external_nonces`, and
+`external_latency` are operational gateway records, not replayable projections. Sessions
+and nonces survive a live-process restart; latency is retained for the original run's audit
+and cannot be rebuilt because wall-clock measurements never enter the event log.
 
 ---
 
@@ -378,7 +385,7 @@ The gateway *constructs* these drafts; **the engine appends them**. The gateway 
 
 Three queues, one drain point, one ordering rule: `polis:act`, `polis:mem`, `polis:touch`, all drained in PHASE 3, all applied sorted by `(agent_id, nonce)`. There is no fourth path and no synchronous write anywhere in `polis/gateway/`.
 
-**Consequence, and a spec tension worth recording.** `08 §4.6` promises `polis_remember` returns `memory_id` / `evicted_memory_id` synchronously. It cannot: the row is written by the engine. Resolution shipped here: the synchronous body returns `{"pending": true, "memory_id": null, "importance_assigned": <clamped>, "citations_dropped": [...]}`; the final ids arrive on the WS frame `memory.receipt` and in the next observation. `client.remember()` in the SDK awaits the receipt with a bounded wait so the operator sees the documented shape. **Raise this as a `08 §4.6` amendment; do not silently diverge.** The same applies to `polis_recall`'s `last_accessed_tick` freshening, which is queued on `polis:touch`.
+**Consequence, and a spec tension worth recording.** `polis_remember` cannot return `memory_id` / `evicted_memory_id` synchronously because the row is written by the engine. Resolution shipped here: the synchronous body returns `{"pending": true, "memory_id": null, "importance_assigned": <clamped>, "citations_dropped": [...]}`; final ids are authoritative in event 20060 and may appear in a later observation. Protocol v1 has no dedicated `memory.receipt` frame. `08 §4.6` records this contract. The same applies to `polis_recall`'s `last_accessed_tick` freshening, which is queued on `polis:touch`.
 
 ### 9.2 Tick synchronisation
 
@@ -395,9 +402,9 @@ drain_deadline= drain_at + drain_timeout_ms                    # 100
 | PHASE 1 push | The engine `SETEX`s the serialised `Observation` per agent, TTL 3 ticks, then publishes a notify. Failure → the agent is treated as missed (20900 + 20030); the tick proceeds. |
 | Window | Runs *concurrently* with the native DELIBERATE batch, which occupies the same ~3,000 ms. External agents cost the tick zero wall-clock. |
 | Seal | The gateway refuses tick `T` at `seal_at`. `seal_margin_ms` absorbs the RPUSH→LRANGE hop so an accepted submission is never lost in transit. |
-| Drain | **One** `LRANGE 0 -1` + `DEL`, bounded by `drain_timeout_ms`. Timeout → `()`, 20900, everyone misses. |
+| Drain | **One** atomic source-to-processing claim plus `LRANGE`, bounded by `drain_timeout_ms`. A freshly re-read matching batch is acknowledged after commit. Timed-out and changed claims retain their original TTL; malformed raw records are logged and moved atomically to a quarantine list with that TTL when the valid decoded subset is acknowledged. Timeout → `OSError`, 20900, everyone falls back. |
 | No extension | Nothing an external agent does extends the window. There is no such endpoint and there will not be one. |
-| Parity | `decision_deadline_ms` **must equal** `llm.request_timeout_ms`. A CI config lint fails a C1-eligible config where they differ. |
+| Parity | `decision_deadline_ms` **must equal** `llm.request_timeout_ms`. A CI config lint fails a C1-eligible config where they differ. Provider `timeout_s` remains an independent transport guard and may be longer. |
 
 **On a miss** (`08 §6.4`): emit 20030; run **that agent's own** `reflex_decide()` over its own `Observation` with its own `ReflexProfile`; increment `deadlines_missed` and `consecutive_misses`; write the `external_latency` row with `missed: true`. A late action for `T` is rejected `LATE` — **never** queued for `T+1` and never consuming `T+1`'s slot. Rolling it forward would let a lagging agent act on stale observations *and* make `deadlines_missed` unmeasurable.
 
@@ -481,7 +488,7 @@ We do **not** sanitise semantics. `security.injection_policy` offers `flag` (def
 
 ### 9.11 V8 measurement (C22 measures, C24 enforces)
 
-Per agent per run: `deadlines_missed`, `miss_rate = deadlines_missed / ticks_driven`, `decision_ms` p50/p95/p99 from `external_latency`, `rejection_rate`, `driven_fraction`, and per-tick `external_liveness = 1 − missed_this_tick / operator_driven_alive` written to `metrics`. A run where any operator-driven agent exceeds `external_miss_rate_max` (0.05) is tagged `invalid_for_cross_agent_comparison` and 20090 is emitted; the run remains perfectly valid for Track A and Track B. **A city with some intermittent citizens is still a city — only the cross-agent comparison is void.**
+Per agent per run: `deadlines_missed`, `miss_rate = deadlines_missed / ticks_driven`, `decision_ms` p50/p95/p99 from `external_latency`, `rejection_rate`, `driven_fraction`, and per-tick `external_liveness = 1 − missed_this_tick / operator_driven_alive` written to `metrics`. `ticks_driven` is exactly the count of scheduled operator-decision seals while the agent remains operator-driven, whether the seal accepts an action or falls back after a miss. A run where any operator-driven agent exceeds `external_miss_rate_max` (0.05) is tagged `invalid_for_cross_agent_comparison` and 20090 is emitted; the run remains perfectly valid for Track A and Track B. **A city with some intermittent citizens is still a city — only the cross-agent comparison is void.**
 
 ---
 
@@ -530,7 +537,7 @@ gateway:
 2. The gateway process, running as `polis_reader`, raises `WriteForbidden` on any attempted `INSERT` into `events`; a test asserts this rather than assuming it.
 3. `canonical.py` is the only file in the repo containing a domain separator constant; the 24 published test vectors round-trip byte-exactly, including empty strings, non-ASCII params, and the maximum payload.
 4. A signature over a mutated preimage is rejected `BAD_SIGNATURE`; mutating **any** of the twelve fields in `08 §3.1` invalidates it.
-5. `agent_id == "ag_" + pubkey_hex[:16]` for every registration; a colliding 16-hex **prefix** is rejected `duplicate_pubkey`.
+5. `agent_id == "ag_" + pubkey_hex` for every registration; a duplicate public key is rejected `duplicate_pubkey`.
 6. Registration never creates a citizen: with the engine stopped, `POST /register` returns `status: pending` and no `agents` row exists.
 7. `polis_act` input schema and `prompts/schemas/deliberate.schema.json` are field-identical after key sorting (CI assertion).
 8. Slot accounting: a second `polis_act` in one tick returns `NO_SLOTS`; a *rejected* action still consumes the slot; external and native `action_slots` are read from the same config key.
@@ -571,7 +578,7 @@ gateway:
 | `tests/unit/gateway/test_errors.py` | Every `ErrorCode` maps to its `08 §4.11` HTTP status and retryability; messages are fixed templates with no interpolation |
 | `tests/unit/gateway/test_injection_envelope.py` | Control characters stripped; caps applied; `content_is_untrusted` always set; instruction-shaped strings hit; no markdown/HTML/link survives |
 | `tests/unit/gateway/test_scorecard_dimensions.py` | Each of W, Ẇ, R, C, P, I, S, L, Λ against a fixture population; percentile ranks; the seven eligibility conditions; no scalar composite |
-| `tests/integration/test_registration_flow.py` | challenge → register → pending → admitted → session; roster cap; per-operator cap; duplicate prefix; conformance token enforcement |
+| `tests/unit/gateway/test_registration_flow.py` | challenge → register → pending → admitted → session; roster cap; per-operator cap; duplicate key; conformance token enforcement |
 | `tests/integration/test_observation_identity.py` | The served blob is byte-identical to the engine's PHASE 1 object; two `observe` calls in one tick match byte-for-byte |
 | `tests/integration/test_deadline_fallback.py` | Miss → 20030 + reflex action attributed to the agent; tick duration unchanged; late action rejected `LATE` and does not consume `T+1`'s slot |
 | `tests/integration/test_drain_degraded.py` | Redis down at drain: `()`, 20900, everyone misses, run continues; `QUEUE_FULL` counts as a miss |

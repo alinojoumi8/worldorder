@@ -127,6 +127,25 @@ class AgentState:
     died_at_tick: int | None = None
     death_cause: str | None = None
     fertility_intent_tick: int | None = None
+    kind: Literal["native", "external"] = "native"
+    pubkey: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("native", "external"):
+            raise ValueError("agent kind must be 'native' or 'external'")
+        if self.kind == "external":
+            if self.pubkey is None:
+                raise ValueError("external agents require a public key")
+            if len(self.pubkey) != 64 or any(
+                char not in "0123456789abcdef" for char in self.pubkey
+            ):
+                raise ValueError(
+                    "external agent public key must be 64 lowercase hexadecimal characters"
+                )
+            if self.agent_id != f"ag_{self.pubkey}":
+                raise ValueError("external agent ID must be derived from its public key")
+        elif self.pubkey is not None:
+            raise ValueError("native agents must not have an external public key")
 
     @property
     def wellbeing(self) -> float:

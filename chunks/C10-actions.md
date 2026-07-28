@@ -379,7 +379,11 @@ class ActionParams(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 Cents  = Annotated[int, Field(ge=0)]          # BIGINT minor units. NEVER float (02 §4.6).
-AgentId = Annotated[str, StringConstraints(pattern=r"^ag_[a-z0-9_]{1,32}$")]
+AgentId = Annotated[str, StringConstraints(pattern=r"^ag_[a-z0-9_]{1,64}$")]
+ExternalAgentId = Annotated[
+    str,
+    StringConstraints(pattern=r"^ag_[0-9a-f]{64}$"),
+]
 FirmId  = Annotated[str, StringConstraints(pattern=r"^fm_[a-z0-9_]{1,32}$")]
 PlaceId = Annotated[str, StringConstraints(pattern=r"^pl_[a-z0-9_]{1,32}$")]
 
@@ -408,6 +412,12 @@ class CommitCrimeParams(ActionParams): crime_type: Literal["theft","fraud","insi
 class NullActionParams(ActionParams):  replaced_type: ActionType | None = None
                                        reason: str | None = None
 ```
+
+`AgentId` remains broad enough for native simulation identities. Every external-agent
+admission boundary uses `ExternalAgentId` instead: registration derives it as
+`"ag_" + <verified ed25519 public-key hex>`, and session, lifecycle, action-signature,
+queue, routing, and authorization checks require that exact derived value. A shortened key
+or any uppercase/non-hex spelling is display-only and is rejected at those boundaries.
 
 ```python
 PARAMS_MODELS: Final[Mapping[ActionType, type[ActionParams]]] = {...}

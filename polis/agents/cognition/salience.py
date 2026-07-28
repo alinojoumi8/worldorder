@@ -82,20 +82,39 @@ def route_cognition(
     *,
     settings: Settings,
     rng: RngRegistry,
+    excluded_agent_ids: frozenset[str] = frozenset(),
 ) -> RoutingResult:
+    eligible = (
+        {
+            agent_id: observation
+            for agent_id, observation in observations.items()
+            if agent_id not in excluded_agent_ids
+        }
+        if excluded_agent_ids
+        else observations
+    )
     raw = {
         agent_id: _score(population, observation, settings=settings, rng=rng)
-        for agent_id, observation in sorted(observations.items())
+        for agent_id, observation in sorted(eligible.items())
     }
     ranked = sorted(raw.values(), key=lambda item: (-item.score, item.agent_id))
     cognition_line = settings.llm.budget.lines["cognition"]
     intended = round(len(ranked) * settings.salience.deliberate_share)
-    reflection_candidates = sorted(
-        (
+    if excluded_agent_ids:
+        reflection_pool = (
+            agent
+            for agent in population.alive()
+            if agent.agent_id in eligible
+            and memory.reflection_due(agent, tick=eligible[agent.agent_id].tick)
+        )
+    else:
+        reflection_pool = (
             agent
             for agent in population.alive()
             if memory.reflection_due(agent, tick=observations[agent.agent_id].tick)
-        ),
+        )
+    reflection_candidates = sorted(
+        reflection_pool,
         key=lambda agent: (-agent.importance_since_reflection, agent.agent_id),
     )
     # M1 reflection consumes one call. Keep synchronized trigger bursts inside

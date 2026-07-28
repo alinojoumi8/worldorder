@@ -23,6 +23,8 @@ class RunRecord:
     model_manifest: Mapping[str, Any]
     metric_manifest: Mapping[str, Any]
     mechanism_manifest: Mapping[str, Any]
+    completion_cache_manifest: Mapping[str, str]
+    completion_cache_manifest_hash: str
     ablations: Mapping[str, Any]
     scale: int
     code_git_sha: str
@@ -42,10 +44,11 @@ class RunRepository:
             """
             INSERT INTO runs (
                 run_id,name,config_yaml,config_hash,master_seed,prompt_manifest,
-                model_manifest,metric_manifest,mechanism_manifest,ablations,scale,
-                code_git_sha,started_at,status,parent_run_id,sweep_id,tags
+                model_manifest,metric_manifest,mechanism_manifest,
+                completion_cache_manifest,completion_cache_manifest_hash,
+                ablations,scale,code_git_sha,started_at,status,parent_run_id,sweep_id,tags
             ) VALUES (
-                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
             )
             """,
             (
@@ -58,6 +61,8 @@ class RunRepository:
                 Jsonb(record.model_manifest),
                 Jsonb(record.metric_manifest),
                 Jsonb(record.mechanism_manifest),
+                Jsonb(record.completion_cache_manifest),
+                record.completion_cache_manifest_hash,
                 Jsonb(record.ablations),
                 record.scale,
                 record.code_git_sha,
@@ -84,6 +89,8 @@ class RunRepository:
             model_manifest=row["model_manifest"],
             metric_manifest=row["metric_manifest"],
             mechanism_manifest=row["mechanism_manifest"],
+            completion_cache_manifest=row["completion_cache_manifest"],
+            completion_cache_manifest_hash=row["completion_cache_manifest_hash"],
             ablations=row["ablations"],
             scale=row["scale"],
             code_git_sha=row["code_git_sha"],

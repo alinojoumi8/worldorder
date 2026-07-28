@@ -3,13 +3,38 @@ from uuid import UUID
 
 import pytest
 
-from polis.events.kinds import RUN_STARTED, TICK_STARTED
+from polis.events.kinds import (
+    MEMORY_WRITTEN,
+    REFLECTION_PRODUCED,
+    RUN_STARTED,
+    TICK_STARTED,
+    Persistence,
+    spec,
+)
 from polis.events.log import EventLog, MemoryEventSink
 from polis.events.types import GENESIS_PREV_HASH, NewEvent
 from polis.events.verify import verify_batch
 
 RUN_ID = UUID("00000000-0000-0000-0000-000000000001")
 SIM_TIME = datetime(2026, 1, 1)
+RUN_STARTED_PAYLOAD = {
+    "config_hash": "abc",
+    "prompt_manifest": {},
+    "model_manifest": {},
+    "code_git_sha": "a" * 40,
+    "master_seed": 7,
+    "completion_cache_manifest_hash": "b" * 64,
+    "mechanism_manifest": {},
+    "metric_manifest": {},
+    "kind_registry_hash": "c" * 64,
+    "clock_profile": "test",
+    "scale": 1,
+}
+
+
+def test_memory_and_reflection_events_are_never_sampled() -> None:
+    assert spec(MEMORY_WRITTEN).persistence is Persistence.PERSISTED
+    assert spec(REFLECTION_PRODUCED).persistence is Persistence.PERSISTED
 
 
 @pytest.mark.asyncio
@@ -17,7 +42,7 @@ async def test_event_log_seals_and_commits_one_chain() -> None:
     sink = MemoryEventSink()
     log = EventLog(RUN_ID, sink)
     first = log.stage(
-        NewEvent(RUN_STARTED, {"config_hash": "abc", "seed": 7}),
+        NewEvent(RUN_STARTED, RUN_STARTED_PAYLOAD),
         tick=0,
         sim_time=SIM_TIME,
     )

@@ -147,6 +147,7 @@ class LLMSettings(FrozenModel):
     cache: CacheSettings = CacheSettings()
     prompt_variant: str | None = None
     est_tokens_per_call: int = 3300
+    request_timeout_ms: int = Field(default=3_000, ge=1)
 
     @model_validator(mode="after")
     def validate_routes(self) -> LLMSettings:
@@ -977,6 +978,97 @@ class ObservatorySettings(FrozenModel):
     live: ObservatoryLiveSettings = ObservatoryLiveSettings()
 
 
+class GatewayRegistrationSettings(FrozenModel):
+    open_until_tick: int = Field(default=2_400, ge=-1)
+    max_external_agents: int = Field(default=32, ge=1)
+    registrations_per_operator: int = Field(default=8, ge=1)
+    pending_ttl_ticks: int = Field(default=240, ge=1)
+    require_conformance_token: bool = True
+    embodiment: Literal["cohort_matched", "paired_control", "adopt_existing"] = "cohort_matched"
+
+
+class GatewayDeadlineSettings(FrozenModel):
+    decision_deadline_ms: int = Field(default=3_000, ge=1)
+    seal_margin_ms: int = Field(default=50, ge=0)
+    drain_timeout_ms: int = Field(default=100, ge=1)
+    tick_lookahead: int = Field(default=0, ge=0)
+    tick_skew_tolerance: int = Field(default=0, ge=0)
+    pause_for_external: bool = False
+    pause_max_ms: int = Field(default=600_000, ge=1)
+
+    @model_validator(mode="after")
+    def seal_precedes_deadline(self) -> GatewayDeadlineSettings:
+        if self.seal_margin_ms >= self.decision_deadline_ms:
+            raise ValueError("gateway.deadline.seal_margin_ms must be less than the deadline")
+        return self
+
+
+class GatewayLifecycleSettings(FrozenModel):
+    naturalise_after_consecutive_misses: int = Field(default=240, ge=1)
+    resume_grace_ticks: int = Field(default=720, ge=0)
+    suspension_ticks: int = Field(default=240, ge=1)
+    session_ttl_s: int = Field(default=3_600, ge=1)
+
+
+class GatewayLimitSettings(FrozenModel):
+    requests_per_tick: int = Field(default=40, ge=1)
+    requests_per_second: int = Field(default=20, ge=1)
+    recall_queries_per_tick: int = Field(default=6, ge=0)
+    history_queries_per_tick: int = Field(default=3, ge=0)
+    memory_writes_per_tick: int = Field(default=2, ge=0)
+    ws_connections_per_agent: int = Field(default=2, ge=1)
+    max_request_bytes: int = Field(default=65_536, ge=1)
+    max_frame_bytes: int = Field(default=262_144, ge=1)
+    long_poll_max_ms: int = Field(default=60_000, ge=1)
+    market_depth_visible: int = Field(default=5, ge=1)
+
+
+class GatewayToolSettings(FrozenModel):
+    observe: bool = True
+    act: bool = True
+    recall: bool = True
+    remember: bool = True
+    who_am_i: bool = True
+    market_quote: bool = True
+    wait_for_tick: bool = True
+    search_history: bool = False
+
+
+class GatewaySecuritySettings(FrozenModel):
+    injection_policy: Literal["flag", "redact", "block"] = "flag"
+    external_speech_filter: Literal["flag", "redact", "block"] = "flag"
+    error_codes_uniform: bool = True
+    external_obs_sample_rate: float = Field(default=0.05, ge=0, le=1)
+
+
+class GatewayArenaSettings(FrozenModel):
+    min_driven_fraction: float = Field(default=0.90, ge=0, le=1)
+    live_scorecard: bool = False
+    scoring_interval_ticks: int = Field(default=8_640, ge=1)
+    seeds_per_cell_min: int = Field(default=5, ge=1)
+
+
+class GatewaySettings(FrozenModel):
+    enabled: bool = False
+    bind: str = "127.0.0.1:8081"
+    protocol_version: Literal[1] = 1
+    registration: GatewayRegistrationSettings = GatewayRegistrationSettings()
+    deadline: GatewayDeadlineSettings = GatewayDeadlineSettings()
+    lifecycle: GatewayLifecycleSettings = GatewayLifecycleSettings()
+    limits: GatewayLimitSettings = GatewayLimitSettings()
+    tools: GatewayToolSettings = GatewayToolSettings()
+    security: GatewaySecuritySettings = GatewaySecuritySettings()
+    arena: GatewayArenaSettings = GatewayArenaSettings()
+
+
+class ResearchGateSettings(FrozenModel):
+    external_miss_rate_max: float = Field(default=0.05, ge=0, le=1)
+
+
+class ResearchSettings(FrozenModel):
+    gates: ResearchGateSettings = ResearchGateSettings()
+
+
 class FertilitySettings(FrozenModel):
     peak_age: int = Field(default=28, ge=0, le=120)
     band: tuple[int, int] = (16, 45)
@@ -1123,6 +1215,8 @@ class Settings(FrozenModel):
     store: StoreSettings
     telemetry: TelemetrySettings = TelemetrySettings()
     observatory: ObservatorySettings = ObservatorySettings()
+    gateway: GatewaySettings = GatewaySettings()
+    research: ResearchSettings = ResearchSettings()
 
     @model_validator(mode="after")
     def default_scale(self) -> Settings:
@@ -1142,6 +1236,21 @@ class Settings(FrozenModel):
                 }
             ),
         )
+        if self.gateway.enabled:
+            if self.llm.routing.get("DELIBERATE") is None:
+                raise ValueError("gateway-enabled runs require an LLM DELIBERATE route")
+            if self.llm.request_timeout_ms != self.gateway.deadline.decision_deadline_ms:
+                raise ValueError(
+                    "gateway decision_deadline_ms must equal llm.request_timeout_ms "
+                    f"({self.llm.request_timeout_ms} ms)"
+                )
+        if self.gateway.enabled and self.gateway.deadline.pause_for_external:
+            tags = tuple(dict.fromkeys((*self.run.tags, "paused_for_external")))
+            object.__setattr__(
+                self,
+                "run",
+                self.run.model_copy(update={"tags": tags}),
+            )
         return self
 
 
@@ -1225,6 +1334,10 @@ _ECONOMY_CONFIG_FIELDS = frozenset(
 
 def _config_payload(settings: Settings, *, by_alias: bool = False) -> dict[str, Any]:
     payload = settings.model_dump(mode="json", by_alias=by_alias)
+    if not settings.gateway.enabled:
+        payload.pop("gateway")
+        if settings.research == ResearchSettings():
+            payload.pop("research")
     if settings.actions == ActionSettings():
         payload.pop("actions")
     society_defaults = SocietySettings().model_dump(mode="json", by_alias=by_alias)
@@ -1280,12 +1393,21 @@ def reproducibility_tuple(
     *,
     prompt_manifest: Mapping[str, str],
     model_manifest: Mapping[str, Any],
-) -> dict[str, str]:
-    from polis.config.paths import repo_git_sha
+    completion_cache_manifest_hash: str,
+    code_git_sha: str,
+) -> dict[str, Any]:
+    if not completion_cache_manifest_hash:
+        raise ValueError(
+            "completion_cache_manifest_hash is required for a reproducible run identity"
+        )
+    if not code_git_sha:
+        raise ValueError("code_git_sha is required for a reproducible run identity")
 
     return {
         "config_hash": config_hash(settings),
-        "code_git_sha": repo_git_sha(),
-        "prompt_manifest_hash": sha256_hex(canonical_bytes(prompt_manifest)),
-        "model_manifest_hash": sha256_hex(canonical_bytes(model_manifest)),
+        "prompt_manifest": dict(prompt_manifest),
+        "model_manifest": dict(model_manifest),
+        "code_git_sha": code_git_sha,
+        "master_seed": settings.run.seed,
+        "completion_cache_manifest_hash": completion_cache_manifest_hash,
     }

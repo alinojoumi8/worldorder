@@ -416,6 +416,7 @@ Extends `02-ARCHITECTURE.md §8`. Keys shown there remain valid.
 
 ```yaml
 llm:
+  request_timeout_ms: 3000                    # native PHASE 3 decision window
   budget:
     lines:
       cognition:  {calls_per_tick: 90,  tokens_per_tick: 240_000}   # see R2

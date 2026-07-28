@@ -21,12 +21,14 @@ world:
   places_per_district: 60
 llm:
   est_tokens_per_call: 3300
+  request_timeout_ms: 3000
   providers:
     reasoning:
       kind: minimax
       base_url: https://api.minimax.io/v1
       api_key_env: MINIMAX_API_KEY
       max_concurrency: 8
+      timeout_s: 30.0
       structured_output: none
       billing: token
     volume_text:
@@ -265,3 +267,60 @@ observatory:
   enabled: true
   bind: 127.0.0.1:8080
   static_dir: web/dist
+gateway:
+  enabled: true
+  bind: 127.0.0.1:8081
+  protocol_version: 1
+  registration:
+    open_until_tick: 2400
+    max_external_agents: 32
+    registrations_per_operator: 8
+    pending_ttl_ticks: 240
+    require_conformance_token: true
+    embodiment: cohort_matched
+  deadline:
+    decision_deadline_ms: 3000
+    seal_margin_ms: 50
+    drain_timeout_ms: 100
+    tick_lookahead: 0
+    tick_skew_tolerance: 0
+    pause_for_external: false
+    pause_max_ms: 600000
+  lifecycle:
+    naturalise_after_consecutive_misses: 240
+    resume_grace_ticks: 720
+    suspension_ticks: 240
+    session_ttl_s: 3600
+  limits:
+    requests_per_tick: 40
+    requests_per_second: 20
+    recall_queries_per_tick: 6
+    history_queries_per_tick: 3
+    memory_writes_per_tick: 2
+    ws_connections_per_agent: 2
+    max_request_bytes: 65536
+    max_frame_bytes: 262144
+    long_poll_max_ms: 60000
+    market_depth_visible: 5
+  tools:
+    observe: true
+    act: true
+    recall: true
+    remember: true
+    who_am_i: true
+    market_quote: true
+    wait_for_tick: true
+    search_history: false
+  security:
+    injection_policy: flag
+    external_speech_filter: flag
+    error_codes_uniform: true
+    external_obs_sample_rate: 0.05
+  arena:
+    min_driven_fraction: 0.90
+    live_scorecard: false
+    scoring_interval_ticks: 8640
+    seeds_per_cell_min: 5
+research:
+  gates:
+    external_miss_rate_max: 0.05

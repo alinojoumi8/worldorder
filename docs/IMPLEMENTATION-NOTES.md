@@ -3,6 +3,30 @@
 This file records implementation findings that amend or narrow a binding specification.
 No finding here changes scientific behaviour silently.
 
+## C22 external-agent gateway handback
+
+- `polis_remember` and recall-touch updates cross the bounded Redis handoff because the
+  gateway has no write authority. Remember therefore returns `pending: true` with a null
+  memory id. The final id and any eviction are authoritative in event 20060 and may appear
+  in a later observation. Protocol v1 has no dedicated `memory.receipt` frame. This is the
+  explicit amendment recorded in protocol section 4.6.
+- The engine is the only producer of observation JSON. It serialises the PHASE 1
+  `Observation.as_dict()` with canonical bytes and the gateway serves that blob unchanged.
+  New observation fields must be coordinated at that producer; no gateway projection may
+  rebuild or enrich it.
+- The engine-facing Redis adapter lives in `polis/cli/wiring/external.py`. It is outside
+  `polis/gateway/` so the isolated HTTP process cannot import agent, kernel, or writable
+  store internals.
+- `sdk/pyproject.toml` builds the same `polis.gateway.sdk` source tree as the standalone
+  `polis-agent-sdk` wheel. The wheel contains only the SDK namespace and its client
+  dependencies; it does not package the engine, agent internals, or store.
+- The native deliberate response and signed transport envelope remain distinct layers.
+  Both use the generated `actions.v1.json` parameter bundle; transport-only run, tick,
+  nonce, action id, session, and signature fields are not native cognition fields.
+- Verification latency is exposed by gateway-local metrics. The 50-citizen by 40-request
+  p50/p95 benchmark must be recorded from the deployment host before a C1 report; a local
+  workstation number is not treated as a portable performance claim.
+
 ## M0 / C03
 
 ### Nested event partition primary key

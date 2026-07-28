@@ -8,8 +8,9 @@ import pytest
 from polis.config.settings import load_settings
 from polis.events.kinds import KIND_REGISTRY
 from polis.living_city import run_living_city
+from polis.run_identity import build_run_identity
 
-M3_GOLDEN_100_HASH = "0242ed20e992e64c7696e0b68ccec03dc208e111e028f31db03b3e8fe43436df"
+M3_GOLDEN_100_HASH = "b882a0995804240f6fbd62f40b8a52f3d25352d379061bdb8ed51a2f83420b49"
 
 
 @pytest.mark.asyncio
@@ -71,7 +72,10 @@ async def test_frozen_m3_100_tick_golden_covers_every_leg_family() -> None:
         Path("configs/m3-smoke.yaml"),
         overrides={"run": {"ticks": 100}},
     )
-    result = await run_living_city(settings)
+    result = await run_living_city(
+        settings,
+        run_identity=build_run_identity(settings, code_git_sha="0" * 40),
+    )
 
     assert result.report.status == "completed"
     assert result.report.chain_hash == M3_GOLDEN_100_HASH

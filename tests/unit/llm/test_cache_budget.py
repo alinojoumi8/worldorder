@@ -57,14 +57,82 @@ async def test_hybrid_cache_reuses_persistent_completion(tmp_path) -> None:
     response = CompletionResponse("{}", 10, 2, 0, "v1", "request", 4, "stop")
     first = CompletionCache(mode="hybrid", path=path, namespace="run")
     await first.put(CacheRecord("key", "rendered", response))
+    original_manifest = first.manifest()
+    original_manifest_hash = first.manifest_hash()
     await first.close()
 
     resumed = CompletionCache(mode="hybrid", path=path, namespace="run")
+    assert resumed.snapshot() == {}
+    assert resumed.manifest() == original_manifest
+    assert resumed.manifest_hash() == original_manifest_hash
     restored = await resumed.get("key", rendered_hash="rendered")
     assert restored is not None
     assert restored.response == response
     assert resumed.reported_hit("key")
     await resumed.close()
+
+
+@pytest.mark.asyncio
+async def test_cache_manifest_is_canonical_and_survives_l0_eviction(tmp_path) -> None:
+    first_response = CompletionResponse("one", 10, 2, 0, "v1", "one", 4, "stop")
+    second_response = CompletionResponse("two", 11, 3, 0, "v1", "two", 5, "stop")
+    path = f"file://{tmp_path.as_posix()}"
+    first = CompletionCache(
+        mode="live",
+        l0_entries=1,
+        path=path,
+        namespace="manifest-run",
+    )
+    await first.put(CacheRecord("b", "rendered-b", second_response))
+    await first.put(CacheRecord("a", "rendered-a", first_response))
+    assert len(first.snapshot()) == 1
+    assert len(first.manifest()) == 2
+    original_manifest = first.manifest()
+    original_manifest_hash = first.manifest_hash()
+    await first.close()
+
+    reopened = CompletionCache(
+        mode="replay",
+        l0_entries=1,
+        path=path,
+        namespace="manifest-run",
+    )
+    assert await reopened.get("a", rendered_hash="rendered-a") is not None
+    assert await reopened.get("b", rendered_hash="rendered-b") is not None
+    assert len(reopened.snapshot()) == 1
+    assert reopened.manifest() == original_manifest
+    assert reopened.manifest_hash() == original_manifest_hash
+    await reopened.close()
+
+    changed = CompletionCache(
+        mode="hybrid",
+        path=path,
+        namespace="manifest-run",
+    )
+    try:
+        await changed.put(
+            CacheRecord(
+                "a",
+                "rendered-a",
+                CompletionResponse("changed", 10, 2, 0, "v1", "one", 4, "stop"),
+            )
+        )
+    finally:
+        await changed.close()
+
+    changed_reopened = CompletionCache(
+        mode="replay",
+        l0_entries=1,
+        path=path,
+        namespace="manifest-run",
+    )
+    try:
+        assert await changed_reopened.get("a", rendered_hash="rendered-a") is not None
+        assert await changed_reopened.get("b", rendered_hash="rendered-b") is not None
+        assert changed_reopened.manifest()["a"] != original_manifest["a"]
+        assert changed_reopened.manifest_hash() != original_manifest_hash
+    finally:
+        await changed_reopened.close()
 
 
 def test_budget_ladder_degrades_then_halts() -> None:
