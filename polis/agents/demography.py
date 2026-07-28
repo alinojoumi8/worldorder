@@ -31,7 +31,7 @@ from polis.agents.ports import (
     EstatePort,
     HousingPort,
     IncarcerationPort,
-    LedgerReadPort,
+    LedgerPort,
     MemoryArchivePort,
     SocialGraphPort,
 )
@@ -178,7 +178,7 @@ class HouseholdRegistry:
         world: World,
         agents: AgentPopulation,
         housing: HousingPort | None = None,
-        ledger: LedgerReadPort | None = None,
+        ledger: LedgerPort | None = None,
         employment: EmploymentPort | None = None,
         cfg: DemographySettings,
         rng: RngRegistry,
@@ -877,7 +877,7 @@ class CourtshipRegistry:
         )
         if split_legs:
             actual = str(
-                cast(LedgerReadPort, self.households.ledger).post_transaction(
+                cast(LedgerPort, self.households.ledger).post_transaction(
                     split_legs,
                     tick=tick,
                     cause=event,
@@ -1490,7 +1490,7 @@ class ChildCosts:
         clock: Clock,
         agents: AgentPopulation,
         households: HouseholdRegistry,
-        ledger: LedgerReadPort | None,
+        ledger: LedgerPort | None,
         runtime: RuntimeOverlay,
         cfg: DemographySettings,
         supplier_account: Callable[[int], str | None] | None = None,
@@ -1687,7 +1687,7 @@ class EstateSettler:
         agents: AgentPopulation,
         households: HouseholdRegistry,
         estate: EstatePort,
-        ledger: LedgerReadPort,
+        ledger: LedgerPort,
         housing: HousingPort,
         graph: SocialGraphPort,
         memories: MemoryArchivePort,
