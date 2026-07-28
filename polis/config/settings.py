@@ -46,6 +46,27 @@ class ClockSettings(FrozenModel):
         return self
 
 
+class ActionSlotSettings(FrozenModel):
+    microscope: int = Field(default=1, ge=1)
+    chronicle: int = Field(default=4, ge=1)
+
+    def for_profile(self, profile: Literal["microscope", "chronicle"]) -> int:
+        return self.microscope if profile == "microscope" else self.chronicle
+
+
+class ActionLegalitySettings(FrozenModel):
+    oracle: Literal["permissive", "law"] = "permissive"
+
+
+class ActionSettings(FrozenModel):
+    slots_per_tick: ActionSlotSettings = ActionSlotSettings()
+    max_params_bytes: int = Field(default=4_096, ge=1)
+    max_reasoning_chars: int = Field(default=2_000, ge=0)
+    max_speech_chars: int = Field(default=1_000, ge=0)
+    legality: ActionLegalitySettings = ActionLegalitySettings()
+    reject_on_unregistered: bool = True
+
+
 class PopulationSettings(FrozenModel):
     initial_agents: int = 1000
     age_distribution: str = "pyramid_ca_2020"
@@ -513,6 +534,7 @@ class Settings(FrozenModel):
     population: PopulationSettings
     world: WorldSettings
     llm: LLMSettings
+    actions: ActionSettings = ActionSettings()
     salience: SalienceSettings = SalienceSettings()
     memory: MemorySettings = MemorySettings()
     mechanisms: dict[str, str] = {}
@@ -621,6 +643,8 @@ _ECONOMY_CONFIG_FIELDS = frozenset(
 
 def _config_payload(settings: Settings, *, by_alias: bool = False) -> dict[str, Any]:
     payload = settings.model_dump(mode="json", by_alias=by_alias)
+    if settings.actions == ActionSettings():
+        payload.pop("actions")
     budget = payload["llm"]["budget"]
     if budget["max_calls_per_run"] is None:
         budget.pop("max_calls_per_run")

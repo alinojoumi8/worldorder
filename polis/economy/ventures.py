@@ -7,6 +7,7 @@ from decimal import Decimal, localcontext
 from fractions import Fraction
 from typing import Any
 
+from polis.agents.actions.compat import LEGACY_ACTION_TYPES
 from polis.agents.actions.types import Action, ActionType, make_action
 from polis.agents.state import AgentPopulation
 from polis.config.canon import canonical_json
@@ -2076,7 +2077,7 @@ class VentureEngine:
                     "released_shares": released_shares,
                     "blocked_action_types": sorted(
                         action_type.value
-                        for action_type in ActionType
+                        for action_type in LEGACY_ACTION_TYPES
                         if action_type not in allowed
                     ),
                     "stay_until_tick": case.stay_until_tick,

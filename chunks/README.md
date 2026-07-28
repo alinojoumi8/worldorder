@@ -137,7 +137,10 @@ consecutive sim-years.
 - `{C06, C07, C10, C24a}` after C04
 - `{C11, C12, C14}` after M1
 - `{C13, C15}` after M2
-- `{C16, C17, C18, C19}` after M3
+- `{C16}` after M3
+- `{C17}` after C16
+- `{C18}` after C17
+- `{C19}` after C18
 - `{C22, C23b, C25}` after M5
 
 ---
