@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from importlib import import_module
 from uuid import UUID
 
 from polis.config.canon import canonical_bytes, sha256_hex
@@ -30,6 +31,7 @@ async def rebuild(
     batch: int = 5_000,
     progress: Callable[[int], None] | None = None,
 ) -> RebuildReport:
+    import_module("polis.society.projections")
     repository = EventRepository(db, run_id)
     router = ProjectionRouter(db, run_id)
     tables = await router.truncate_all()

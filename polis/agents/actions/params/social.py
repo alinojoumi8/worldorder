@@ -5,6 +5,7 @@ from polis.agents.actions.params.base import ActionParams, AgentId
 
 class BefriendParams(ActionParams):
     target_id: AgentId
+    message: str | None = None
 
 
 class CourtParams(ActionParams):

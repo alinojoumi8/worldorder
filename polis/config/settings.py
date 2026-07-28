@@ -198,9 +198,54 @@ class MemorySettings(FrozenModel):
     reflection_min_gap_ticks: int = 24
 
 
+class FeedEngagementSettings(FrozenModel):
+    eta: float = Field(default=0.05, gt=0)
+    passes: int = Field(default=20, ge=1)
+    n0: int = Field(default=5_000, ge=0)
+    beta_prior: tuple[float, ...] = (0.0,) * 11
+
+    @model_validator(mode="after")
+    def validate_beta_prior(self) -> FeedEngagementSettings:
+        if len(self.beta_prior) != 11:
+            raise ValueError("society.feed.engagement.beta_prior must contain 11 entries")
+        return self
+
+
+class SocietyFeedSettings(FrozenModel):
+    recency_halflife_sim_hours: float = Field(default=12.0, gt=0)
+    pop_norm: int = Field(default=200, ge=1)
+    follower_norm: int = Field(default=200, ge=1)
+    adversarial_gamma: float = Field(default=0.5, ge=0)
+    engagement: FeedEngagementSettings = FeedEngagementSettings()
+
+
 class SocietySettings(FrozenModel):
-    feed_algorithm: str = "engagement"
-    outlets: int = 4
+    feed_algorithm: Literal["chronological", "engagement", "random", "adversarial"] = "engagement"
+    outlets: int = Field(default=4, ge=0)
+    feed_slice: int = Field(default=15, ge=1, le=15)
+    feed_candidate_cap: int = Field(default=300, ge=15)
+    feed_window_sim_hours: int = Field(default=72, ge=1)
+    feed_out_of_network_quota: float = Field(default=0.30, ge=0, le=1)
+    repeat_penalty: float = Field(default=0.4, ge=0, le=1)
+    hearing_threshold: float = Field(default=0.35, ge=0, le=1)
+    max_dms_per_tick: int = Field(default=2, ge=0)
+    conversation_idle_ticks: int = Field(default=2, ge=1)
+    cascade_idle_ticks: int = Field(default=24, ge=1)
+    colocation_threshold: int = Field(default=6, ge=1)
+    befriend_window_sim_days: int = Field(default=14, ge=1)
+    tie_event_threshold: float = Field(default=0.02, ge=0, le=1)
+    tie_halflife_sim_days: dict[str, float | None] = {
+        "acquaintance": 30.0,
+        "friend": 90.0,
+        "colleague": 120.0,
+        "rival": 180.0,
+        "kin": None,
+        "partner": None,
+        "creditor": None,
+    }
+    homophily_bias: float = Field(default=0.0, ge=0)
+    comms_attention: Literal["tie_weighted", "uniform"] = "tie_weighted"
+    feed: SocietyFeedSettings = SocietyFeedSettings()
 
 
 class EconomySettings(FrozenModel):
@@ -493,6 +538,7 @@ class AblationSettings(FrozenModel):
     obfuscate_domain: bool = False
     disclose_simulation: bool = False
     salience_policy_override: str | None = None
+    feed_off: bool = False
 
 
 class StoreSettings(FrozenModel):
@@ -645,6 +691,13 @@ def _config_payload(settings: Settings, *, by_alias: bool = False) -> dict[str, 
     payload = settings.model_dump(mode="json", by_alias=by_alias)
     if settings.actions == ActionSettings():
         payload.pop("actions")
+    society_defaults = SocietySettings().model_dump(mode="json", by_alias=by_alias)
+    society_payload = payload["society"]
+    for field, value in society_defaults.items():
+        if field not in {"feed_algorithm", "outlets"} and society_payload.get(field) == value:
+            society_payload.pop(field, None)
+    if not settings.ablations.feed_off:
+        payload["ablations"].pop("feed_off", None)
     budget = payload["llm"]["budget"]
     if budget["max_calls_per_run"] is None:
         budget.pop("max_calls_per_run")

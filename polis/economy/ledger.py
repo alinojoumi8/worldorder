@@ -39,6 +39,7 @@ REASONS: Final = frozenset(
         "transfer",
         "wage",
         "purchase",
+        "rent",
         "trade",
         "loan",
         "interest",

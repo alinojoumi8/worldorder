@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
 from polis.agents.state import AgentPopulation
@@ -34,7 +35,53 @@ class PlaceView:
 class AgentBrief:
     agent_id: str
     display_name: str
-    relationship: str
+    age_years: float
+    relationship: str | None
+    tie_strength: float = 0.0
+    occupation: str | None = None
+    is_novel: bool = False
+    last_utterance: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MessageBrief:
+    message_id: str
+    from_id: str
+    tick: int
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class PostBrief:
+    post_id: str
+    author_id: str
+    tick: int
+    text: str
+    topic: str | None
+    likes: int
+    is_repost: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ArticleBrief:
+    article_id: str
+    outlet_id: str
+    headline: str
+    tick: int
+
+
+@dataclass(frozen=True, slots=True)
+class PerceptionSources:
+    """Already-capped slices built once per tick by the composition root."""
+
+    inbox: Mapping[str, tuple[MessageBrief, ...]] = field(default_factory=dict)
+    feed: Mapping[str, tuple[PostBrief, ...]] = field(default_factory=dict)
+    news: tuple[ArticleBrief, ...] = ()
+    market: Mapping[str, dict[str, object]] = field(default_factory=dict)
+    employer: Mapping[str, dict[str, object]] = field(default_factory=dict)
+    offers: Mapping[str, tuple[dict[str, str], ...]] = field(default_factory=dict)
+    obligations: Mapping[str, tuple[dict[str, str], ...]] = field(default_factory=dict)
+    utterances: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,9 +92,9 @@ class Observation:
     self_state: SelfView
     place: PlaceView
     co_located: tuple[AgentBrief, ...]
-    inbox: tuple[dict[str, str], ...]
-    feed: tuple[dict[str, str], ...]
-    news: tuple[dict[str, str], ...]
+    inbox: tuple[MessageBrief, ...]
+    feed: tuple[PostBrief, ...]
+    news: tuple[ArticleBrief, ...]
     market: dict[str, object] | None
     employer: dict[str, object] | None
     offers: tuple[dict[str, str], ...]
@@ -82,13 +129,21 @@ def build_observations(
     *,
     tick: int,
     sim_time: datetime,
+    sources: PerceptionSources | None = None,
 ) -> dict[str, Observation]:
+    sources = sources or PerceptionSources()
     observations: dict[str, Observation] = {}
     for agent in population.alive():
         location = world.locations[agent.agent_id]
         place = world.place(location.place_id) if location.place_id is not None else None
         co_located = tuple(
-            AgentBrief(other_id, population[other_id].display_name, "co-located")
+            AgentBrief(
+                other_id,
+                population[other_id].display_name,
+                population[other_id].age_years,
+                "co-located",
+                last_utterance=sources.utterances.get(agent.agent_id, {}).get(other_id),
+            )
             for other_id in world.occupancy(location.place_id or "")
             if other_id != agent.agent_id
         )[:12]
@@ -134,13 +189,13 @@ def build_observations(
                 _legal_actions(place_type, location.in_transit),
             ),
             co_located=co_located,
-            inbox=(),
-            feed=(),
-            news=(),
-            market=None,
-            employer=None,
-            offers=(),
-            obligations=(),
+            inbox=sources.inbox.get(agent.agent_id, ())[:10],
+            feed=sources.feed.get(agent.agent_id, ())[:15],
+            news=sources.news[:3],
+            market=sources.market.get(agent.agent_id),
+            employer=sources.employer.get(agent.agent_id),
+            offers=sources.offers.get(agent.agent_id, ())[:8],
+            obligations=sources.obligations.get(agent.agent_id, ())[:8],
             stakes=0.0,
             digest_features=features,
             digest_hash=digest_hash,
