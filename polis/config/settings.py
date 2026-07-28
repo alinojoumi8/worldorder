@@ -640,6 +640,229 @@ class BankruptcySettings(FrozenModel):
     credit_flag_years: int = 7
 
 
+class PolityOfficeSettings(FrozenModel):
+    seats: int = 1
+    term_sim_years: int | None = None
+    term_limit: int | None = None
+    method: Literal["plurality", "approval", "irv", "proportional"] | None = None
+    salary_cents: int = 0
+    min_skill_law: float | None = None
+
+
+class PolityAbstainSettings(FrozenModel):
+    theta_0: float = 0.35
+    theta_conscientiousness: float = 0.15
+    theta_civic: float = 0.10
+
+
+class IncomePolicySettings(FrozenModel):
+    brackets: tuple[tuple[int, int], ...] = (
+        (0, 0),
+        (3_000_000, 2_000),
+        (9_000_000, 3_500),
+    )
+
+
+class TaxPolicySettings(FrozenModel):
+    income: IncomePolicySettings = IncomePolicySettings()
+    corporate_bp: int = 2_000
+    capital_gains_bp: int = 1_500
+    inheritance_bp: int = 1_000
+    vat_bp: int = 1_000
+
+
+class MoneyPolicySettings(FrozenModel):
+    policy_rate_bp: int = 200
+
+
+class WelfarePolicySettings(FrozenModel):
+    unemployment_benefit_cents: int = 120_000
+    benefit_duration_ticks: int = 8_640
+    pension_cents: int = 150_000
+    child_benefit_cents: int = 40_000
+
+
+class EducationPolicySettings(FrozenModel):
+    spend_cents_per_student: int = 0
+    compulsory_until_age: int = 18
+
+
+class PolicePolicySettings(FrozenModel):
+    budget_cents: int = 5_000_000
+
+
+class CourtsPolicySettings(FrozenModel):
+    budget_cents: int = 3_000_000
+    loser_pays: bool = False
+
+
+class PrisonPolicySettings(FrozenModel):
+    capacity: int = 40
+
+
+class SentencingPolicySettings(FrozenModel):
+    multiplier_bp: int = 10_000
+
+
+class LabourPolicySettings(FrozenModel):
+    minimum_wage_cents: int = 1_200
+    max_hours_per_sim_week: int = 48
+
+
+class FinanceRegulationPolicySettings(FrozenModel):
+    margin_allowed: bool = True
+    short_selling_allowed: bool = True
+    insider_trading_enforced: bool = True
+
+
+class LabourRegulationPolicySettings(FrozenModel):
+    at_will_dismissal: bool = True
+
+
+class MediaRegulationPolicySettings(FrozenModel):
+    disclosure_required: bool = False
+
+
+class HousingRegulationPolicySettings(FrozenModel):
+    rent_cap_bp: int | None = None
+
+
+class RegulationPolicySettings(FrozenModel):
+    finance: FinanceRegulationPolicySettings = FinanceRegulationPolicySettings()
+    labour: LabourRegulationPolicySettings = LabourRegulationPolicySettings()
+    media: MediaRegulationPolicySettings = MediaRegulationPolicySettings()
+    housing: HousingRegulationPolicySettings = HousingRegulationPolicySettings()
+
+
+class MigrationPolicySettings(FrozenModel):
+    quota_per_sim_year: int = 60
+
+
+class PolityControlPolicySettings(FrozenModel):
+    campaign_cap_cents: int | None = None
+    felon_franchise: bool = False
+
+
+class GovernmentPolicySettings(FrozenModel):
+    debt_ceiling_cents: int = 500_000_000
+    public_notices_budget_cents: int = 0
+
+
+class SocietyPolicySettings(FrozenModel):
+    feed_algorithm: Literal["chronological", "engagement", "social", "diversity"] = "engagement"
+
+
+class PolicyInitialSettings(FrozenModel):
+    tax: TaxPolicySettings = TaxPolicySettings()
+    money: MoneyPolicySettings = MoneyPolicySettings()
+    welfare: WelfarePolicySettings = WelfarePolicySettings()
+    education: EducationPolicySettings = EducationPolicySettings()
+    police: PolicePolicySettings = PolicePolicySettings()
+    courts: CourtsPolicySettings = CourtsPolicySettings()
+    prison: PrisonPolicySettings = PrisonPolicySettings()
+    sentencing: SentencingPolicySettings = SentencingPolicySettings()
+    labour: LabourPolicySettings = LabourPolicySettings()
+    regulation: RegulationPolicySettings = RegulationPolicySettings()
+    migration: MigrationPolicySettings = MigrationPolicySettings()
+    polity: PolityControlPolicySettings = PolityControlPolicySettings()
+    government: GovernmentPolicySettings = GovernmentPolicySettings()
+    society: SocietyPolicySettings = SocietyPolicySettings()
+
+    def flat(self) -> Mapping[str, Any]:
+        result: dict[str, Any] = {}
+
+        def visit(prefix: str, value: Any) -> None:
+            if isinstance(value, BaseModel):
+                for field_name in value.__class__.model_fields:
+                    visit(
+                        f"{prefix}.{field_name}" if prefix else field_name,
+                        getattr(value, field_name),
+                    )
+                return
+            result[prefix] = value
+
+        visit("", self)
+        return result
+
+
+def _default_polity_offices() -> dict[str, PolityOfficeSettings]:
+    return {
+        "president": PolityOfficeSettings(
+            term_sim_years=4,
+            term_limit=2,
+            salary_cents=900_000,
+        ),
+        "council": PolityOfficeSettings(
+            seats=7,
+            term_sim_years=2,
+            method="proportional",
+            salary_cents=450_000,
+        ),
+        "judge": PolityOfficeSettings(
+            seats=2,
+            term_sim_years=6,
+            salary_cents=700_000,
+            min_skill_law=0.6,
+        ),
+        "police_chief": PolityOfficeSettings(salary_cents=600_000),
+        "cb_governor": PolityOfficeSettings(term_sim_years=6, salary_cents=800_000),
+    }
+
+
+class PolitySettings(FrozenModel):
+    election_method: Literal["plurality", "approval", "irv", "proportional"] = "plurality"
+    offices: dict[str, PolityOfficeSettings] = Field(default_factory=_default_polity_offices)
+    council_session: str = "weekly"
+    policy_review: str = "weekly"
+    court_session: str = "twice_weekly"
+    campaign_length_sim_days: int = 30
+    candidacy_close_sim_days: int = 7
+    candidacy_deposit_cents: int = 250_000
+    deposit_refund_share: float = 0.05
+    candidacy_record_bar: tuple[str, ...] = ("fraud", "embezzlement", "perjury")
+    party_founding_fee_cents: int = 100_000
+    max_platform_planks: int = 8
+    initiative_signatures: int = 50
+    exposure_halflife_sim_days: int = 14
+    outlet_efficiency: float = 0.6
+    abstain: PolityAbstainSettings = PolityAbstainSettings()
+    vote_model: Literal["fitted_from_deliberate"] = "fitted_from_deliberate"
+    vote_holdout_share: float = 0.20
+    vote_min_holdout_lift: float = 0.5
+    omega_prior: dict[str, float] = {
+        "congruence": 1.0,
+        "self_interest": 0.6,
+        "social": 0.4,
+        "media": 0.3,
+        "party_id": 0.8,
+        "incumbency": 0.2,
+    }
+    llm_election_multiplier: float = 6.0
+    can_regulate_feed: bool = False
+    policy: PolicyInitialSettings = PolicyInitialSettings()
+
+    @model_validator(mode="after")
+    def validate_polity(self) -> PolitySettings:
+        expected_offices = {"president", "council", "judge", "police_chief", "cb_governor"}
+        if set(self.offices) != expected_offices:
+            raise ValueError("polity.offices must define the five constitutional offices")
+        expected_omega = {
+            "congruence",
+            "self_interest",
+            "social",
+            "media",
+            "party_id",
+            "incumbency",
+        }
+        if set(self.omega_prior) != expected_omega:
+            raise ValueError("polity.omega_prior must define all six vote features")
+        if not 0 <= self.deposit_refund_share <= 1:
+            raise ValueError("polity.deposit_refund_share must be between zero and one")
+        if not 0 < self.vote_holdout_share < 1:
+            raise ValueError("polity.vote_holdout_share must be between zero and one")
+        return self
+
+
 class AblationSettings(FrozenModel):
     reflex_only: bool = False
     obfuscate_domain: bool = False
@@ -705,6 +928,7 @@ class Settings(FrozenModel):
     exchange: ExchangeSettings = ExchangeSettings()
     ventures: VentureSettings = VentureSettings()
     bankruptcy: BankruptcySettings = BankruptcySettings()
+    polity: PolitySettings = PolitySettings()
     ablations: AblationSettings = AblationSettings()
     store: StoreSettings
     telemetry: TelemetrySettings = TelemetrySettings()

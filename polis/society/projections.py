@@ -3,18 +3,28 @@ from __future__ import annotations
 import json
 
 from polis.events.kinds import (
+    ABSTAINED,
     ARTICLE_DISTRIBUTED,
     ARTICLE_PUBLISHED,
     ARTICLE_RETRACTED,
     BELIEF_DRIFT_APPLIED,
     BELIEF_PRIORS_SET,
     BELIEF_UPDATED,
+    CAMPAIGN_SPEND,
+    CANDIDACY_ANNOUNCED,
     CLAIM_CHECKED,
+    ELECTION_CALLED,
+    ELECTION_RESOLVED,
     FOLLOW_CREATED,
     FOLLOW_ENDED,
     OUTLET_CLOSED,
     OUTLET_FOUNDED,
     OUTLET_REVENUE_BOOKED,
+    PARTY_DISSOLVED,
+    PARTY_FOUNDED,
+    PARTY_PLATFORM_CHANGED,
+    POLICY_ENACTED,
+    POLICY_REPEALED,
     POST_DELETED,
     POST_ENGAGED,
     POST_PUBLISHED,
@@ -22,6 +32,7 @@ from polis.events.kinds import (
     TIE_FORMED,
     TIE_TYPE_CHANGED,
     TIE_UPDATED,
+    VOTE_CAST,
 )
 from polis.events.types import Event
 from polis.society.beliefs import proposition_spec
@@ -521,12 +532,238 @@ class BeliefsProjection:
         await ctx.conn.execute("DELETE FROM beliefs WHERE run_id=%s", (ctx.run_id,))
 
 
+class PolityProjection:
+    name = "polity_projection"
+    tables: tuple[str, ...] = (
+        "parties",
+        "elections",
+        "candidacies",
+        "votes",
+        "policies",
+    )
+    handles: frozenset[int] = frozenset(
+        {
+            PARTY_FOUNDED,
+            PARTY_PLATFORM_CHANGED,
+            PARTY_DISSOLVED,
+            ELECTION_CALLED,
+            ELECTION_RESOLVED,
+            CANDIDACY_ANNOUNCED,
+            CAMPAIGN_SPEND,
+            VOTE_CAST,
+            ABSTAINED,
+            POLICY_ENACTED,
+            POLICY_REPEALED,
+        }
+    )
+
+    async def apply(self, ctx: ProjectionContext, event: Event) -> None:
+        payload = event.payload
+        if event.kind == PARTY_FOUNDED:
+            await ctx.conn.execute(
+                """
+                INSERT INTO parties(
+                    run_id,party_id,name,platform,founded_tick,dissolved_tick
+                ) VALUES(%s,%s,%s,%s::jsonb,%s,NULL)
+                ON CONFLICT(run_id,party_id) DO UPDATE SET
+                    name=EXCLUDED.name,platform=EXCLUDED.platform,
+                    founded_tick=EXCLUDED.founded_tick,dissolved_tick=NULL
+                """,
+                (
+                    ctx.run_id,
+                    payload["party_id"],
+                    payload["name"],
+                    json.dumps(payload["platform"], sort_keys=True),
+                    event.tick,
+                ),
+            )
+        elif event.kind == PARTY_PLATFORM_CHANGED:
+            changes = {str(row["proposition"]): float(row["new"]) for row in payload["changes"]}
+            await ctx.conn.execute(
+                """
+                UPDATE parties SET platform=platform || %s::jsonb
+                WHERE run_id=%s AND party_id=%s
+                """,
+                (
+                    json.dumps(changes, sort_keys=True),
+                    ctx.run_id,
+                    payload["party_id"],
+                ),
+            )
+        elif event.kind == PARTY_DISSOLVED:
+            await ctx.conn.execute(
+                """
+                UPDATE parties SET dissolved_tick=%s
+                WHERE run_id=%s AND party_id=%s
+                """,
+                (event.tick, ctx.run_id, payload["party_id"]),
+            )
+        elif event.kind == ELECTION_CALLED:
+            await ctx.conn.execute(
+                """
+                INSERT INTO elections(
+                    run_id,election_id,office,seats,called_tick,voting_tick,
+                    campaign_ends_tick,electorate_size,method
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(run_id,election_id) DO UPDATE SET
+                    called_tick=EXCLUDED.called_tick,
+                    voting_tick=EXCLUDED.voting_tick,
+                    campaign_ends_tick=EXCLUDED.campaign_ends_tick,
+                    electorate_size=EXCLUDED.electorate_size,
+                    turnout=NULL,winner_id=NULL,winner_ids='[]',
+                    margin=NULL,diagnostics='{}'
+                """,
+                (
+                    ctx.run_id,
+                    payload["election_id"],
+                    payload["office"],
+                    payload["seats"],
+                    payload["called_tick"],
+                    payload["voting_tick"],
+                    payload["campaign_ends_tick"],
+                    payload["electorate_size"],
+                    payload["method"],
+                ),
+            )
+        elif event.kind == ELECTION_RESOLVED:
+            winners = list(payload["winner_ids"])
+            diagnostics = {
+                key: payload[key]
+                for key in (
+                    "rounds",
+                    "n_deliberate",
+                    "n_reflex",
+                    "fitted_omega",
+                    "holdout_accuracy",
+                    "first_election_prior",
+                )
+                if key in payload
+            }
+            await ctx.conn.execute(
+                """
+                UPDATE elections SET
+                    turnout=%s,winner_id=%s,winner_ids=%s::jsonb,
+                    margin=%s,diagnostics=%s::jsonb
+                WHERE run_id=%s AND election_id=%s
+                """,
+                (
+                    payload["turnout"],
+                    winners[0] if winners else None,
+                    json.dumps(winners),
+                    payload["margin"],
+                    json.dumps(diagnostics, sort_keys=True),
+                    ctx.run_id,
+                    payload["election_id"],
+                ),
+            )
+            for candidacy_id, votes in sorted(payload["tallies"].items()):
+                await ctx.conn.execute(
+                    """
+                    UPDATE candidacies SET votes=%s
+                    WHERE run_id=%s AND candidacy_id=%s
+                    """,
+                    (votes, ctx.run_id, candidacy_id),
+                )
+        elif event.kind == CANDIDACY_ANNOUNCED:
+            await ctx.conn.execute(
+                """
+                INSERT INTO candidacies(
+                    run_id,candidacy_id,election_id,agent_id,party_id,platform
+                ) VALUES(%s,%s,%s,%s,%s,%s::jsonb)
+                ON CONFLICT(run_id,candidacy_id) DO UPDATE SET
+                    party_id=EXCLUDED.party_id,platform=EXCLUDED.platform
+                """,
+                (
+                    ctx.run_id,
+                    payload["candidacy_id"],
+                    payload["election_id"],
+                    payload["agent_id"],
+                    payload["party_id"],
+                    json.dumps(payload["platform"], sort_keys=True),
+                ),
+            )
+        elif event.kind == CAMPAIGN_SPEND:
+            await ctx.conn.execute(
+                """
+                UPDATE candidacies SET spend_cents=spend_cents+%s
+                WHERE run_id=%s AND candidacy_id=%s
+                """,
+                (payload["amount_cents"], ctx.run_id, payload["candidacy_id"]),
+            )
+        elif event.kind in {VOTE_CAST, ABSTAINED}:
+            voter_id = payload.get("voter_id", payload.get("agent_id"))
+            await ctx.conn.execute(
+                """
+                INSERT INTO votes(
+                    run_id,election_id,voter_id,candidacy_id,tick,
+                    ranking,approvals,origin,utility
+                ) VALUES(%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s::jsonb)
+                ON CONFLICT(run_id,election_id,voter_id) DO UPDATE SET
+                    candidacy_id=EXCLUDED.candidacy_id,tick=EXCLUDED.tick,
+                    ranking=EXCLUDED.ranking,approvals=EXCLUDED.approvals,
+                    origin=EXCLUDED.origin,utility=EXCLUDED.utility
+                """,
+                (
+                    ctx.run_id,
+                    payload["election_id"],
+                    voter_id,
+                    payload.get("candidacy_id"),
+                    event.tick,
+                    json.dumps(payload.get("ranking", [])),
+                    json.dumps(payload.get("approvals", [])),
+                    payload["origin"],
+                    json.dumps(payload["utility"], sort_keys=True),
+                ),
+            )
+        elif event.kind == POLICY_ENACTED:
+            await ctx.conn.execute(
+                """
+                INSERT INTO policies(
+                    run_id,policy_id,parameter,old_value,new_value,enacted_tick,
+                    effective_tick,enacted_by,vote_margin,proposal_seq
+                ) VALUES(%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s)
+                ON CONFLICT(run_id,policy_id) DO UPDATE SET
+                    old_value=EXCLUDED.old_value,new_value=EXCLUDED.new_value,
+                    effective_tick=EXCLUDED.effective_tick,
+                    enacted_by=EXCLUDED.enacted_by,
+                    vote_margin=EXCLUDED.vote_margin,
+                    proposal_seq=EXCLUDED.proposal_seq
+                """,
+                (
+                    ctx.run_id,
+                    payload["policy_id"],
+                    payload["parameter"],
+                    json.dumps(payload["old_value"], sort_keys=True),
+                    json.dumps(payload["new_value"], sort_keys=True),
+                    event.tick,
+                    payload["effective_tick"],
+                    payload["enacted_by"],
+                    payload["vote_margin"],
+                    payload["proposal_seq"],
+                ),
+            )
+        elif event.kind == POLICY_REPEALED:
+            policy_id = payload.get("repealed_policy_id") or payload["policy_id"]
+            await ctx.conn.execute(
+                """
+                UPDATE policies SET repealed_tick=%s
+                WHERE run_id=%s AND policy_id=%s
+                """,
+                (event.tick, ctx.run_id, policy_id),
+            )
+
+    async def truncate(self, ctx: ProjectionContext) -> None:
+        for table in ("votes", "candidacies", "elections", "parties", "policies"):
+            await ctx.conn.execute(f"DELETE FROM {table} WHERE run_id=%s", (ctx.run_id,))
+
+
 posts_projection = PostsProjection()
 follows_projection = FollowsProjection()
 relationships_projection = RelationshipsProjection()
 outlets_projection = OutletsProjection()
 articles_projection = ArticlesProjection()
 beliefs_projection = BeliefsProjection()
+polity_projection = PolityProjection()
 
 register_projection(posts_projection)
 register_projection(follows_projection)
@@ -534,18 +771,21 @@ register_projection(relationships_projection)
 register_projection(outlets_projection)
 register_projection(articles_projection)
 register_projection(beliefs_projection)
+register_projection(polity_projection)
 
 __all__ = [
     "ArticlesProjection",
     "BeliefsProjection",
     "FollowsProjection",
     "OutletsProjection",
+    "PolityProjection",
     "PostsProjection",
     "RelationshipsProjection",
     "articles_projection",
     "beliefs_projection",
     "follows_projection",
     "outlets_projection",
+    "polity_projection",
     "posts_projection",
     "relationships_projection",
 ]

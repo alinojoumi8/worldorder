@@ -54,3 +54,40 @@ def test_broadcast_adapter_posts_one_balanced_venue_fee() -> None:
     assert ledger.balance(payee) == 250
     assert ledger.global_balance_cents() == 0
     assert adapter.can_pay_broadcast("ag_payer", "ag_owner", 751) is False
+
+    transfer_id = adapter.next_transfer_id(2)
+    assert adapter.can_pay("ag_payer", 100, "ag_owner")
+    assert (
+        adapter.post_transfer(
+            "ag_payer",
+            "ag_owner",
+            100,
+            reason="transfer",
+            tick=2,
+            cause=cause(run_id, 2, 2),
+        )
+        == transfer_id
+    )
+    assert ledger.balance(payer) == 650
+    assert ledger.balance(payee) == 350
+    assert ledger.global_balance_cents() == 0
+
+
+def test_generic_affordability_requires_a_compatible_payee_account() -> None:
+    run_id = UUID(int=9)
+    ledger = Ledger(run_id)
+    payer = ledger.open_account("cash", "ag_payer", "agent", tick=0)
+    ledger.open_account("dep", "ag_owner", "agent", bank_id="bk_one", tick=0)
+    issuance = ledger.open_account("iss", "bk_cb", "central_bank", tick=0)
+    ledger.issue_base_money(
+        (
+            Leg(payer, 1, 500, "issuance"),
+            Leg(issuance, -1, 500, "issuance"),
+        ),
+        tick=0,
+        cause=cause(run_id, 0, 0),
+    )
+    adapter = EconomyLedgerAdapter(ledger)
+
+    assert adapter.can_pay("ag_payer", 100)
+    assert not adapter.can_pay("ag_payer", 100, "ag_owner")

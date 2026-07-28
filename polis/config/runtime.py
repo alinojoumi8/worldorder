@@ -20,6 +20,8 @@ class Enactment:
 
 
 class RuntimeOverlay(Protocol):
+    def get(self, parameter: str, tick: int) -> Any: ...
+
     def bp(self, key: str, tick: int) -> int: ...
 
     def cents(self, key: str, tick: int) -> int: ...
@@ -30,6 +32,19 @@ class RuntimeOverlay(Protocol):
 
     def as_of(self, tick: int) -> Mapping[str, Any]: ...
 
+    def enact(
+        self,
+        parameter: str,
+        value: Any,
+        effective_tick: int,
+        policy_id: str,
+        event_seq: int,
+        *,
+        enacted_tick: int = 0,
+    ) -> None: ...
+
+    def history(self, parameter: str) -> tuple[Enactment, ...]: ...
+
 
 class RuntimeConfig:
     name: ClassVar[str] = "runtime_config"
@@ -37,17 +52,32 @@ class RuntimeConfig:
     def __init__(self, base: Settings) -> None:
         self.base = base
         self._history: dict[str, list[Enactment]] = defaultdict(list)
+        self._policy_defaults = dict(base.polity.policy.flat())
+        self._policy_keys = frozenset(self._policy_defaults)
 
     def _static(self, parameter: str) -> Any:
-        current: Any = self.base
-        for part in parameter.split("."):
-            if not hasattr(current, part):
-                raise RuntimeOverlayError(f"unknown runtime parameter: {parameter}")
-            current = getattr(current, part)
-        return current
+        def resolve(root: Any) -> Any:
+            current = root
+            for part in parameter.split("."):
+                if not hasattr(current, part):
+                    raise AttributeError(part)
+                current = getattr(current, part)
+            return current
+
+        if parameter in self._policy_keys:
+            try:
+                return resolve(self.base.polity.policy)
+            except AttributeError as exc:
+                raise RuntimeOverlayError(f"unknown runtime parameter: {parameter}") from exc
+        try:
+            return resolve(self.base)
+        except AttributeError as exc:
+            raise RuntimeOverlayError(f"unknown runtime parameter: {parameter}") from exc
 
     def get(self, parameter: str, tick: int) -> Any:
-        candidates = [item for item in self._history[parameter] if item.effective_tick <= tick]
+        candidates = [
+            item for item in self._history.get(parameter, ()) if item.effective_tick <= tick
+        ]
         if not candidates:
             return self._static(parameter)
         return max(candidates, key=lambda item: (item.effective_tick, item.event_seq)).value
@@ -123,7 +153,8 @@ class RuntimeConfig:
         return tuple(self._history[parameter])
 
     def snapshot(self, tick: int) -> Mapping[str, Any]:
-        return {key: self.get(key, tick) for key in sorted(self._history)}
+        keys = self._policy_keys.union(self._history)
+        return {key: self.get(key, tick) for key in sorted(keys)}
 
     def dump(self) -> Mapping[str, Any]:
         return {
