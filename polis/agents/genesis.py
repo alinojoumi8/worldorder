@@ -96,6 +96,67 @@ def _reflex(traits: Traits) -> ReflexProfile:
     )
 
 
+def derive_reflex_profile(traits: Traits) -> ReflexProfile:
+    return _reflex(traits)
+
+
+def stage_for_age(age_years: float) -> str:
+    if age_years < 6:
+        return "infant"
+    if age_years < 12:
+        return "child"
+    if age_years < 18:
+        return "adolescent"
+    if age_years < 65:
+        return "adult"
+    return "elder"
+
+
+def advance_age(
+    agent: AgentState,
+    elapsed_sim_days: float,
+    *,
+    demographic_acceleration: float,
+    days_per_sim_year: int,
+) -> float:
+    if elapsed_sim_days < 0:
+        raise ValueError("elapsed_sim_days must be non-negative")
+    agent.age_years += elapsed_sim_days * demographic_acceleration / days_per_sim_year
+    return agent.age_years
+
+
+def population_mean_traits(population: AgentPopulation) -> Traits:
+    rows = population.alive()
+    if not rows:
+        raise ValueError("cannot compute trait means for an empty population")
+    values = {
+        name: sum(getattr(agent.traits, name) for agent in rows) / len(rows)
+        for name in Traits.__dataclass_fields__
+    }
+    return Traits(**values)
+
+
+def inherit_traits(
+    mother: AgentState,
+    father: AgentState,
+    rng: RngRegistry,
+    child_id: str,
+) -> Traits:
+    stream = rng.numpy("demog.traits", child_id)
+    values = {}
+    for name in Traits.__dataclass_fields__:
+        centre = (getattr(mother.traits, name) + getattr(father.traits, name)) / 2
+        values[name] = round(
+            min(1.0, max(0.0, centre + float(stream.normal(0.0, 0.05)))),
+            6,
+        )
+    return Traits(**values)
+
+
+def mark_dead(*_args: object, **_kwargs: object) -> None:
+    raise RuntimeError("C20 EstateSettler is the only supported death path")
+
+
 def generate_agents(
     settings: PopulationSettings,
     world: World,
@@ -147,3 +208,6 @@ def generate_agents(
         )
     world.freeze_occupancy()
     return AgentPopulation(agents)
+
+
+initialise_population = generate_agents

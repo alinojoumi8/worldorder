@@ -707,28 +707,43 @@ class BeliefEngine:
         agent_id: str,
         offsets: Mapping[str, float],
     ) -> tuple[tuple[str, float, float], ...]:
-        del agent_id
-        return (
-            *(
-                (
+        rows: list[tuple[str, float, float]] = []
+        for proposition in (*POLICY_PROPOSITIONS, "trust.generalised"):
+            spec = _spec_for(proposition)
+            if spec is None:
+                raise RuntimeError(f"migrant proposition has no specification: {proposition}")
+            value = max(
+                spec.lo,
+                min(
+                    spec.hi,
+                    self.population_mean(proposition) + float(offsets.get(proposition, 0.0)),
+                ),
+            )
+            rows.append((proposition, value, self.cfg.confidence_dilution))
+        return tuple(rows)
+
+    def apply_priors(
+        self,
+        agent_id: str,
+        priors: Sequence[tuple[str, float, float]],
+        *,
+        tick: int,
+        source_ref: str,
+    ) -> None:
+        for proposition, value, confidence in priors:
+            if proposition.startswith("fact."):
+                raise ValueError("fact propositions cannot be inherited")
+            self.repo.put(
+                Belief(
+                    agent_id,
                     proposition,
-                    max(
-                        -1.0,
-                        min(
-                            1.0,
-                            self.population_mean(proposition) + offsets.get(proposition, 0),
-                        ),
-                    ),
-                    0.25,
+                    value,
+                    confidence,
+                    "inherited",
+                    source_ref,
+                    tick,
                 )
-                for proposition in POLICY_PROPOSITIONS
-            ),
-            (
-                "trust.generalised",
-                max(0.0, min(1.0, 0.5 + offsets.get("trust.generalised", 0))),
-                0.25,
-            ),
-        )
+            )
 
 
 __all__ = [

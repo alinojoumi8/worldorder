@@ -45,6 +45,14 @@ class CommitResult:
     chain_hash: str
 
 
+@dataclass(frozen=True, slots=True)
+class EventSavepoint:
+    staged_len: int
+    last_seq: int
+    chain_hash: str
+    dropped_sampled: int
+
+
 class EventLog:
     def __init__(
         self,
@@ -134,6 +142,22 @@ class EventLog:
 
     def staged(self) -> tuple[Event, ...]:
         return tuple(self._staged)
+
+    def savepoint(self) -> EventSavepoint:
+        return EventSavepoint(
+            len(self._staged),
+            self._last_seq,
+            self._chain_hash,
+            self._dropped_sampled,
+        )
+
+    def rollback_to(self, savepoint: EventSavepoint) -> None:
+        if not 0 <= savepoint.staged_len <= len(self._staged):
+            raise ValueError("event savepoint is not valid for the current staged batch")
+        del self._staged[savepoint.staged_len :]
+        self._last_seq = savepoint.last_seq
+        self._chain_hash = savepoint.chain_hash
+        self._dropped_sampled = savepoint.dropped_sampled
 
     async def commit(self, tick: int) -> CommitResult:
         persisted = [event for event in self._staged if event.seq != EPHEMERAL_SEQ]

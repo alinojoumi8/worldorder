@@ -576,6 +576,23 @@ class SocialGraph:
     def end_all_for(self, agent_id: str, reason: str, tick: int) -> Sequence[Event]:
         return tuple(self.end(row, reason, tick) for row in self.neighbours(agent_id))
 
+    def strong_ties(self, agent_id: str, threshold: float) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                row.b_id if row.a_id == agent_id else row.a_id
+                for row in self.neighbours(agent_id, min_strength=threshold)
+            )
+        )
+
+    def live_partner(self, agent_id: str) -> str | None:
+        row = next(
+            (tie for tie in self.neighbours(agent_id) if tie.type == "partner"),
+            None,
+        )
+        if row is None:
+            return None
+        return row.b_id if row.a_id == agent_id else row.a_id
+
 
 @mechanism(
     "graph_homophily",

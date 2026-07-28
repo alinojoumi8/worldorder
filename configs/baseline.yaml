@@ -89,6 +89,10 @@ mechanisms:
   crime_detection: budget_scaled
   bench_rule: evidence_threshold
   ex_offender_wage_penalty: "on"
+  fertility_hazard: income_conditional
+  mortality_hazard: gompertz_makeham
+  emigration_hazard: precarity_conditional
+  custody_default: higher_income
 society:
   feed_algorithm: engagement
   outlets: 4
@@ -204,6 +208,43 @@ law:
   ex_offender_penalty_floor: 0.6
   incarceration_decay_multiplier: 2.0
   civil_causes: [contract_breach, negligence, fraud, defamation, wrongful_dismissal]
+demography:
+  courtship_window_sim_days: 60
+  courtship_salience_boost: 0.3
+  leave_home_age: 18
+  independence_threshold_cents: 180000
+  housing_burden: 0.35
+  compatibility_weights: {age: 0.20, traits: 0.25, beliefs: 0.20, tie: 0.20, econ: 0.15}
+  age_norm_years: 20
+  fertility:
+    peak_age: 28
+    band: [16, 45]
+    kappa_income: {a: 0.6, b: 0.8}
+    kappa_parity: [1.0, 0.85, 0.6, 0.35, 0.15, 0.05]
+    phi_single: 0.15
+    iota_intent: 2.0
+    intent_window_sim_days: 90
+    psi_child_benefit: 0.4
+    kappa_housing_penalty: 0.4
+    gestation_sim_days: 270
+    loss_base: 0.03
+  child:
+    base_cost_cents_per_sim_day: 3500
+    age_multiplier: {infant: 1.0, child: 1.2, adolescent: 1.6}
+    arrears_tolerance_sim_days: 30
+    welfare_threshold_health: 0.35
+  migration:
+    cadence: monthly
+    origin_profile: {skill_premium: 0.0, wealth_offset_cents: 0, belief_offsets: {}}
+    base_emig_per_sim_day: 0.00015
+  estate:
+    liquidate_on_intestacy: true
+    creditor_priority: [secured, tax, unsecured]
+  bereavement:
+    strong_tie_threshold: 0.45
+    health_delta: -0.04
+    social_need_delta: -0.25
+    salience_boost_ticks: 72
 ablations:
   reflex_only: false
   obfuscate_domain: false

@@ -652,6 +652,18 @@ class LabourMarket:
             or offer.expires_tick < tick
         ):
             return ()
+        if not self.population[offer.agent_id].alive:
+            offer.status = "expired"
+            return (
+                emit(
+                    NewEvent(
+                        OFFER_EXPIRED,
+                        {"offer_id": offer.offer_id, "agent_id": offer.agent_id},
+                        actor_id=offer.firm_id,
+                        subject_ids=(offer.agent_id,),
+                    )
+                ),
+            )
         vacancy = self.economy.vacancies[offer.vacancy_id]
         if vacancy.status != "open" or vacancy.headcount <= 0:
             offer.status = "expired"
@@ -861,6 +873,29 @@ class LabourMarket:
             unpaid: list[str] = []
             for employment in sorted(employments, key=lambda row: row.employment_id):
                 gross = employment.accrued_wage_cents
+                agent = self.population[employment.agent_id]
+                if not agent.alive:
+                    events.append(
+                        emit(
+                            NewEvent(
+                                PAYROLL_SHORTFALL,
+                                {
+                                    "firm_id": firm.firm_id,
+                                    "required_cents": gross,
+                                    "available_cents": self.economy.ledger.liquid(firm.firm_id),
+                                    "unpaid_employment_ids": [employment.employment_id],
+                                    "accrued_claim_cents": gross,
+                                },
+                                actor_id=firm.firm_id,
+                                subject_ids=(employment.agent_id,),
+                            )
+                        )
+                    )
+                    employment.accrued_wage_cents = 0
+                    if employment.ended_tick is None:
+                        employment.ended_tick = tick
+                        firm.headcount = max(0, firm.headcount - 1)
+                    continue
                 income_tax = progressive_income_tax_cents(
                     gross,
                     self.settings.treasury.tax.income_brackets,
@@ -894,7 +929,7 @@ class LabourMarket:
                     legs.extend(
                         self.economy.ledger.transfer(
                             firm.ledger_account_id,
-                            self._deposit_account(employment.agent_id),
+                            self._deposit_account(employment.agent_id, tick),
                             net,
                             "wage",
                         )
@@ -1108,13 +1143,24 @@ class LabourMarket:
             )
         )
 
-    def _deposit_account(self, owner_id: str) -> str:
+    def _deposit_account(self, owner_id: str, tick: int) -> str:
         accounts = self.economy.ledger.accounts_of(owner_id)
         for account_id in accounts:
             code, _owner, _bank, _ref = parse_account_id(account_id)
             if code == "dep" and self.economy.ledger.is_open(account_id):
                 return account_id
-        raise RuntimeError(f"owner {owner_id} has no open deposit")
+        bank_id = min(
+            bank.bank_id
+            for bank in self.economy.banks.values()
+            if not bank.is_central and bank.status == "active"
+        )
+        return self.economy.ledger.open_account(
+            "dep",
+            owner_id,
+            "agent",
+            bank_id=bank_id,
+            tick=tick,
+        )
 
     def _combine_legs(self, legs: Sequence[Leg]) -> tuple[Leg, ...]:
         totals: dict[tuple[str, int, str], int] = {}

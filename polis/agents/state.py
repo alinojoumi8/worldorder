@@ -29,6 +29,12 @@ class AgentPopulation:
     def alive(self) -> tuple[AgentState, ...]:
         return tuple(agent for agent in self.agents.values() if agent.alive)
 
+    def add(self, agent: AgentState) -> None:
+        if agent.agent_id in self.agents:
+            raise ValueError(f"duplicate agent id: {agent.agent_id}")
+        self.agents[agent.agent_id] = agent
+        self.agents = dict(sorted(self.agents.items()))
+
     def money_supply_cents(self) -> int:
         return sum(agent.wealth_cents for agent in self.alive())
 

@@ -258,3 +258,70 @@ The offline replay opened no provider lane and reproduced terminal chain hash
 `b4fecd7855530a19f96d70618ffda3545b9a65d1e44099362e41566d79b371c4` exactly.
 This validates the bounded calibration harness; it does not promote the pilot to the full
 five-seed/five-year M3 research gate.
+
+## M5 / C20 demography handback
+
+### C15/C20 ownership and the death-settlement port
+
+C20 owns the mortality trigger, intestacy weights, dependant reassignment, relationship and
+memory effects, and the final widened `AGENT_DIED` event. The concrete C15 bridge owns order
+cancellation, liquidation, the debt and tax waterfall, distributions, write-offs, and every
+9xxx event and ledger leg used by cases A-D. C20 calls that bridge exactly once through:
+
+`settle_death(agent_id, tick, *, heirs: Sequence[tuple[str, int]] | None, ctx: Any)
+-> Sequence[Event]`
+
+The same port exposes `case_for`, `estate_account_id`, `gross_cents`, `open_order_count`, and
+`open_loan_count` so orchestration can report and verify the canonical estate without
+duplicating C15 logic. `tests/invariants/test_death_settlement.py` is the settlement gate,
+including open buy and sell orders, a loan larger than the estate, escheat, zero residual
+escrow, and exact money, ledger, order, and share invariants.
+
+The five coordination decisions are fixed as follows:
+
+1. C15 emits the 9xxx waterfall events and ledger legs; C20 emits 2006-2009, 2051,
+   household/tie/memory effects, and the widened 2002.
+2. Kind 2002 is widened in place with estate, debt, write-off, tax, heir, escheat,
+   transaction, and case details.
+3. The old `AgentPopulation.mark_dead` path raises at M5; all deaths use the atomic
+   settlement.
+4. Case A leaves the decedent's accounts open and defers closing while bankruptcy is open.
+5. Inheritance tax uses `tax.inheritance_bp`, read through `RuntimeOverlay.bp` as integer
+   basis points; no float rate or second key is accepted.
+
+The source brief's nominal 2003-2059 allocation overlaps existing C07 and C21 kinds. The
+implemented conflict-free ranges are 2005-2009, 2051, and demography-owned subranges
+15001-15004, 15010-15013, 15020-15023, 15030, and 15040-15041.
+
+### Households, fiscal child costs, and replay
+
+PHASE 8 runs dissolution, conception, gestation, birth, child costs, migration in,
+migration out, mortality, and settlement in stable order. Courtship and union formation
+remain bilateral agent actions. Child costs use balanced purchase legs to a real firm:
+the household pays the amount net of benefit, the treasury funds the benefit, and a
+headless shelter household is fully state-funded. Government spending is recorded and any
+same-tick overdraft is financed before the invariant pass.
+
+Migration, household state, parent IDs, generation, home, and death fields are projected by
+migration 0018 and reproduced by `polis rebuild`. Birth belief inheritance is a local
+O(number of inherited propositions) calculation and makes no provider call; the 0.0 and
+1.0 heritability endpoints are covered directly, so the B6 sweep adds simulation runs but
+no LLM spend.
+
+### Three-year calibration and F10
+
+The reproducible command
+`python scripts/validate_c20_calibration.py --agents 300 --years 3 --progress-ticks 100`
+completed all 1,080 chronicle ticks in 2,725.988 seconds with no halt. It recorded 300
+births, 180 arrivals, 73 departures, and 361 living residents at the end. Yearly
+birth/arrival/departure counts were `300/55/17`, `0/60/27`, and `0/60/29`.
+
+The reflex-only calibration's mean deliberate share was exactly 0.0 in every year, so the
+births-versus-deliberate-share correlation is undefined rather than zero. The first-year
+birth pulse followed by two zero-birth years is an F10 warning and cannot be presented as
+evidence that budget selection is absent. A non-reflex multi-budget sweep is still required
+before demographic findings use this mechanism. The calibration also exposed and fixed two
+long-horizon lifecycle gaps: death now settles funded accrued wages before estate closure
+and records unfunded terminal claims as `PAYROLL_SHORTFALL`; ordinary payroll
+deterministically opens a deposit at an active bank for a living worker whose prior bank
+account was resolved.

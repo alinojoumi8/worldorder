@@ -40,7 +40,9 @@ class KindError(PolisError):
 
 KIND_RANGES: Final = (
     KindRange(1000, 1999, "kernel", "polis.kernel", Persistence.PERSISTED),
-    KindRange(2000, 2999, "agents", "polis.agents", Persistence.PERSISTED),
+    KindRange(2000, 2004, "agents", "polis.agents", Persistence.PERSISTED),
+    KindRange(2005, 2005, "agent_sample", "polis.agents", Persistence.SAMPLED),
+    KindRange(2006, 2999, "agents", "polis.agents", Persistence.PERSISTED),
     KindRange(3000, 3999, "world", "polis.world", Persistence.PERSISTED),
     KindRange(4000, 4099, "cognition", "polis.agents", Persistence.SAMPLED),
     KindRange(4100, 4199, "llm", "polis.llm", Persistence.PERSISTED),
@@ -57,6 +59,7 @@ KIND_RANGES: Final = (
     KindRange(12000, 12999, "polity", "polis.society", Persistence.PERSISTED),
     KindRange(13000, 13999, "law", "polis.society", Persistence.PERSISTED),
     KindRange(14000, 14999, "education", "polis.agents", Persistence.PERSISTED),
+    KindRange(15000, 15999, "demography", "polis.agents", Persistence.PERSISTED),
     KindRange(90000, 90999, "ephemeral", "*", Persistence.EPHEMERAL),
     KindRange(99000, 99999, "research", "polis.research", Persistence.PERSISTED),
 )
@@ -175,7 +178,116 @@ AGENT_BORN = register_kind(
     "AGENT_BORN",
     owner="polis.agents",
     persistence=Persistence.PERSISTED,
-    schema=_schema("agent_id"),
+    schema=_schema(
+        "agent_id",
+        "display_name",
+        "age_years",
+        "born_tick",
+        "home_place_id",
+        "household_id",
+        "mother_id",
+        "father_id",
+        "generation",
+        "traits",
+        "education_level",
+    ),
+)
+AGENT_DIED = register_kind(
+    2002,
+    "AGENT_DIED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "cause",
+        "age_years",
+        "estate_value_cents",
+        "debts_cents",
+        "written_off_cents",
+        "tax_cents",
+        "heirs",
+        "escheated_cents",
+        "txn_ids",
+        "case",
+        "household_id",
+        "dependants",
+        "obituary_eligible",
+    ),
+)
+MORTALITY_HAZARD_DRAWN = register_kind(
+    2005,
+    "MORTALITY_HAZARD_DRAWN",
+    owner="polis.agents.demography",
+    persistence=Persistence.SAMPLED,
+    schema=_schema("agent_id", "hazard", "draw", "components"),
+)
+ESTATE_OPENED = register_kind(
+    2006,
+    "ESTATE_OPENED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "decedent_id",
+        "escrow_account_id",
+        "gross_cents",
+        "open_orders",
+        "open_loans",
+        "dependants",
+        "case",
+    ),
+)
+ESTATE_DEBTS_SETTLED = register_kind(
+    2007,
+    "ESTATE_DEBTS_SETTLED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "decedent_id",
+        "paid_cents",
+        "written_off_cents",
+        "creditors",
+        "txn_ids",
+    ),
+)
+ESTATE_DISTRIBUTED = register_kind(
+    2008,
+    "ESTATE_DISTRIBUTED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "decedent_id",
+        "tax_cents",
+        "distributable_cents",
+        "heirs",
+        "escheated_cents",
+        "txn_ids",
+    ),
+)
+ESTATE_CLOSED = register_kind(
+    2009,
+    "ESTATE_CLOSED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "decedent_id",
+        "escrow_account_id",
+        "residual_cents",
+        "steps_completed",
+        "total_txn_ids",
+    ),
+)
+BEREAVEMENT_APPLIED = register_kind(
+    2051,
+    "BEREAVEMENT_APPLIED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "decedent_id",
+        "bereaved_ids",
+        "health_delta",
+        "social_need_delta",
+        "salience_boost_ticks",
+    ),
 )
 ACTION_SUBMITTED = register_kind(
     2060,
@@ -2867,6 +2979,162 @@ GARNISHMENT_COLLECTED = register_kind(
         "txn_id",
         "reason",
         "remaining_cents",
+    ),
+)
+
+# C20: households, partnering, fertility, and migration.
+COURTSHIP_STARTED = register_kind(
+    15001,
+    "COURTSHIP_STARTED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("a_id", "b_id", "initiator_id", "compatibility", "place_id"),
+)
+COURTSHIP_ENDED = register_kind(
+    15002,
+    "COURTSHIP_ENDED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("a_id", "b_id", "outcome", "duration_ticks"),
+)
+UNION_FORMED = register_kind(
+    15003,
+    "UNION_FORMED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("partner_ids", "household_id", "courtship_ticks"),
+)
+UNION_DISSOLVED = register_kind(
+    15004,
+    "UNION_DISSOLVED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "partner_ids",
+        "initiator_id",
+        "reason",
+        "split_txn_id",
+        "dependants",
+        "custody",
+    ),
+)
+HOUSEHOLD_FORMED = register_kind(
+    15010,
+    "HOUSEHOLD_FORMED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "household_id",
+        "member_ids",
+        "home_place_id",
+        "tenure",
+        "rent_cents",
+        "head_agent_id",
+        "reason",
+    ),
+)
+HOUSEHOLD_JOINED = register_kind(
+    15011,
+    "HOUSEHOLD_JOINED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "household_id", "reason"),
+)
+HOUSEHOLD_LEFT = register_kind(
+    15012,
+    "HOUSEHOLD_LEFT",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "household_id", "reason"),
+)
+HOUSEHOLD_DISSOLVED = register_kind(
+    15013,
+    "HOUSEHOLD_DISSOLVED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("household_id", "reason", "members_reassigned"),
+)
+CONCEPTION = register_kind(
+    15020,
+    "CONCEPTION",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("mother_id", "father_id", "due_tick", "hazard", "draw"),
+)
+PREGNANCY_ENDED = register_kind(
+    15021,
+    "PREGNANCY_ENDED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("mother_id", "outcome", "child_id", "gestation_ticks"),
+)
+CHILD_COST_CHARGED = register_kind(
+    15022,
+    "CHILD_COST_CHARGED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "household_id",
+        "child_ids",
+        "amount_cents",
+        "benefit_offset_cents",
+        "txn_id",
+        "arrears_cents",
+    ),
+)
+STATE_CARE_STARTED = register_kind(
+    15023,
+    "STATE_CARE_STARTED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "child_id",
+        "from_household_id",
+        "to_household_id",
+        "reason",
+        "cost_cents",
+    ),
+)
+BELIEF_PRIORS_INHERITED = register_kind(
+    15030,
+    "BELIEF_PRIORS_INHERITED",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "child_id",
+        "mother_id",
+        "father_id",
+        "heritability_beliefs",
+        "propositions",
+    ),
+)
+MIGRATION_IN = register_kind(
+    15040,
+    "MIGRATION_IN",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "cohort_id",
+        "origin_profile",
+        "arrival_wealth_cents",
+        "skills",
+        "belief_priors",
+        "home_place_id",
+    ),
+)
+MIGRATION_OUT = register_kind(
+    15041,
+    "MIGRATION_OUT",
+    owner="polis.agents.demography",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "hazard_components",
+        "exit_wealth_cents",
+        "ties_severed",
+        "debts_settled_cents",
+        "debts_defaulted_cents",
     ),
 )
 POLICE_BUDGET_ALLOCATED = register_kind(
