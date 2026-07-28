@@ -43,6 +43,20 @@ def test_attention_matches_the_spec_formula() -> None:
 
 def test_heard_by_caps_sorts_and_supports_uniform_attention() -> None:
     candidates = [AgentBrief(f"ag_{index:02}") for index in range(20, 0, -1)]
+    social_graph = graph()
+    social_graph.form("speaker", "ag_19", "friend", "household", 0)
+    social_graph.form("speaker", "ag_20", "friend", "household", 0)
+    tied_listeners = heard_by(
+        "speaker",
+        candidates,
+        place=SimpleNamespace(occupancy=21, capacity=30),
+        addressed_to=(),
+        graph=social_graph,
+        speech_id="sp_ranked",
+        tick=1,
+        rng=RngRegistry(7),
+        cfg=SocietySettings(hearing_threshold=0),
+    )
     listeners = heard_by(
         "speaker",
         candidates,
@@ -56,6 +70,7 @@ def test_heard_by_caps_sorts_and_supports_uniform_attention() -> None:
     )
 
     assert len(listeners) == 12
+    assert {"ag_19", "ag_20"} <= {listener.agent_id for listener in tied_listeners}
     assert [listener.agent_id for listener in listeners] == sorted(
         listener.agent_id for listener in listeners
     )

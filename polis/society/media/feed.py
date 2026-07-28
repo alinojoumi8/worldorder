@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Final, Literal, Protocol
 
 from polis.config.canon import round6
-from polis.config.settings import SocietySettings
+from polis.config.settings import FEED_FEATURE_COUNT, SocietySettings
 from polis.events.kinds import FEED_SERVED
 from polis.events.log import EventLog
 from polis.events.types import NewEvent
@@ -158,9 +158,8 @@ def _mixed_pool(agent_id: str, tick: int, ctx: FeedContext) -> tuple[Post, ...]:
     out = [post for post in _citywide(agent_id, tick, ctx) if post.post_id not in in_ids]
     stream = ctx.rng.get("feed.pool", agent_id, tick)
     stream.shuffle(out)
-    combined = in_network + out
-    combined.sort(key=lambda post: (-post.tick, post.post_id))
-    combined = combined[: ctx.cfg.feed_candidate_cap]
+    remaining = max(0, ctx.cfg.feed_candidate_cap - len(in_network))
+    combined = in_network + out[:remaining]
     return tuple(sorted(combined, key=lambda post: post.post_id))
 
 
@@ -230,11 +229,33 @@ class AdversarialRanker:
         return score if f.repeat == 0 else score * ctx.cfg.repeat_penalty
 
 
-RANKERS: Final[Mapping[FeedAlgorithm, type[object]]] = {
-    "chronological": ChronologicalRanker,
-    "engagement": EngagementRanker,
-    "random": RandomRanker,
-    "adversarial": AdversarialRanker,
+type RankerFactory = Callable[[BeliefChannel, EngagementModel], FeedRanker]
+
+
+def _chronological_ranker(beliefs: BeliefChannel, model: EngagementModel) -> FeedRanker:
+    del beliefs, model
+    return ChronologicalRanker()
+
+
+def _engagement_ranker(beliefs: BeliefChannel, model: EngagementModel) -> FeedRanker:
+    del beliefs
+    return EngagementRanker(model)
+
+
+def _random_ranker(beliefs: BeliefChannel, model: EngagementModel) -> FeedRanker:
+    del beliefs, model
+    return RandomRanker()
+
+
+def _adversarial_ranker(beliefs: BeliefChannel, model: EngagementModel) -> FeedRanker:
+    return AdversarialRanker(beliefs, model)
+
+
+RANKERS: Final[Mapping[FeedAlgorithm, RankerFactory]] = {
+    "chronological": _chronological_ranker,
+    "engagement": _engagement_ranker,
+    "random": _random_ranker,
+    "adversarial": _adversarial_ranker,
 }
 
 
@@ -248,12 +269,12 @@ class EngagementModel:
         n0: int = 5_000,
         beta_prior: Sequence[float] | None = None,
     ) -> None:
-        prior = tuple(beta_prior or (0.0,) * 11)
-        if len(prior) != 11:
-            raise ValueError("beta_prior must contain 11 entries")
+        prior = tuple(beta_prior or (0.0,) * FEED_FEATURE_COUNT)
+        if len(prior) != FEED_FEATURE_COUNT:
+            raise ValueError(f"beta_prior must contain {FEED_FEATURE_COUNT} entries")
         current = tuple(beta or prior)
-        if len(current) != 11:
-            raise ValueError("beta must contain 11 entries")
+        if len(current) != FEED_FEATURE_COUNT:
+            raise ValueError(f"beta must contain {FEED_FEATURE_COUNT} entries")
         self.beta = tuple(round6(value) for value in current)
         self.n_observations = 0
         self.eta = eta
@@ -307,7 +328,7 @@ class EngagementModel:
                 (self.n0 * self.beta_prior[index] + self.n_observations * fitted[index])
                 / denominator
             )
-            for index in range(11)
+            for index in range(FEED_FEATURE_COUNT)
         )
         return self.beta
 
@@ -326,8 +347,8 @@ class EngagementModel:
         if not isinstance(raw_beta, Sequence):
             raise ValueError("checkpoint beta must be a sequence")
         beta = tuple(float(value) for value in raw_beta)
-        if len(beta) != 11:
-            raise ValueError("checkpoint beta must contain 11 entries")
+        if len(beta) != FEED_FEATURE_COUNT:
+            raise ValueError(f"checkpoint beta must contain {FEED_FEATURE_COUNT} entries")
         self.beta = tuple(round6(value) for value in beta)
         raw_count = state["n_observations"]
         if not isinstance(raw_count, int) or isinstance(raw_count, bool) or raw_count < 0:
@@ -346,8 +367,8 @@ class EngagementModel:
         if not isinstance(raw_prior, Sequence):
             raise ValueError("checkpoint beta_prior must be a sequence")
         prior = tuple(round6(float(value)) for value in raw_prior)
-        if len(prior) != 11:
-            raise ValueError("checkpoint beta_prior must contain 11 entries")
+        if len(prior) != FEED_FEATURE_COUNT:
+            raise ValueError(f"checkpoint beta_prior must contain {FEED_FEATURE_COUNT} entries")
         self.eta = float(raw_eta)
         self.passes = raw_passes
         self.n0 = raw_n0
@@ -378,14 +399,7 @@ class FeedService:
         self.log = log
         self.cfg = cfg
         self._impression_features: list[tuple[int, str, str, Features]] = []
-        if algorithm == "engagement":
-            self.ranker: FeedRanker = EngagementRanker(model)
-        elif algorithm == "adversarial":
-            self.ranker = AdversarialRanker(beliefs, model)
-        elif algorithm == "chronological":
-            self.ranker = ChronologicalRanker()
-        else:
-            self.ranker = RandomRanker()
+        self.ranker = RANKERS[algorithm](beliefs, model)
 
     def _features(self, agent_id: str, post: Post, tick: int) -> Features:
         half_life = max(

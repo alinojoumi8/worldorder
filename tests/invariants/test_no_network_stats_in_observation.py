@@ -15,11 +15,9 @@ def test_observation_views_never_expose_network_statistics_or_reach() -> None:
         observation.Observation,
     )
 
-    names = {
-        field.name
-        for view_type in view_types
-        if is_dataclass(view_type)
-        for field in fields(view_type)
-    }
+    names: set[str] = set()
+    for view_type in view_types:
+        assert is_dataclass(view_type), f"{view_type.__name__} must remain a dataclass"
+        names.update(field.name for field in fields(view_type))
 
     assert not {name for name in names if any(fragment in name.lower() for fragment in banned)}

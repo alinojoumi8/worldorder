@@ -630,6 +630,8 @@ class CommunicationResolver:
             return sub.check_resources(action, ctx)
         if action.type == ActionType.DIRECT_MESSAGE:
             recipient_id = str(action.params.get("recipient_id", ""))
+            # The normative config key retains its historical ``per_tick`` name,
+            # but §1.1/§9.2 define the counter per sender/recipient/sim-day.
             count = self.repo.dm_count(action.actor_id, recipient_id, self.clock.sim_day(ctx.tick))
             if count >= self.cfg.max_dms_per_tick:
                 return GateFailure("resources", "direct-message rate limit reached")

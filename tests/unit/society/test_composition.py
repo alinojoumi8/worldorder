@@ -71,7 +71,7 @@ class Duplicate(SubResolver):
     handles = frozenset({ActionType.SAY})
 
 
-def resolver() -> CommunicationResolver:
+def resolver(*, world: object | None = None) -> CommunicationResolver:
     log = EventLog(UUID(int=5), MemoryEventSink())
     clock = Clock(PROFILES["microscope"])
     cfg = SocietySettings()
@@ -86,7 +86,7 @@ def resolver() -> CommunicationResolver:
         log=log,
         clock=clock,
         rng=RngRegistry(5),
-        world=object(),  # type: ignore[arg-type]
+        world=world or object(),  # type: ignore[arg-type]
         graph=graph,
         platform=object(),  # type: ignore[arg-type]
         conversations=ConversationTracker(log=log, clock=clock),
@@ -106,7 +106,7 @@ def test_compose_rejects_wrong_slots_and_duplicate_types() -> None:
 
 
 def test_say_locality_uses_the_committed_observation_not_live_occupancy() -> None:
-    communications = resolver()
+    communications = resolver(world=CoLocatedWorld())
     action = make_action(
         actor_id="ag_a",
         tick=1,

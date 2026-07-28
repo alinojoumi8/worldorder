@@ -5,6 +5,7 @@ import yaml
 
 from polis.config.errors import ConfigError
 from polis.config.settings import (
+    FeedEngagementSettings,
     Settings,
     SocietySettings,
     config_hash,
@@ -69,3 +70,9 @@ def test_society_tie_halflives_reject_partial_and_unknown_maps() -> None:
     values["stranger"] = 10.0
     with pytest.raises(ValueError, match="unknown"):
         SocietySettings(tie_halflife_sim_days=values)
+
+
+@pytest.mark.parametrize("length", [10, 12])
+def test_feed_beta_prior_has_exact_feature_arity(length: int) -> None:
+    with pytest.raises(ValueError):
+        FeedEngagementSettings(beta_prior=(0.0,) * length)

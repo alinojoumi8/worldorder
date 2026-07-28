@@ -1,10 +1,26 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from polis.agents.actions.params.base import ActionParams, AgentId, ShortText
+
+StanceValue = Annotated[float, Field(ge=-1.0, le=1.0)]
+
+
+class ClaimReference(ActionParams):
+    entity_id: str
+    predicate: str
+    value: Any
+    as_of_tick: int = Field(ge=0)
+
+
+class ClaimParams(ActionParams):
+    claim_id: str
+    text: ShortText
+    refers_to: ClaimReference
+    sourced_to_event_seqs: tuple[int, ...] = ()
 
 
 class PostParams(ActionParams):
@@ -12,8 +28,8 @@ class PostParams(ActionParams):
     media_urls: tuple[str, ...] = ()
     topic: str | None = None
     stance_proposition: str | None = None
-    stance_value: float | None = None
-    claims: tuple[dict[str, Any], ...] = ()
+    stance_value: StanceValue | None = None
+    claims: tuple[ClaimParams, ...] = ()
     in_reply_to: str | None = None
 
 
@@ -52,7 +68,7 @@ class LikeParams(ActionParams):
 class CommentParams(ActionParams):
     post_id: str
     text: ShortText
-    claims: tuple[dict[str, Any], ...] = ()
+    claims: tuple[ClaimParams, ...] = ()
 
 
 class FollowParams(ActionParams):

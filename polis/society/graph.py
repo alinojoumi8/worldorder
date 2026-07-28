@@ -525,15 +525,6 @@ class SocialGraph:
             degree_x.extend((degrees[row.a_id], degrees[row.b_id]))
             degree_y.extend((degrees[row.b_id], degrees[row.a_id]))
         powerlaw_alpha, powerlaw_ks = _powerlaw_fit(values)
-        component_edges = [
-            sum(row.a_id in component and row.b_id in component for row in live)
-            for component in components
-        ]
-        modularity = (
-            0.0
-            if not live
-            else 1.0 - sum((edge_count / len(live)) ** 2 for edge_count in component_edges)
-        )
         payload = {
             "n_nodes": len(nodes),
             "n_edges": len(live),
@@ -548,11 +539,11 @@ class SocialGraph:
                 0.0 if not local_clustering else sum(local_clustering) / len(local_clustering)
             ),
             "assortativity_degree": _pearson(degree_x, degree_y),
-            "assortativity_wealth": 0.0,
-            "assortativity_belief": 0.0,
-            "assortativity_district": 0.0,
-            "modularity": modularity,
-            "n_communities": len(components),
+            "assortativity_wealth": None,
+            "assortativity_belief": None,
+            "assortativity_district": None,
+            "modularity": None,
+            "n_communities": None,
             "largest_component_share": (
                 0.0 if not nodes else max(map(len, components), default=0) / len(nodes)
             ),

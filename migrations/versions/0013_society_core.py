@@ -63,6 +63,7 @@ def upgrade() -> None:
             context TEXT NOT NULL,
             PRIMARY KEY (run_id, follower_id, followee_id)
         );
+        CREATE INDEX fo_followee ON follows(run_id,followee_id);
 
         CREATE TABLE engagements (
             run_id UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,

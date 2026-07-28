@@ -13,6 +13,7 @@ from polis.society.graph import (
     Interaction,
     MemoryGraphRepository,
     SocialGraph,
+    Tie,
     formation_multiplier,
 )
 
@@ -92,6 +93,9 @@ def test_network_snapshot_computes_triangle_clustering() -> None:
     assert snapshot.payload["mean_degree"] == 2
     assert snapshot.payload["clustering_global"] == 1
     assert snapshot.payload["clustering_avg_local"] == 1
+    assert snapshot.payload["modularity"] is None
+    assert snapshot.payload["n_communities"] is None
+    assert snapshot.payload["assortativity_wealth"] is None
 
 
 @dataclass
@@ -146,3 +150,44 @@ def test_transition_without_target_emits_type_change() -> None:
     assert event.kind == TIE_TYPE_CHANGED
     assert graph.tie("a", "b", "acquaintance") is None
     assert graph.tie("a", "b", "friend") is not None
+
+
+def test_transition_rules_cover_conflict_recovery_and_decay() -> None:
+    repo = MemoryGraphRepository()
+    graph = make_graph("microscope", repo)
+    friend = Tie("a", "b", "friend", 0.5, -0.4, 0.5, 0, None, 0)
+    repo.put(friend)
+
+    conflict = graph._transition(friend, 1)
+    rival = graph.tie("a", "b", "rival")
+    assert conflict is not None
+    assert conflict.kind == TIE_TYPE_CHANGED
+    assert rival is not None
+
+    recovering = Tie("c", "d", "rival", 0.5, 0.2, 0.5, 0, None, 0)
+    repo.put(recovering)
+    assert graph._transition(recovering, 1) is None
+    recovered = graph._transition(recovering, 1 + 30 * 24)
+    assert recovered is not None
+    assert recovered.kind == TIE_TYPE_CHANGED
+    assert graph.tie("c", "d", "acquaintance") is not None
+
+    decayed = Tie("e", "f", "acquaintance", 0.01, 0.0, 0.5, 0, None, 0)
+    repo.put(decayed)
+    ended = graph._transition(decayed, 2)
+    assert ended is not None
+    assert ended.kind == TIE_ENDED
+    assert graph.tie("e", "f", "acquaintance") is None
+
+
+def test_end_all_for_closes_every_live_tie_for_agent() -> None:
+    repo = MemoryGraphRepository()
+    graph = make_graph("microscope", repo)
+    graph.form("a", "b", "friend", "befriend", 0)
+    graph.form("a", "c", "acquaintance", "colocation", 0)
+
+    events = graph.end_all_for("a", "death", 1)
+
+    assert len(events) == 2
+    assert {event.kind for event in events} == {TIE_ENDED}
+    assert graph.neighbours("a") == ()

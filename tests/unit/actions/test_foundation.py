@@ -35,6 +35,7 @@ from polis.agents.actions import (
 )
 from polis.agents.actions.params.exchange import SubmitOrderParams
 from polis.agents.actions.params.media import (
+    ClaimParams,
     FollowParams,
     PostParams,
     RepostParams,
@@ -192,13 +193,28 @@ def test_strict_action_params_accept_json_arrays_in_json_mode() -> None:
         '{"text":"hello","addressed_to":["ag_peer"],"claims":[{"predicate":"x"}]}'
     )
     post = PostParams.model_validate_json(
-        '{"text":"hello","media_urls":["https://example.test/a"],"claims":[{"predicate":"x"}]}'
+        '{"text":"hello","media_urls":["https://example.test/a"],'
+        '"claims":[{"claim_id":"clm_1","text":"Acme is solvent",'
+        '"refers_to":{"entity_id":"fm_acme","predicate":"firm.solvent",'
+        '"value":true,"as_of_tick":1},"sourced_to_event_seqs":[10]}]}'
     )
 
     assert say.addressed_to == ("ag_peer",)
     assert say.claims == ({"predicate": "x"},)
     assert post.media_urls == ("https://example.test/a",)
-    assert post.claims == ({"predicate": "x"},)
+    assert post.claims == (
+        ClaimParams.model_validate_json(
+            '{"claim_id":"clm_1","text":"Acme is solvent",'
+            '"refers_to":{"entity_id":"fm_acme","predicate":"firm.solvent",'
+            '"value":true,"as_of_tick":1},"sourced_to_event_seqs":[10]}'
+        ),
+    )
+
+
+@pytest.mark.parametrize("stance", [-1.01, 1.01])
+def test_post_stance_rejects_values_outside_the_unit_interval(stance: float) -> None:
+    with pytest.raises(ValidationError):
+        PostParams(text="hello", stance_value=stance)
 
 
 def test_slot_ledger_uses_the_single_profile_configuration() -> None:

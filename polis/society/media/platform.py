@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol
 
-from polis.agents.actions.params.media import PostParams, RepostParams
+from polis.agents.actions.params.media import ClaimParams, PostParams, RepostParams
 from polis.config.settings import SocietySettings
 from polis.events.kinds import (
     CASCADE_CLOSED,
@@ -247,7 +247,10 @@ class Platform:
         in_reply_to = _value(params, "in_reply_to")
         parent = self.repo.post(str(in_reply_to)) if in_reply_to else None
         root_id = parent.root_post_id if parent is not None else post_id
-        claims = tuple(_value(params, "claims", ()))
+        claims = tuple(
+            claim.model_dump(mode="json") if isinstance(claim, ClaimParams) else claim
+            for claim in _value(params, "claims", ())
+        )
         post = Post(
             post_id=post_id,
             author_id=author_id,
@@ -567,17 +570,18 @@ class CascadeTracker:
         pairs = 0
         for index, source in enumerate(nodes):
             distance = {source: 0}
-            queue = [source]
+            queue = deque([source])
             while queue:
-                current = queue.pop(0)
+                current = queue.popleft()
                 for neighbour in sorted(adjacent[current]):
                     if neighbour not in distance:
                         distance[neighbour] = distance[current] + 1
                         queue.append(neighbour)
             for target in nodes[index + 1 :]:
-                total += distance[target]
-                pairs += 1
-        return total / pairs
+                if target in distance:
+                    total += distance[target]
+                    pairs += 1
+        return 0.0 if pairs == 0 else total / pairs
 
 
 __all__ = [

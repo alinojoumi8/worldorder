@@ -198,17 +198,18 @@ class MemorySettings(FrozenModel):
     reflection_min_gap_ticks: int = 24
 
 
+FEED_FEATURE_COUNT = 11
+
+
 class FeedEngagementSettings(FrozenModel):
     eta: float = Field(default=0.05, gt=0)
     passes: int = Field(default=20, ge=1)
     n0: int = Field(default=5_000, ge=0)
-    beta_prior: tuple[float, ...] = (0.0,) * 11
-
-    @model_validator(mode="after")
-    def validate_beta_prior(self) -> FeedEngagementSettings:
-        if len(self.beta_prior) != 11:
-            raise ValueError("society.feed.engagement.beta_prior must contain 11 entries")
-        return self
+    beta_prior: tuple[float, ...] = Field(
+        default=(0.0,) * FEED_FEATURE_COUNT,
+        min_length=FEED_FEATURE_COUNT,
+        max_length=FEED_FEATURE_COUNT,
+    )
 
 
 class SocietyFeedSettings(FrozenModel):
