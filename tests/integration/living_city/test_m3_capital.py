@@ -9,7 +9,7 @@ from polis.config.settings import load_settings
 from polis.events.kinds import KIND_REGISTRY
 from polis.living_city import run_living_city
 
-M3_GOLDEN_100_HASH = "1b841c0f1d32589855d8f0ca807344f6590babe2cf0d0577574158081e8260b4"
+M3_GOLDEN_100_HASH = "756d2845cb1127c7acc20c94cee8a19c8eea1e8008572122de8a29f4116151d6"
 
 
 @pytest.mark.asyncio

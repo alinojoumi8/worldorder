@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from polis.agents.actions import (
     InstitutionResolver,
@@ -29,6 +29,14 @@ from polis.society.media.platform import MemoryPlatformRepository, Platform
 from polis.society.protocols import BeliefChannel
 from polis.world.api import World
 
+if TYPE_CHECKING:
+    from polis.society.law import (
+        CourtService,
+        DetectionEngine,
+        Incarceration,
+        PoliceService,
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class SocietyPerception:
@@ -52,6 +60,12 @@ class SocietyRuntime:
         cfg: SocietySettings,
         news: InstitutionResolver | None = None,
         polity: InstitutionResolver | None = None,
+        law: InstitutionResolver | None = None,
+        detection: DetectionEngine | None = None,
+        police: PoliceService | None = None,
+        courts: CourtService | None = None,
+        incarceration: Incarceration | None = None,
+        police_chief: Callable[[int], str | None] | None = None,
     ) -> None:
         self.log = log
         self.clock = clock
@@ -114,6 +128,13 @@ class SocietyRuntime:
         self.registry.register(cast(InstitutionResolver, self.communication))
         if polity is not None:
             self.registry.register(polity)
+        if law is not None:
+            self.registry.register(law)
+        self.detection = detection
+        self.police = police
+        self.courts = courts
+        self.incarceration = incarceration
+        self.police_chief = police_chief or (lambda _tick: None)
         self.contacts = ContactLedger(ticks_per_sim_day=clock.profile.ticks_per_sim_day)
 
     def phase1(
@@ -164,11 +185,28 @@ class SocietyRuntime:
 
     def phase7(self, tick: int) -> Sequence[Event]:
         events = list(self.platform.cascades.close_due(tick))
+        if self.police is not None and self.clock.starts_new("month", tick):
+            events.append(self.police.allocate_budget(self.police_chief(tick), tick))
+        if self.clock.starts_new("day", tick):
+            if self.detection is not None:
+                events.extend(self.detection.run_hazard(tick))
+            if self.police is not None:
+                events.extend(self.police.process_queue(tick))
+            if self.incarceration is not None:
+                events.extend(self.incarceration.release_due(tick))
         if self.clock.starts_new("day", tick) and tick > 0:
             previous_day = self.clock.sim_day(tick) - 1
             self.model.refit(self.feed.impressions_for_refit(previous_day), tick)
         if self.clock.starts_new("week", tick):
             events.append(self.graph.snapshot(tick))
+        return tuple(events)
+
+    async def phase7_async(self, tick: int) -> Sequence[Event]:
+        """Run PHASE 7, including the twice-weekly court docket."""
+        events = list(self.phase7(tick))
+        court_day = self.clock.sim_day(tick) % 7 in {0, 3}
+        if self.courts is not None and self.clock.starts_new("day", tick) and court_day:
+            events.extend(await self.courts.hold_session(tick))
         return tuple(events)
 
 

@@ -19,6 +19,11 @@ def test_world_generation_is_frozen_and_reproducible() -> None:
     assert first.places == second.places
     assert len(first.districts) == 4
     assert len(first.places) == 32
+    core_id = next(
+        district.district_id for district in first.districts if district.archetype == "core"
+    )
+    core_types = {place.type for place in first.places if place.district_id == core_id}
+    assert {"courthouse", "prison"} <= core_types
     assert not first.terrain.flags.writeable
     with pytest.raises(ValueError):
         first.terrain[0, 0] = 1

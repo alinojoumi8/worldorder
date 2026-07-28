@@ -55,6 +55,7 @@ KIND_RANGES: Final = (
     KindRange(11021, 11021, "feed_sample", "polis.society", Persistence.SAMPLED),
     KindRange(11022, 11999, "social_media", "polis.society", Persistence.PERSISTED),
     KindRange(12000, 12999, "polity", "polis.society", Persistence.PERSISTED),
+    KindRange(13000, 13999, "law", "polis.society", Persistence.PERSISTED),
     KindRange(14000, 14999, "education", "polis.agents", Persistence.PERSISTED),
     KindRange(90000, 90999, "ephemeral", "*", Persistence.EPHEMERAL),
     KindRange(99000, 99999, "research", "polis.research", Persistence.PERSISTED),
@@ -2634,6 +2635,253 @@ OFFICER_REMOVED = register_kind(
     owner="polis.society.polity",
     persistence=Persistence.PERSISTED,
     schema=_schema("office", "agent_id", "removed_by", "margin", "reason"),
+)
+LEGALITY_FLAGGED = register_kind(
+    13001,
+    "LEGALITY_FLAGGED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "action_id",
+        "actor_id",
+        "action_type",
+        "offence_type",
+        "path",
+        "predicate_id",
+        "crime_id",
+    ),
+)
+CRIME_COMMITTED = register_kind(
+    13010,
+    "CRIME_COMMITTED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "crime_id",
+        "type",
+        "perpetrator_id",
+        "victim_id",
+        "amount_cents",
+        "place_id",
+        "district_id",
+        "source_action_id",
+        "concealment",
+        "detected",
+        "path",
+    ),
+)
+CRIME_DETECTED = register_kind(
+    13011,
+    "CRIME_DETECTED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("crime_id", "detector", "p_detect", "ticks_since_commission"),
+)
+CRIME_REPORTED = register_kind(
+    13012,
+    "CRIME_REPORTED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("crime_id", "reporter_id", "latency_ticks", "evidence_event_seqs"),
+)
+INVESTIGATION_OPENED = register_kind(
+    13013,
+    "INVESTIGATION_OPENED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("case_file_id", "crime_id", "officer_id", "severity", "queue_position"),
+)
+INVESTIGATION_CLOSED = register_kind(
+    13014,
+    "INVESTIGATION_CLOSED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("case_file_id", "outcome", "evidence_strength", "evidence_event_seqs"),
+)
+ARREST_MADE = register_kind(
+    13015,
+    "ARREST_MADE",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("crime_id", "suspect_id", "officer_id", "place_id", "evidence_strength"),
+)
+SUIT_FILED = register_kind(
+    13020,
+    "SUIT_FILED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "type",
+        "plaintiff_id",
+        "defendant_id",
+        "crime_id",
+        "cause_of_action",
+        "claim_cents",
+        "filing_fee_cents",
+        "evidence_event_seqs",
+        "txn_id",
+    ),
+)
+COUNSEL_RETAINED = register_kind(
+    13021,
+    "COUNSEL_RETAINED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "party_id",
+        "counsel_id",
+        "side",
+        "fee_cents",
+        "counsel_skill_law",
+        "public_defender",
+        "txn_id",
+    ),
+)
+EVIDENCE_ADMITTED = register_kind(
+    13022,
+    "EVIDENCE_ADMITTED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "admitted_seqs",
+        "excluded_seqs",
+        "excluded_reasons",
+        "evidence_strength",
+        "surfaced_by_counsel",
+    ),
+)
+TESTIMONY_GIVEN = register_kind(
+    13023,
+    "TESTIMONY_GIVEN",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "witness_id",
+        "statement",
+        "claims",
+        "consistency_score",
+        "perjury_flagged",
+    ),
+)
+CASE_SETTLED = register_kind(
+    13030,
+    "CASE_SETTLED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("case_id", "amount_cents", "offered_by", "txn_id"),
+)
+TRIAL_HELD = register_kind(
+    13031,
+    "TRIAL_HELD",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "judge_id",
+        "session_tick",
+        "plaintiff_counsel_id",
+        "defence_counsel_id",
+        "evidence_strength",
+    ),
+)
+JUDGMENT_RENDERED = register_kind(
+    13040,
+    "JUDGMENT_RENDERED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "judge_id",
+        "verdict",
+        "findings",
+        "fine_cents",
+        "sentence_ticks",
+        "damages_cents",
+        "restitution_cents",
+        "disqualification_ticks",
+        "clamped",
+        "origin",
+        "llm_call_id",
+        "nominal",
+    ),
+)
+FINE_LEVIED = register_kind(
+    13041,
+    "FINE_LEVIED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("case_id", "payer_id", "amount_cents", "txn_id", "garnished", "shortfall_cents"),
+)
+DAMAGES_AWARDED = register_kind(
+    13042,
+    "DAMAGES_AWARDED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "case_id",
+        "from_id",
+        "to_id",
+        "amount_cents",
+        "txn_id",
+        "shortfall_cents",
+    ),
+)
+INCARCERATION_STARTED = register_kind(
+    13043,
+    "INCARCERATION_STARTED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "case_id",
+        "ticks",
+        "place_id",
+        "converted_to_fine",
+        "capacity_at_sentencing",
+    ),
+)
+INCARCERATION_ENDED = register_kind(
+    13044,
+    "INCARCERATION_ENDED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id", "ticks_served", "skill_delta", "ties_lost", "returns_to_household_id"
+    ),
+)
+GARNISHMENT_COLLECTED = register_kind(
+    13045,
+    "GARNISHMENT_COLLECTED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "receivable_id",
+        "case_id",
+        "debtor_id",
+        "creditor_id",
+        "amount_cents",
+        "txn_id",
+        "reason",
+        "remaining_cents",
+    ),
+)
+POLICE_BUDGET_ALLOCATED = register_kind(
+    13050,
+    "POLICE_BUDGET_ALLOCATED",
+    owner="polis.society.law",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "total_cents",
+        "chief_id",
+        "district_shares",
+        "patrol_units",
+        "audit_units",
+        "investigation_slots",
+    ),
 )
 EXIT_COMPLETED = register_kind(
     9040,

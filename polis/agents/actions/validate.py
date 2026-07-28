@@ -8,7 +8,11 @@ from pydantic import ValidationError
 
 from polis.agents.actions.budget import SlotLedger
 from polis.agents.actions.compat import LEGACY_PARAM_MODELS
-from polis.agents.actions.legal import CHILD_ALLOWED, REFLEX_ALLOWED
+from polis.agents.actions.legal import (
+    CHILD_ALLOWED,
+    REFLEX_ALLOWED,
+    incarceration_allows,
+)
 from polis.agents.actions.params import PARAMS_MODELS
 from polis.agents.actions.params.base import ActionParams
 from polis.agents.actions.protocol import (
@@ -385,6 +389,15 @@ class ActionValidator:
                 gate=None,
                 reason="unavailable",
                 detail=f"no resolver is registered for {action.type.value}",
+                cause_seq=cause_seq,
+            )
+
+        if not incarceration_allows(action.actor_id, action.type, ctx):
+            return self._reject(
+                action,
+                gate="capability",
+                reason="capability",
+                detail="the actor is incarcerated and cannot perform this action",
                 cause_seq=cause_seq,
             )
 

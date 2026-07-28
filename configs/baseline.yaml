@@ -60,6 +60,7 @@ llm:
     DELIBERATE: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.8, template: deliberate/user.v1.jinja}
     REFLECT: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.9, template: reflect/questions.v1.jinja}
     CREDIT_EVAL: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.2, max_tokens: 400, template: credit/eval.v1.jinja}
+    JUDGE: {lane: reasoning, model: MiniMax-M2.7, temperature: 0.2, max_tokens: 700, structured: constrain, schema: prompts/schemas/judge.schema.json, template: judge/user.v1.jinja}
     IMPORTANCE: {lane: volume_text, model: qwen3.5:cloud, temperature: 0.0, template: importance/user.v1.jinja}
     NEWS_WRITE: {lane: volume_text, model: qwen3.5:cloud, temperature: 0.2, max_tokens: 800, structured: constrain, schema: prompts/schemas/news_write.schema.json, template: news_write/user.v1.jinja}
     EMBED: {lane: volume_embed, model: embeddinggemma:cloud, temperature: 0.0, template: embedding/user.v1.jinja}
@@ -79,9 +80,15 @@ memory:
   retrieval_max_tokens: 600
   reflection_threshold: 4.0
   reflection_min_gap_ticks: 24
+actions:
+  legality:
+    oracle: law
 mechanisms:
   party_platform_drift: member_mean
   fiscal_scoring: static
+  crime_detection: budget_scaled
+  bench_rule: evidence_threshold
+  ex_offender_wage_penalty: "on"
 society:
   feed_algorithm: engagement
   outlets: 4
@@ -170,12 +177,40 @@ polity:
     polity: {campaign_cap_cents: null, felon_franchise: false}
     government: {debt_ceiling_cents: 500000000, public_notices_budget_cents: 0}
     society: {feed_algorithm: engagement}
+law:
+  detection_window_sim_days: 180
+  mnpi_window_sim_days: 14
+  base_detect: {theft: 0.35, assault: 0.45, fraud: 0.12, insider_trading: 0.06, embezzlement: 0.10, contract_breach: 0.30, perjury: 0.20}
+  victim_awareness: {theft: 0.95, assault: 0.95, fraud: 0.30, insider_trading: 0.05, embezzlement: 0.15, contract_breach: 0.85, perjury: 0.40}
+  capacity_exponent: 0.6
+  witness_bonus_per_witness: 0.4
+  witness_bonus_cap: 1.2
+  cost_per_patrol_cents: 20000
+  cost_per_investigation_cents: 150000
+  cost_per_case_cents: 400000
+  charge_threshold: 0.45
+  conviction_threshold: 0.60
+  evidence_window_sim_days: 30
+  strength_norm: 6.0
+  counsel_base_evidence: 3
+  counsel_skill_factor: 8
+  legal_aid_wealth_pct: 0.25
+  min_counsel_skill_law: 0.5
+  filing_fee_cents: 50000
+  filing_fee_waiver_pct: 0.25
+  garnishment_rate: 0.20
+  fine_per_tick_cents: 8000
+  ex_offender_wage_penalty: 0.08
+  ex_offender_penalty_floor: 0.6
+  incarceration_decay_multiplier: 2.0
+  civil_causes: [contract_breach, negligence, fraud, defamation, wrongful_dismissal]
 ablations:
   reflex_only: false
   obfuscate_domain: false
   disclose_simulation: false
   social_influence_off: false
   backfire_off: false
+  no_record_penalty: false
 store:
   dsn: postgresql://polis_engine:polis@127.0.0.1:5432/polis
   reader_dsn: postgresql://polis_reader:polis_reader@127.0.0.1:5432/polis

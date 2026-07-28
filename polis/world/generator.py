@@ -111,6 +111,7 @@ _CAPACITY: Final[dict[str, int]] = {
     "town_hall": 300,
     "courthouse": 120,
     "police": 40,
+    "prison": 40,
     "hospital": 150,
     "park": 100_000,
     "bar": 40,
@@ -150,9 +151,31 @@ def _scaled_types(archetype: str, count: int) -> tuple[PlaceType, ...]:
     expanded = tuple(
         place_type for place_type, amount in _MIX[archetype].items() for _ in range(amount)
     )
-    return tuple(
+    selected = [
         expanded[min(len(expanded) - 1, index * len(expanded) // count)] for index in range(count)
-    )
+    ]
+    if archetype == "core" and len(selected) >= 2:
+        for required in ("courthouse", "prison"):
+            if required in selected:
+                continue
+            counts = Counter(selected)
+            replace_at = next(
+                (
+                    index
+                    for index in range(len(selected) - 1, -1, -1)
+                    if selected[index] not in {"courthouse", "prison"}
+                    and counts[selected[index]] > 1
+                ),
+                None,
+            )
+            if replace_at is None:
+                replace_at = next(
+                    index
+                    for index in range(len(selected) - 1, -1, -1)
+                    if selected[index] not in {"courthouse", "prison"}
+                )
+            selected[replace_at] = required
+    return tuple(selected)
 
 
 def _terrain(

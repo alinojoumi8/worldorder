@@ -12,11 +12,18 @@ from polis.events.kinds import (
     BELIEF_UPDATED,
     CAMPAIGN_SPEND,
     CANDIDACY_ANNOUNCED,
+    CASE_SETTLED,
     CLAIM_CHECKED,
+    COUNSEL_RETAINED,
+    CRIME_COMMITTED,
+    CRIME_DETECTED,
+    CRIME_REPORTED,
     ELECTION_CALLED,
     ELECTION_RESOLVED,
+    EVIDENCE_ADMITTED,
     FOLLOW_CREATED,
     FOLLOW_ENDED,
+    JUDGMENT_RENDERED,
     OUTLET_CLOSED,
     OUTLET_FOUNDED,
     OUTLET_REVENUE_BOOKED,
@@ -28,6 +35,7 @@ from polis.events.kinds import (
     POST_DELETED,
     POST_ENGAGED,
     POST_PUBLISHED,
+    SUIT_FILED,
     TIE_ENDED,
     TIE_FORMED,
     TIE_TYPE_CHANGED,
@@ -757,6 +765,164 @@ class PolityProjection:
             await ctx.conn.execute(f"DELETE FROM {table} WHERE run_id=%s", (ctx.run_id,))
 
 
+class LawProjection:
+    name = "law_projection"
+    tables: tuple[str, ...] = ("crimes", "court_cases")
+    handles: frozenset[int] = frozenset(
+        {
+            CRIME_COMMITTED,
+            CRIME_DETECTED,
+            CRIME_REPORTED,
+            SUIT_FILED,
+            COUNSEL_RETAINED,
+            EVIDENCE_ADMITTED,
+            CASE_SETTLED,
+            JUDGMENT_RENDERED,
+        }
+    )
+
+    async def apply(self, ctx: ProjectionContext, event: Event) -> None:
+        payload = event.payload
+        if event.kind == CRIME_COMMITTED:
+            await ctx.conn.execute(
+                """
+                INSERT INTO crimes(
+                    run_id,crime_id,tick,type,perpetrator_id,victim_id,
+                    amount_cents,place_id,district_id,source_action_id,
+                    concealment,path,detected
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,FALSE)
+                ON CONFLICT(run_id,crime_id) DO UPDATE SET
+                    amount_cents=EXCLUDED.amount_cents,
+                    place_id=EXCLUDED.place_id,
+                    district_id=EXCLUDED.district_id,
+                    concealment=EXCLUDED.concealment,
+                    path=EXCLUDED.path
+                """,
+                (
+                    ctx.run_id,
+                    payload["crime_id"],
+                    event.tick,
+                    payload["type"],
+                    payload["perpetrator_id"],
+                    payload["victim_id"],
+                    payload["amount_cents"],
+                    payload["place_id"],
+                    payload["district_id"],
+                    payload["source_action_id"],
+                    payload["concealment"],
+                    payload.get("path", "explicit"),
+                ),
+            )
+        elif event.kind == CRIME_DETECTED:
+            await ctx.conn.execute(
+                """
+                UPDATE crimes SET detected=TRUE,detected_tick=%s
+                WHERE run_id=%s AND crime_id=%s
+                """,
+                (event.tick, ctx.run_id, payload["crime_id"]),
+            )
+        elif event.kind == CRIME_REPORTED:
+            await ctx.conn.execute(
+                """
+                UPDATE crimes SET reported_by=%s
+                WHERE run_id=%s AND crime_id=%s
+                """,
+                (payload["reporter_id"], ctx.run_id, payload["crime_id"]),
+            )
+        elif event.kind == SUIT_FILED:
+            await ctx.conn.execute(
+                """
+                INSERT INTO court_cases(
+                    run_id,case_id,type,plaintiff_id,defendant_id,crime_id,
+                    cause_of_action,claim_cents,filed_tick,evidence_event_seqs
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(run_id,case_id) DO UPDATE SET
+                    plaintiff_id=EXCLUDED.plaintiff_id,
+                    defendant_id=EXCLUDED.defendant_id,
+                    crime_id=EXCLUDED.crime_id,
+                    cause_of_action=EXCLUDED.cause_of_action,
+                    claim_cents=EXCLUDED.claim_cents,
+                    evidence_event_seqs=EXCLUDED.evidence_event_seqs,
+                    status='open',resolved_tick=NULL
+                """,
+                (
+                    ctx.run_id,
+                    payload["case_id"],
+                    payload["type"],
+                    payload["plaintiff_id"],
+                    payload["defendant_id"],
+                    payload["crime_id"],
+                    payload["cause_of_action"],
+                    payload["claim_cents"],
+                    event.tick,
+                    list(payload.get("evidence_event_seqs", ())),
+                ),
+            )
+        elif event.kind == COUNSEL_RETAINED:
+            column = (
+                "defence_counsel_id" if payload["side"] == "defence" else "plaintiff_counsel_id"
+            )
+            await ctx.conn.execute(
+                f"""
+                UPDATE court_cases SET {column}=%s
+                WHERE run_id=%s AND case_id=%s
+                """,
+                (payload["counsel_id"], ctx.run_id, payload["case_id"]),
+            )
+        elif event.kind == EVIDENCE_ADMITTED:
+            await ctx.conn.execute(
+                """
+                UPDATE court_cases SET admitted_event_seqs=%s
+                WHERE run_id=%s AND case_id=%s
+                """,
+                (list(payload["admitted_seqs"]), ctx.run_id, payload["case_id"]),
+            )
+        elif event.kind == CASE_SETTLED:
+            await ctx.conn.execute(
+                """
+                UPDATE court_cases SET status='settled',resolved_tick=%s
+                WHERE run_id=%s AND case_id=%s
+                """,
+                (event.tick, ctx.run_id, payload["case_id"]),
+            )
+        elif event.kind == JUDGMENT_RENDERED:
+            await ctx.conn.execute(
+                """
+                UPDATE court_cases SET
+                    status='resolved',resolved_tick=%s,judge_id=%s,verdict=%s,
+                    penalty_cents=%s,sentence_ticks=%s,damages_cents=%s,
+                    restitution_cents=%s
+                WHERE run_id=%s AND case_id=%s
+                """,
+                (
+                    event.tick,
+                    payload["judge_id"],
+                    payload["verdict"],
+                    payload["fine_cents"],
+                    payload["sentence_ticks"],
+                    payload["damages_cents"],
+                    payload["restitution_cents"],
+                    ctx.run_id,
+                    payload["case_id"],
+                ),
+            )
+            if payload["verdict"] == "guilty":
+                await ctx.conn.execute(
+                    """
+                    UPDATE agents SET criminal_record=criminal_record+1
+                    WHERE run_id=%s AND agent_id=(
+                        SELECT defendant_id FROM court_cases
+                        WHERE run_id=%s AND case_id=%s
+                    )
+                    """,
+                    (ctx.run_id, ctx.run_id, payload["case_id"]),
+                )
+
+    async def truncate(self, ctx: ProjectionContext) -> None:
+        await ctx.conn.execute("DELETE FROM court_cases WHERE run_id=%s", (ctx.run_id,))
+        await ctx.conn.execute("DELETE FROM crimes WHERE run_id=%s", (ctx.run_id,))
+
+
 posts_projection = PostsProjection()
 follows_projection = FollowsProjection()
 relationships_projection = RelationshipsProjection()
@@ -764,6 +930,7 @@ outlets_projection = OutletsProjection()
 articles_projection = ArticlesProjection()
 beliefs_projection = BeliefsProjection()
 polity_projection = PolityProjection()
+law_projection = LawProjection()
 
 register_projection(posts_projection)
 register_projection(follows_projection)
@@ -772,11 +939,13 @@ register_projection(outlets_projection)
 register_projection(articles_projection)
 register_projection(beliefs_projection)
 register_projection(polity_projection)
+register_projection(law_projection)
 
 __all__ = [
     "ArticlesProjection",
     "BeliefsProjection",
     "FollowsProjection",
+    "LawProjection",
     "OutletsProjection",
     "PolityProjection",
     "PostsProjection",
@@ -784,6 +953,7 @@ __all__ = [
     "articles_projection",
     "beliefs_projection",
     "follows_projection",
+    "law_projection",
     "outlets_projection",
     "polity_projection",
     "posts_projection",

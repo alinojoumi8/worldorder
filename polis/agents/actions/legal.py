@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Callable, Collection
+from typing import Final, cast
 
 from polis.agents.actions.params import PARAMS_MODELS
 from polis.agents.actions.protocol import ValidationContext
@@ -45,6 +46,24 @@ def _life_stage_allows(state: object, action_type: ActionType) -> bool:
     return True
 
 
+def incarceration_allows(
+    actor_id: str,
+    action_type: ActionType,
+    ctx: ValidationContext,
+) -> bool:
+    incarceration = ctx.repositories.get("incarceration")
+    if incarceration is None:
+        return True
+    checker = getattr(incarceration, "is_incarcerated", None)
+    if checker is None or not cast(Callable[[str, int], bool], checker)(actor_id, ctx.tick):
+        return True
+    allowed = cast(
+        Collection[ActionType],
+        getattr(incarceration, "ALLOWED_ACTIONS", ()),
+    )
+    return action_type in allowed
+
+
 def legal_actions(
     obs: object,
     state: object,
@@ -56,7 +75,11 @@ def legal_actions(
     actor_id = str(getattr(state, "agent_id", "ag_probe"))
     for action_type in ActionType:
         resolver = registry.for_type(action_type)
-        if resolver is None or not _life_stage_allows(state, action_type):
+        if (
+            resolver is None
+            or not _life_stage_allows(state, action_type)
+            or not incarceration_allows(actor_id, action_type, ctx)
+        ):
             continue
         probe = Action(
             action_id=det_uuid("polis.action.legal", actor_id, ctx.tick, action_type.value),

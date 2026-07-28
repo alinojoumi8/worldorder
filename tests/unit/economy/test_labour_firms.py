@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,7 +10,7 @@ from polis.agents.types import SKILLS
 from polis.config.mechanisms import mechanism_manifest
 from polis.config.settings import load_settings
 from polis.economy.firms import production_output_micro
-from polis.economy.labour import labour_force, load_occupations
+from polis.economy.labour import LabourMarket, labour_force, load_occupations
 from polis.events.kinds import (
     HIRED,
     OFFER_ACCEPTED,
@@ -62,6 +63,42 @@ def test_production_carry_preserves_fractional_output() -> None:
     assert output == 700_000
     assert units == 7
     assert carry == 0
+
+
+def test_ex_offender_penalty_never_drops_an_offer_below_minimum_wage() -> None:
+    market = object.__new__(LabourMarket)
+    market.settings = SimpleNamespace(
+        labour=SimpleNamespace(minimum_wage_cents=1_200, offer_ttl_days=7),
+        clock=SimpleNamespace(ticks_per_sim_day=24),
+    )
+    application = SimpleNamespace(
+        application_id="app_one",
+        vacancy_id="vac_one",
+        agent_id="ag_worker",
+        status="shortlisted",
+    )
+    vacancy = SimpleNamespace(
+        vacancy_id="vac_one",
+        firm_id="fm_one",
+        status="open",
+        headcount=1,
+        occupation="clerk",
+    )
+    market.economy = SimpleNamespace(
+        applications={"app_one": application},
+        vacancies={"vac_one": vacancy},
+        offers={},
+    )
+    market.wage_penalty = SimpleNamespace(wage_multiplier=lambda _agent_id: 0.5)
+    action = SimpleNamespace(
+        actor_id="fm_one",
+        params={"application_id": "app_one", "wage_cents": 2_000},
+    )
+
+    event = market._make_offer(action, 1, lambda draft: draft)
+
+    assert event is not None
+    assert event.payload["wage_cents"] == 1_200
 
 
 @pytest.mark.asyncio
