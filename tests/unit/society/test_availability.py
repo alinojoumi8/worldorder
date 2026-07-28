@@ -88,6 +88,8 @@ def test_private_event_requires_witness_source_or_document() -> None:
     memories.rows.add(("ag_source", event.seq))
     assert availability.cultivate("ag_reporter", "ag_source", "msg_answer", 2) is not None
     assert availability.channel("ag_reporter", event, 2) == "source"
+    expired_tick = 2 + graph.cfg.source_window_sim_days * clock.profile.ticks_per_sim_day + 1
+    assert availability.channel("ag_reporter", event, expired_tick) is None
 
 
 def test_public_and_document_channels() -> None:

@@ -1072,7 +1072,7 @@ class NewsCycle:
                             "outlet_id": outlet.outlet_id,
                             "reporter_id": reporter_id,
                             "editor_id": editor_id,
-                            "reason": "thin_sourcing",
+                            "reason": "llm_invalid",
                             "rewrite_attempts": 0,
                         },
                         tick,
@@ -1083,7 +1083,7 @@ class NewsCycle:
                 continue
             draft = self._draft(outlet, reporter_id, story, result.parsed, str(result.call_id))
             decision = self.editor.review(draft, outlet, tick)
-            reason = self.editor.spike_reason(draft, outlet)
+            reason: str | None = self.editor.spike_reason(draft, outlet)
             rewrite_attempts = 0
             if decision == "rewrite":
                 rewrite_attempts = 1
@@ -1119,7 +1119,7 @@ class NewsCycle:
                     reason = self.editor.spike_reason(draft, outlet)
                 else:
                     decision = "spike"
-                    reason = "thin_sourcing"
+                    reason = "llm_invalid"
             if decision != "publish":
                 events.append(
                     self._emit(

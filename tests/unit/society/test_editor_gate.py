@@ -34,3 +34,6 @@ def test_editor_gate_all_spike_reasons() -> None:
     assert gate.spike_reason(draft(legal_risk=True), loose) is None
     assert gate.spike_reason(draft(over_budget=True), rigorous) == "budget"
     assert gate.review(draft(), rigorous, 1) == "publish"
+    thin = draft(claims=())
+    assert gate.review(thin, rigorous, 1) == "rewrite"
+    assert gate.review(thin, rigorous, 2) == "spike"

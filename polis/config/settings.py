@@ -313,6 +313,27 @@ class SocietySettings(FrozenModel):
     feed: SocietyFeedSettings = SocietyFeedSettings()
 
     @model_validator(mode="after")
+    def validate_weight_maps(self) -> SocietySettings:
+        expected_maps = (
+            (
+                "newsworthiness_weights",
+                self.newsworthiness_weights,
+                {"mag", "prom", "nov", "conf", "prox", "slant"},
+            ),
+            (
+                "distribution_weights",
+                self.distribution_weights,
+                {"trust", "topic", "prox", "sub", "reach"},
+            ),
+        )
+        for name, weights, expected in expected_maps:
+            if set(weights) != expected:
+                raise ValueError(f"society.{name} must define exactly {sorted(expected)}")
+            if abs(sum(weights.values()) - 1.0) > 1e-6:
+                raise ValueError(f"society.{name} must sum to 1.0")
+        return self
+
+    @model_validator(mode="after")
     def validate_tie_halflives(self) -> SocietySettings:
         expected = {
             "acquaintance",

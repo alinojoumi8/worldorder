@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from bisect import bisect_right
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol
@@ -95,10 +96,10 @@ class MemoryCheckContext:
         as_of_tick: int,
     ) -> tuple[Any, tuple[int, ...]] | None:
         rows = self._facts.get((predicate, entity_id), ())
-        eligible = [row for row in rows if row.tick <= as_of_tick]
-        if not eligible:
+        index = bisect_right(rows, as_of_tick, key=lambda row: row.tick)
+        if index == 0:
             return None
-        row = eligible[-1]
+        row = rows[index - 1]
         return row.value, row.event_seqs
 
 

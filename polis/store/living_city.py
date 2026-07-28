@@ -47,9 +47,11 @@ def _prompt_manifest(settings: Settings) -> dict[str, str]:
         manifest[purpose] = sha256_hex(material)
     for path in sorted((prompt_root / "news_write").glob("*.jinja")):
         manifest[f"NEWS_WRITE:{path.name}"] = sha256_hex(path.read_bytes())
-    schema = prompt_root / "schemas" / "news_write.schema.json"
-    if schema.is_file():
-        manifest["NEWS_WRITE:schema"] = sha256_hex(schema.read_bytes())
+    news_route = settings.llm.routing.get("NEWS_WRITE")
+    if news_route is not None and news_route.schema_ is not None:
+        schema = prompt_root.parent / news_route.schema_
+        if schema.is_file():
+            manifest["NEWS_WRITE:schema"] = sha256_hex(schema.read_bytes())
     return manifest
 
 

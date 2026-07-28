@@ -44,6 +44,8 @@ def _dip_statistic(values: np.ndarray) -> float:
 
 
 def hartigan_dip(x: Sequence[float]) -> tuple[float, float]:
+    """Return a deterministic bimodality proxy, not the published Hartigan dip test."""
+
     values = np.sort(np.asarray(tuple(x), dtype=float))
     if len(values) < 4:
         return 0.0, 1.0

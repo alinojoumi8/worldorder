@@ -21,7 +21,7 @@ def test_scores_are_absent_from_perception_and_prompt_contracts() -> None:
 
 
 def test_news_templates_use_narrative_line_and_include_memories() -> None:
-    prompt_dir = Path("prompts/news_write")
+    prompt_dir = Path(__file__).resolve().parents[2] / "prompts" / "news_write"
     templates = [path.read_text(encoding="utf-8") for path in prompt_dir.glob("*.jinja")]
     assert len(templates) >= 4
     assert "reporter_memories" in (prompt_dir / "user.v1.jinja").read_text(encoding="utf-8")

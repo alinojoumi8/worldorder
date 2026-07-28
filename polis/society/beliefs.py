@@ -546,7 +546,8 @@ class BeliefEngine:
                 self._reject(agent_id, update, "unknown", tick, llm_call_id)
                 continue
             spec = _spec_for(resolved)
-            assert spec is not None
+            if spec is None:
+                raise RuntimeError(f"resolved proposition has no specification: {resolved}")
             value = update.value
             confidence = update.confidence
             if value < spec.lo or value > spec.hi:
@@ -680,7 +681,8 @@ class BeliefEngine:
         rows: list[tuple[str, float, float]] = []
         for proposition in (*POLICY_PROPOSITIONS, "trust.generalised"):
             spec = _spec_for(proposition)
-            assert spec is not None
+            if spec is None:
+                raise RuntimeError(f"birth proposition has no specification: {proposition}")
             midparent = (
                 self.value(mother_id, proposition) + self.value(father_id, proposition)
             ) / 2.0

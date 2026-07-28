@@ -187,6 +187,7 @@ async def test_news_write_failure_spikes_without_fallback_article() -> None:
     news, _ = cycle(fail=True)
     events = await news.run_cycle(1)
     assert [event.kind for event in events] == [ARTICLE_SPIKED]
+    assert events[0].payload["reason"] == "llm_invalid"
     assert news.articles.all() == ()
 
 

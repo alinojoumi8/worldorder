@@ -156,7 +156,7 @@ class FollowsProjection:
                     payload["context"],
                 ),
             )
-        else:
+        elif event.kind == OUTLET_REVENUE_BOOKED:
             await ctx.conn.execute(
                 """
                 UPDATE follows SET ended_tick=%s

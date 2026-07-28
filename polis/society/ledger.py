@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from polis.economy.ledger import Ledger, Leg, bank_of, parse_account_id
 from polis.events.kinds import OUTLET_REVENUE_BOOKED
@@ -27,7 +27,7 @@ class EconomyLedgerAdapter:
             )
         )
 
-    def _compatible_balance(self, payer_id: str, payee_id: str) -> int:
+    def compatible_balance(self, payer_id: str, payee_id: str) -> int:
         destinations = self._liquid_accounts(payee_id)
         if not destinations:
             return 0
@@ -46,12 +46,12 @@ class EconomyLedgerAdapter:
         payee_id: str,
         amount_cents: int,
     ) -> bool:
-        return amount_cents >= 0 and self._compatible_balance(payer_id, payee_id) >= amount_cents
+        return amount_cents >= 0 and self.compatible_balance(payer_id, payee_id) >= amount_cents
 
     def next_broadcast_txn_id(self, tick: int) -> str:
         return str(self.ledger.next_txn_id(tick))
 
-    def _transfer_legs(
+    def transfer_legs(
         self,
         payer_id: str,
         payee_id: str,
@@ -103,7 +103,7 @@ class EconomyLedgerAdapter:
         cause: Event,
     ) -> str:
         transaction_id = self.ledger.post_transaction(
-            self._transfer_legs(payer_id, payee_id, amount_cents),
+            self.transfer_legs(payer_id, payee_id, amount_cents),
             tick=tick,
             cause=cause,
         )
@@ -122,9 +122,10 @@ class EconomyNewsLedgerAdapter:
     advertiser_budgets: dict[str, int]
     campaign_buys: Mapping[str, Mapping[str, int]]
     subscription_price_cents: int = 0
+    _adapter: EconomyLedgerAdapter = field(init=False, repr=False)
 
-    def _bridge(self) -> EconomyLedgerAdapter:
-        return EconomyLedgerAdapter(self.ledger)
+    def __post_init__(self) -> None:
+        self._adapter = EconomyLedgerAdapter(self.ledger)
 
     def _affordable(
         self,
@@ -139,15 +140,14 @@ class EconomyNewsLedgerAdapter:
             requested,
             max(
                 0,
-                self._bridge()._compatible_balance(payer_id, payee_id) - committed_cents,
+                self._adapter.compatible_balance(payer_id, payee_id) - committed_cents,
             ),
         )
 
     def _aggregate(self, transfers: Sequence[tuple[str, str, int]]) -> tuple[Leg, ...]:
         totals: dict[tuple[str, int, str], int] = defaultdict(int)
-        bridge = self._bridge()
         for payer_id, payee_id, cents in transfers:
-            for leg in bridge._transfer_legs(payer_id, payee_id, cents):
+            for leg in self._adapter.transfer_legs(payer_id, payee_id, cents):
                 totals[(leg.account_id, leg.direction, "purchase")] += leg.amount_cents
         return tuple(
             Leg(account_id, direction, amount, reason)
