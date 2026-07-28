@@ -22,8 +22,4 @@ def test_observation_views_never_expose_network_statistics_or_reach() -> None:
         for field in fields(view_type)
     }
 
-    assert not {
-        name
-        for name in names
-        if any(fragment in name.lower() for fragment in banned)
-    }
+    assert not {name for name in names if any(fragment in name.lower() for fragment in banned)}
