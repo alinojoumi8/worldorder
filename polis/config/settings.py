@@ -220,6 +220,44 @@ class SocietyFeedSettings(FrozenModel):
     engagement: FeedEngagementSettings = FeedEngagementSettings()
 
 
+class BeliefGenesisSettings(FrozenModel):
+    mixture_separation: float = Field(default=0.0, ge=0)
+    sd: float = Field(default=0.25, gt=0)
+
+
+class BeliefSettings(FrozenModel):
+    alpha: dict[str, float] = {
+        "experience": 0.35,
+        "social": 0.10,
+        "media": 0.08,
+    }
+    theta_backfire: float = Field(default=0.60, ge=0, le=1)
+    theta_entrench: float = Field(default=0.60, ge=0, le=1)
+    theta_trust: float = Field(default=0.40, ge=0, le=1)
+    beta_backfire: float = Field(default=0.05, ge=0)
+    delta_entrench: float = Field(default=0.03, ge=0)
+    eta_trust: float = Field(default=0.04, ge=0)
+    gamma_c: float = Field(default=0.02, ge=0)
+    max_belief_updates_per_call: int = Field(default=5, ge=0)
+    max_step: float = Field(default=0.35, ge=0)
+    genesis: BeliefGenesisSettings = BeliefGenesisSettings()
+    heritability_beliefs: float = Field(default=0.40, ge=0, le=1)
+    confidence_dilution: float = Field(default=0.5, ge=0, le=1)
+    sigma_belief: float = Field(default=0.08, ge=0)
+    consensus_floor: float = Field(default=0.02, ge=0)
+    social_influence_off: bool = False
+    backfire_off: bool = False
+
+    @model_validator(mode="after")
+    def validate_alpha(self) -> BeliefSettings:
+        expected = {"experience", "social", "media"}
+        if set(self.alpha) != expected:
+            raise ValueError("beliefs.alpha must define experience, social and media")
+        if any(value < 0 for value in self.alpha.values()):
+            raise ValueError("beliefs.alpha values must be non-negative")
+        return self
+
+
 class SocietySettings(FrozenModel):
     feed_algorithm: Literal["chronological", "engagement", "random", "adversarial"] = "engagement"
     outlets: int = Field(default=4, ge=0)
@@ -246,6 +284,32 @@ class SocietySettings(FrozenModel):
     }
     homophily_bias: float = Field(default=0.0, ge=0)
     comms_attention: Literal["tie_weighted", "uniform"] = "tie_weighted"
+    outlet_slant_dispersion: float = Field(default=0.55, ge=0)
+    cpm_cents: int = Field(default=40, ge=0)
+    news_cycle: Literal["daily"] = "daily"
+    stories_per_reporter_per_cycle: int = Field(default=1, ge=0)
+    claim_tolerance: float = Field(default=0.10, ge=0)
+    misinfo_audit_rate: float = Field(default=0.05, ge=0, le=1)
+    source_window_sim_days: int = Field(default=14, ge=1)
+    line_threshold: float = Field(default=0.25, ge=0, le=1)
+    correction_reach_multiplier: float = Field(default=0.6, ge=0, le=1)
+    subscription_price_cents: int = Field(default=0, ge=0)
+    reach_norm: int = Field(default=500, ge=1)
+    newsworthiness_weights: dict[str, float] = {
+        "mag": 0.25,
+        "prom": 0.20,
+        "nov": 0.15,
+        "conf": 0.20,
+        "prox": 0.10,
+        "slant": 0.10,
+    }
+    distribution_weights: dict[str, float] = {
+        "trust": 0.35,
+        "topic": 0.25,
+        "prox": 0.15,
+        "sub": 0.15,
+        "reach": 0.10,
+    }
     feed: SocietyFeedSettings = SocietyFeedSettings()
 
     @model_validator(mode="after")
@@ -561,6 +625,8 @@ class AblationSettings(FrozenModel):
     disclose_simulation: bool = False
     salience_policy_override: str | None = None
     feed_off: bool = False
+    social_influence_off: bool = False
+    backfire_off: bool = False
 
 
 class StoreSettings(FrozenModel):
@@ -607,6 +673,7 @@ class Settings(FrozenModel):
     memory: MemorySettings = MemorySettings()
     mechanisms: dict[str, str] = {}
     society: SocietySettings = SocietySettings()
+    beliefs: BeliefSettings = BeliefSettings()
     economy: EconomySettings = EconomySettings()
     labour: LabourSettings = LabourSettings()
     firms: FirmSettings = FirmSettings()

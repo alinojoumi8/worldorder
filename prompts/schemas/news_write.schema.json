@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["headline", "body", "claims"],
+  "properties": {
+    "headline": {"type": "string", "minLength": 1},
+    "body": {"type": "string", "minLength": 1},
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "claim_id",
+          "text",
+          "entity_id",
+          "predicate",
+          "value",
+          "as_of_tick",
+          "sourced_to_event_seqs"
+        ],
+        "properties": {
+          "claim_id": {"type": "string"},
+          "text": {"type": "string"},
+          "entity_id": {"type": "string"},
+          "predicate": {"type": "string"},
+          "value": {},
+          "as_of_tick": {"type": "integer", "minimum": 0},
+          "sourced_to_event_seqs": {
+            "type": "array",
+            "items": {"type": "integer"}
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "stance_proposition": {"type": ["string", "null"]},
+    "stance_value": {"type": ["number", "null"], "minimum": -1, "maximum": 1}
+  },
+  "additionalProperties": false
+}

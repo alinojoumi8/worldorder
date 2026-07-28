@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from polis.economy.ledger import Ledger, Leg, bank_of, parse_account_id
-from polis.events.types import Event
+from polis.events.kinds import OUTLET_REVENUE_BOOKED
+from polis.events.log import EventLog
+from polis.events.types import Event, NewEvent
+from polis.kernel.clock import Clock
+from polis.society.media.news import Outlet, RevenueBooking
 
 
 @dataclass(slots=True)
@@ -107,4 +112,131 @@ class EconomyLedgerAdapter:
         return str(transaction_id)
 
 
-__all__ = ["EconomyLedgerAdapter"]
+@dataclass(slots=True)
+class EconomyNewsLedgerAdapter:
+    """Books media income only by debiting named, liquid counterparties."""
+
+    ledger: Ledger
+    log: EventLog
+    clock: Clock
+    advertiser_budgets: dict[str, int]
+    campaign_buys: Mapping[str, Mapping[str, int]]
+    subscription_price_cents: int = 0
+
+    def _bridge(self) -> EconomyLedgerAdapter:
+        return EconomyLedgerAdapter(self.ledger)
+
+    def _affordable(self, payer_id: str, payee_id: str, requested: int) -> int:
+        if requested <= 0:
+            return 0
+        return min(
+            requested,
+            self._bridge()._compatible_balance(payer_id, payee_id),
+        )
+
+    def _aggregate(self, transfers: Sequence[tuple[str, str, int]]) -> tuple[Leg, ...]:
+        totals: dict[tuple[str, int, str], int] = defaultdict(int)
+        bridge = self._bridge()
+        for payer_id, payee_id, cents in transfers:
+            for leg in bridge._transfer_legs(payer_id, payee_id, cents):
+                totals[(leg.account_id, leg.direction, "purchase")] += leg.amount_cents
+        return tuple(
+            Leg(account_id, direction, amount, reason)
+            for (account_id, direction, reason), amount in sorted(totals.items())
+            if amount > 0
+        )
+
+    def book_outlet_revenue(
+        self,
+        *,
+        outlet: Outlet,
+        period_start_tick: int,
+        tick: int,
+        impressions: int,
+        cpm_cents: int,
+        subscribers: Sequence[str],
+    ) -> RevenueBooking:
+        payee_id = outlet.firm_id
+        if payee_id is None:
+            return RevenueBooking()
+        transfers: list[tuple[str, str, int]] = []
+        advertiser_rows: list[tuple[str, int]] = []
+        ad_remaining = max(0, impressions * cpm_cents // 1_000)
+        for advertiser_id in sorted(self.advertiser_budgets):
+            if ad_remaining <= 0:
+                break
+            budget = max(0, self.advertiser_budgets[advertiser_id])
+            cents = self._affordable(
+                advertiser_id,
+                payee_id,
+                min(ad_remaining, budget),
+            )
+            if cents <= 0:
+                continue
+            advertiser_rows.append((advertiser_id, cents))
+            transfers.append((advertiser_id, payee_id, cents))
+            ad_remaining -= cents
+        subscription_rows: list[tuple[str, int]] = []
+        for subscriber_id in sorted(set(subscribers)):
+            cents = self._affordable(
+                subscriber_id,
+                payee_id,
+                self.subscription_price_cents,
+            )
+            if cents > 0:
+                subscription_rows.append((subscriber_id, cents))
+                transfers.append((subscriber_id, payee_id, cents))
+        campaign_rows: list[tuple[str, int]] = []
+        for buyer_id, requested in sorted(self.campaign_buys.get(outlet.outlet_id, {}).items()):
+            cents = self._affordable(buyer_id, payee_id, max(0, requested))
+            if cents > 0:
+                campaign_rows.append((buyer_id, cents))
+                transfers.append((buyer_id, payee_id, cents))
+        if not transfers:
+            return RevenueBooking()
+        predicted = str(self.ledger.next_txn_id(tick))
+        advertisers = tuple(sorted({payer for payer, _ in (*advertiser_rows, *campaign_rows)}))
+        ad_cents = sum(cents for _, cents in advertiser_rows)
+        subscription_cents = sum(cents for _, cents in subscription_rows)
+        campaign_cents = sum(cents for _, cents in campaign_rows)
+        event = self.log.stage(
+            NewEvent(
+                OUTLET_REVENUE_BOOKED,
+                {
+                    "outlet_id": outlet.outlet_id,
+                    "period_start_tick": period_start_tick,
+                    "impressions": impressions,
+                    "cpm_cents": cpm_cents,
+                    "ad_revenue_cents": ad_cents,
+                    "subscription_cents": subscription_cents,
+                    "campaign_cents": campaign_cents,
+                    "advertisers": list(advertisers),
+                    "txn_ids": [predicted],
+                },
+                subject_ids=(outlet.outlet_id, *advertisers),
+            ),
+            tick=tick,
+            sim_time=self.clock.sim_time_at(tick),
+        )
+        actual = str(
+            self.ledger.post_transaction(
+                self._aggregate(transfers),
+                tick=tick,
+                cause=event,
+            )
+        )
+        if actual != predicted:
+            raise RuntimeError("media revenue ledger transaction ordinal diverged")
+        for advertiser_id, cents in advertiser_rows:
+            self.advertiser_budgets[advertiser_id] -= cents
+        return RevenueBooking(
+            ad_cents,
+            subscription_cents,
+            campaign_cents,
+            advertisers,
+            (actual,),
+            event,
+        )
+
+
+__all__ = ["EconomyLedgerAdapter", "EconomyNewsLedgerAdapter"]
