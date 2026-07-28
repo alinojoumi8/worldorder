@@ -92,7 +92,7 @@ def test_ex_offender_penalty_never_drops_an_offer_below_minimum_wage() -> None:
     market.wage_penalty = SimpleNamespace(wage_multiplier=lambda _agent_id: 0.5)
     action = SimpleNamespace(
         actor_id="fm_one",
-        params={"application_id": "app_one", "wage_cents": 1_200},
+        params={"application_id": "app_one", "wage_cents": 2_000},
     )
 
     event = market._make_offer(action, 1, lambda draft: draft)

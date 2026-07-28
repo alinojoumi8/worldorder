@@ -151,12 +151,31 @@ def _scaled_types(archetype: str, count: int) -> tuple[PlaceType, ...]:
     expanded = tuple(
         place_type for place_type, amount in _MIX[archetype].items() for _ in range(amount)
     )
-    selected = tuple(
+    selected = [
         expanded[min(len(expanded) - 1, index * len(expanded) // count)] for index in range(count)
-    )
-    if archetype == "core" and selected and "prison" not in selected:
-        return (*selected[:-1], "prison")
-    return selected
+    ]
+    if archetype == "core" and len(selected) >= 2:
+        for required in ("courthouse", "prison"):
+            if required in selected:
+                continue
+            counts = Counter(selected)
+            replace_at = next(
+                (
+                    index
+                    for index in range(len(selected) - 1, -1, -1)
+                    if selected[index] not in {"courthouse", "prison"}
+                    and counts[selected[index]] > 1
+                ),
+                None,
+            )
+            if replace_at is None:
+                replace_at = next(
+                    index
+                    for index in range(len(selected) - 1, -1, -1)
+                    if selected[index] not in {"courthouse", "prison"}
+                )
+            selected[replace_at] = required
+    return tuple(selected)
 
 
 def _terrain(
