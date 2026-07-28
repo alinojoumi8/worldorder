@@ -204,7 +204,7 @@ class Platform:
         self._reach: dict[str, set[str]] = defaultdict(set)
         self._impressions: dict[str, int] = defaultdict(int)
         for engagement in self.repo.engagements():
-            if engagement.type == "view":
+            if engagement.type == "view" and self.repo.post(engagement.post_id) is not None:
                 self._reach[engagement.post_id].add(engagement.agent_id)
                 self._impressions[engagement.post_id] += 1
 

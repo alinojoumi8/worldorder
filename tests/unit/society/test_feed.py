@@ -195,3 +195,20 @@ def test_platform_restores_reach_state_from_repository() -> None:
 
     assert restored.reach("po_00") == 1
     assert restored.impressions("po_00") == 1
+
+
+def test_deleted_posts_do_not_restore_reach_state() -> None:
+    clock, log, graph, platform = fixture()
+    platform.engage("reader", "po_00", "view", 100)
+    platform.delete("po_00", "author", 101)
+
+    restored = Platform(
+        log=log,
+        clock=clock,
+        repo=platform.repo,
+        graph=graph,
+        cfg=SocietySettings(),
+    )
+
+    assert restored.reach("po_00") == 0
+    assert restored.impressions("po_00") == 0
