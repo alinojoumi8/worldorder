@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from polis.agents.actions.types import Action, ActionType, make_action
+from polis.agents.actions.types import (
+    Action,
+    ActionType,
+    make_legacy_action,
+)
 from polis.agents.actions.validate import action_response_schema
 from polis.agents.cognition.observation import Observation
 from polis.agents.memory import Retrieval
@@ -84,7 +88,7 @@ async def deliberate_decide(
     params = dict(action_row.get("params", {}))
     if action_type == ActionType.MOVE_TO and "place_id" not in params:
         params["place_id"] = agent.home_place_id
-    action = make_action(
+    action = make_legacy_action(
         actor_id=agent.agent_id,
         tick=observation.tick,
         action_type=action_type,

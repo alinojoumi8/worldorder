@@ -171,6 +171,56 @@ AGENT_BORN = register_kind(
     persistence=Persistence.PERSISTED,
     schema=_schema("agent_id"),
 )
+ACTION_SUBMITTED = register_kind(
+    2060,
+    "ACTION_SUBMITTED",
+    owner="polis.agents",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "action_id",
+        "actor_id",
+        "type",
+        "params",
+        "origin",
+        "salience",
+        "reasoning",
+        "llm_call_id",
+        "slot_index",
+    ),
+)
+ACTION_REJECTED = register_kind(
+    2061,
+    "ACTION_REJECTED",
+    owner="polis.agents",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "action_id",
+        "actor_id",
+        "type",
+        "gate",
+        "reason",
+        "detail",
+        "origin",
+        "slot_consumed",
+        "substituted_with",
+    ),
+)
+ACTION_FLAGGED_ILLEGAL = register_kind(
+    2062,
+    "ACTION_FLAGGED_ILLEGAL",
+    owner="polis.agents",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "action_id",
+        "actor_id",
+        "type",
+        "crime_type",
+        "victim_id",
+        "amount_cents",
+        "crime_id",
+        "proceeded",
+    ),
+)
 AGENT_MOVED = register_kind(
     3001,
     "AGENT_MOVED",
@@ -276,9 +326,9 @@ ACTION_VALIDATED = register_kind(
     persistence=Persistence.PERSISTED,
     schema=_schema("action_id", "agent_id", "type"),
 )
-ACTION_REJECTED = register_kind(
+LEGACY_ACTION_REJECTED = register_kind(
     4202,
-    "ACTION_REJECTED",
+    "ACTION_REJECTED_LEGACY",
     owner="polis.agents",
     persistence=Persistence.PERSISTED,
     schema=_schema("action_id", "agent_id", "reason"),

@@ -4,7 +4,11 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, cast
 
-from polis.agents.actions.types import Action, ActionType, make_action
+from polis.agents.actions.types import (
+    Action,
+    ActionType,
+    make_legacy_action,
+)
 from polis.agents.state import AgentPopulation
 from polis.config.settings import Settings
 from polis.economy.exchange.book import Fill, call_auction, continuous_matches, crosses
@@ -702,7 +706,7 @@ class ExchangeEngine:
             if already_pending:
                 continue
             actions.append(
-                make_action(
+                make_legacy_action(
                     actor_id=position.trader_id,
                     tick=tick,
                     action_type=ActionType.SUBMIT_ORDER,

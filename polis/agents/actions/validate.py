@@ -1,238 +1,56 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
-from polis.agents.actions.types import Action, ActionType, null_action
+from polis.agents.actions.budget import SlotLedger
+from polis.agents.actions.compat import LEGACY_PARAM_MODELS
+from polis.agents.actions.legal import CHILD_ALLOWED, REFLEX_ALLOWED
+from polis.agents.actions.params import PARAMS_MODELS
+from polis.agents.actions.params.base import ActionParams
+from polis.agents.actions.protocol import (
+    InstitutionResolver,
+    LegalityOracle,
+    PermissiveLegalityOracle,
+    ValidationContext,
+)
+from polis.agents.actions.registry import ResolverRegistry
+from polis.agents.actions.types import (
+    Action,
+    ActionType,
+    Gate,
+    GateFailure,
+    Rejection,
+    RejectReason,
+    ValidatedAction,
+    null_action,
+)
 from polis.agents.types import AgentState
+from polis.config.canon import canonical_bytes
+from polis.config.errors import ConfigError, PolisError
+from polis.config.settings import ActionSettings
+from polis.events.kinds import (
+    ACTION_FLAGGED_ILLEGAL,
+    ACTION_REJECTED,
+    ACTION_SUBMITTED,
+)
+from polis.events.types import Event, NewEvent
 from polis.kernel.clock import ClockProfile
 from polis.world.api import World
 
-GateResult = Literal["pass", "fail", "clean", "flagged", "not_checked"]
+LegacyGateResult = Literal["pass", "fail", "clean", "flagged", "not_checked"]
+Emit = Callable[[NewEvent], Event]
 
 
-class _Params(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class ReflexActionViolation(PolisError):
+    """A reflex policy attempted an action reserved for deliberate cognition."""
 
 
-class MoveParams(_Params):
-    place_id: str
-
-
-class EmptyParams(_Params):
-    pass
-
-
-class ApplyForJobParams(_Params):
-    vacancy_id: str
-    asked_wage_cents: int | None = Field(default=None, ge=0)
-
-
-class OfferDecisionParams(_Params):
-    offer_id: str
-    reason: str | None = None
-
-
-class NegotiateWageParams(_Params):
-    offer_id: str | None = None
-    employment_id: str | None = None
-    counter_cents: int = Field(ge=0)
-
-
-class EmploymentParams(_Params):
-    employment_id: str
-    reason: str | None = None
-
-
-class PostVacancyParams(_Params):
-    firm_id: str
-    occupation: str
-    wage_offer_cents: int = Field(ge=0)
-    headcount: int = Field(ge=1)
-
-
-class MakeOfferParams(_Params):
-    application_id: str
-    wage_cents: int = Field(ge=0)
-
-
-class WorkParams(_Params):
-    employment_id: str
-    effort_bp: int = Field(default=10_000, ge=0, le=10_000)
-
-
-class BuyGoodParams(_Params):
-    sku: str
-    qty: int = Field(ge=1, le=1_000)
-    seller_firm_id: str
-    max_unit_price_cents: int = Field(ge=0)
-
-
-class SetPriceParams(_Params):
-    firm_id: str
-    sku: str
-    price_cents: int = Field(ge=1)
-
-
-class ProduceParams(_Params):
-    sku: str
-
-
-class RestockParams(_Params):
-    sku: str
-    qty: int = Field(ge=1)
-
-
-class AccountParams(_Params):
-    bank_id: str
-    amount_cents: int | None = Field(default=None, ge=0)
-
-
-class LoanParams(_Params):
-    loan_id: str | None = None
-    bank_id: str | None = None
-    amount_cents: int = Field(ge=1)
-
-
-class SubmitOrderParams(_Params):
-    symbol: str
-    side: Literal["buy", "sell"]
-    order_type: Literal["limit", "market"] = "limit"
-    qty: int = Field(ge=1)
-    limit_price_cents: int | None = Field(default=None, ge=1)
-    flags: tuple[str, ...] = ()
-
-
-class CancelOrderParams(_Params):
-    order_id: str
-
-
-class ShortParams(_Params):
-    symbol: str
-    qty: int = Field(ge=1)
-    limit_price_cents: int = Field(ge=1)
-    collateral_cents: int = Field(ge=1)
-
-
-class IpoListParams(_Params):
-    firm_id: str
-    symbol: str
-    shares_offered: int = Field(ge=1)
-    primary_shares: int = Field(ge=0)
-    secondary_shares: int = Field(ge=0)
-    price_low_cents: int = Field(ge=1)
-    price_high_cents: int = Field(ge=1)
-    underwriter_bank_id: str
-
-
-class FoundCompanyParams(_Params):
-    name: str
-    sector: str
-    place_id: str
-    initial_capital_cents: int = Field(ge=1)
-    is_startup: bool = False
-    is_fund: bool = False
-    thesis: str = ""
-
-
-class PitchParams(_Params):
-    startup_id: str
-    investor_id: str
-    ask_cents: int = Field(ge=1)
-    pre_money_ask_cents: int = Field(ge=1)
-    deck_text: str
-
-
-class TermSheetParams(_Params):
-    startup_id: str
-    investor_id: str
-    pre_money_cents: int = Field(ge=1)
-    amount_cents: int = Field(ge=1)
-    security: Literal["common", "preferred"] = "preferred"
-    liq_pref_bp: int = Field(default=10_000, ge=0)
-    participating: bool = False
-    pro_rata: bool = True
-    board_seat: bool = False
-    option_pool_bp: int = Field(default=1_000, ge=0, lt=10_000)
-    anti_dilution: Literal["none", "broad_weighted", "full_ratchet"] = "broad_weighted"
-
-
-class InvestParams(_Params):
-    target_id: str
-    cents: int = Field(ge=1)
-    instrument: Literal["round", "lp_commitment", "bond"] = "round"
-    term_sheet_id: str | None = None
-
-
-class AcquireParams(_Params):
-    acquirer_id: str
-    target_id: str
-    offer_cents: int = Field(ge=1)
-    consideration: Literal["cash", "stock", "mixed"] = "cash"
-    stock_ratio_bp: int = Field(default=0, ge=0, le=10_000)
-    integration_mode: Literal["absorb", "standalone", "asset_sale"] = "absorb"
-    financing: str = "cash"
-
-
-class SellStakeParams(_Params):
-    firm_id: str
-    qty: int = Field(ge=1)
-    price_cents: int | None = Field(default=None, ge=1)
-    deal_id: str | None = None
-
-
-class BankruptcyParams(_Params):
-    entity_id: str | None = None
-    reason: str = "voluntary"
-
-
-class DividendParams(_Params):
-    firm_id: str
-    total_cents: int = Field(ge=1)
-
-
-_PARAM_MODELS: dict[ActionType, type[_Params]] = {
-    ActionType.MOVE_TO: MoveParams,
-    ActionType.IDLE: EmptyParams,
-    ActionType.SLEEP: EmptyParams,
-    ActionType.EAT: EmptyParams,
-    ActionType.APPLY_FOR_JOB: ApplyForJobParams,
-    ActionType.ACCEPT_OFFER: OfferDecisionParams,
-    ActionType.DECLINE_OFFER: OfferDecisionParams,
-    ActionType.QUIT_JOB: EmploymentParams,
-    ActionType.NEGOTIATE_WAGE: NegotiateWageParams,
-    ActionType.POST_VACANCY: PostVacancyParams,
-    ActionType.MAKE_OFFER: MakeOfferParams,
-    ActionType.FIRE_EMPLOYEE: EmploymentParams,
-    ActionType.WORK: WorkParams,
-    ActionType.STUDY: EmptyParams,
-    ActionType.BUY_GOOD: BuyGoodParams,
-    ActionType.SET_PRICE: SetPriceParams,
-    ActionType.PRODUCE: ProduceParams,
-    ActionType.RESTOCK: RestockParams,
-    ActionType.OPEN_ACCOUNT: AccountParams,
-    ActionType.DEPOSIT: AccountParams,
-    ActionType.WITHDRAW: AccountParams,
-    ActionType.APPLY_FOR_LOAN: LoanParams,
-    ActionType.REPAY_LOAN: LoanParams,
-    ActionType.DEFAULT: LoanParams,
-    ActionType.SUBMIT_ORDER: SubmitOrderParams,
-    ActionType.CANCEL_ORDER: CancelOrderParams,
-    ActionType.SHORT: ShortParams,
-    ActionType.IPO_LIST: IpoListParams,
-    ActionType.FOUND_COMPANY: FoundCompanyParams,
-    ActionType.PITCH: PitchParams,
-    ActionType.ISSUE_TERM_SHEET: TermSheetParams,
-    ActionType.INVEST: InvestParams,
-    ActionType.ACQUIRE: AcquireParams,
-    ActionType.SELL_STAKE: SellStakeParams,
-    ActionType.FILE_BANKRUPTCY: BankruptcyParams,
-    ActionType.DECLARE_DIVIDEND: DividendParams,
-    ActionType.NULL_ACTION: EmptyParams,
-}
+class UnregisteredActionType(PolisError):
+    """A run configured fail-fast encountered an action without a resolver."""
 
 
 def action_response_schema(legal_actions: Sequence[str]) -> dict[str, Any]:
@@ -252,7 +70,11 @@ def action_response_schema(legal_actions: Sequence[str]) -> dict[str, Any]:
                 "additionalProperties": False,
                 "properties": {
                     "type": {"const": action_type.value},
-                    "params": _PARAM_MODELS[action_type].model_json_schema(),
+                    "params": (
+                        LEGACY_PARAM_MODELS.get(
+                            action_type, PARAMS_MODELS[action_type]
+                        ).model_json_schema()
+                    ),
                 },
                 "required": ["type", "params"],
             }
@@ -264,7 +86,7 @@ def action_response_schema(legal_actions: Sequence[str]) -> dict[str, Any]:
                 "additionalProperties": False,
                 "properties": {
                     "type": {"const": ActionType.NULL_ACTION.value},
-                    "params": EmptyParams.model_json_schema(),
+                    "params": LEGACY_PARAM_MODELS[ActionType.NULL_ACTION].model_json_schema(),
                 },
                 "required": ["type", "params"],
             }
@@ -281,51 +103,21 @@ def action_response_schema(legal_actions: Sequence[str]) -> dict[str, Any]:
     }
 
 
-_ECONOMIC_ACTIONS = frozenset(
-    {
-        ActionType.APPLY_FOR_JOB,
-        ActionType.ACCEPT_OFFER,
-        ActionType.DECLINE_OFFER,
-        ActionType.QUIT_JOB,
-        ActionType.NEGOTIATE_WAGE,
-        ActionType.POST_VACANCY,
-        ActionType.MAKE_OFFER,
-        ActionType.FIRE_EMPLOYEE,
-        ActionType.WORK,
-        ActionType.BUY_GOOD,
-        ActionType.SET_PRICE,
-        ActionType.PRODUCE,
-        ActionType.RESTOCK,
-        ActionType.OPEN_ACCOUNT,
-        ActionType.DEPOSIT,
-        ActionType.WITHDRAW,
-        ActionType.APPLY_FOR_LOAN,
-        ActionType.REPAY_LOAN,
-        ActionType.DEFAULT,
-        ActionType.SUBMIT_ORDER,
-        ActionType.CANCEL_ORDER,
-        ActionType.SHORT,
-        ActionType.IPO_LIST,
-        ActionType.FOUND_COMPANY,
-        ActionType.PITCH,
-        ActionType.ISSUE_TERM_SHEET,
-        ActionType.INVEST,
-        ActionType.ACQUIRE,
-        ActionType.SELL_STAKE,
-        ActionType.FILE_BANKRUPTCY,
-        ActionType.DECLARE_DIVIDEND,
-    }
-)
-
-
 @dataclass(slots=True)
 class ActionBudget:
+    """Compatibility adapter for the M1-M3 living-city validator."""
+
     slots_per_agent: int
     used: dict[str, int] = field(default_factory=dict)
 
     @classmethod
-    def for_profile(cls, profile: ClockProfile) -> ActionBudget:
-        return cls(4 if profile.ticks_per_sim_day == 1 else 1)
+    def for_profile(
+        cls,
+        profile: ClockProfile,
+        settings: ActionSettings | None = None,
+    ) -> ActionBudget:
+        action_settings = settings or ActionSettings()
+        return cls(action_settings.slots_per_tick.for_profile(profile.name))
 
     def available(self, agent_id: str) -> bool:
         return self.used.get(agent_id, 0) < self.slots_per_agent
@@ -339,17 +131,19 @@ class ActionBudget:
 
 @dataclass(frozen=True, slots=True)
 class Validation:
+    """Compatibility result used by the existing M1-M3 phase wiring."""
+
     accepted: bool
     action: Action
     reason: str | None
-    gates: dict[str, GateResult]
+    gates: dict[str, LegacyGateResult]
     detail: dict[str, Any]
 
 
-def _reject(
+def _reject_legacy(
     action: Action,
     reason: str,
-    gates: dict[str, GateResult],
+    gates: dict[str, LegacyGateResult],
     detail: dict[str, Any] | None = None,
 ) -> Validation:
     return Validation(
@@ -361,6 +155,18 @@ def _reject(
     )
 
 
+_LEGACY_DOMAIN_ACTIONS = frozenset(ActionType).difference(
+    {
+        ActionType.MOVE_TO,
+        ActionType.IDLE,
+        ActionType.SLEEP,
+        ActionType.EAT,
+        ActionType.STUDY,
+        ActionType.NULL_ACTION,
+    }
+)
+
+
 def validate_action(
     action: Action,
     *,
@@ -369,7 +175,9 @@ def validate_action(
     profile: ClockProfile,
     budget: ActionBudget,
 ) -> Validation:
-    gates: dict[str, GateResult] = {
+    """Preserve the established M1-M3 validator until resolvers migrate slot by slot."""
+
+    gates: dict[str, LegacyGateResult] = {
         "schema": "not_checked",
         "capability": "not_checked",
         "locality": "not_checked",
@@ -377,21 +185,15 @@ def validate_action(
         "legality": "not_checked",
     }
     try:
-        params = _PARAM_MODELS[action.type].model_validate(action.params)
+        params = LEGACY_PARAM_MODELS[action.type].model_validate(action.params)
     except (KeyError, ValidationError) as exc:
         gates["schema"] = "fail"
-        return _reject(action, "schema", gates, {"error": str(exc)})
+        return _reject_legacy(action, "schema", gates, {"error": str(exc)})
     gates["schema"] = "pass"
 
-    if agent.employment_status == "child" and action.type not in {
-        ActionType.IDLE,
-        ActionType.SLEEP,
-        ActionType.EAT,
-        ActionType.STUDY,
-        ActionType.NULL_ACTION,
-    }:
+    if agent.employment_status == "child" and action.type not in CHILD_ALLOWED:
         gates["capability"] = "fail"
-        return _reject(action, "capability", gates)
+        return _reject_legacy(action, "capability", gates)
     gates["capability"] = "pass"
 
     location = world.locations[action.actor_id]
@@ -399,20 +201,261 @@ def validate_action(
         target_id = str(params.model_dump()["place_id"])
         if not world.has_place(target_id):
             gates["locality"] = "fail"
-            return _reject(action, "locality", gates, {"reason": "unknown_place"})
-        if target_id != agent.home_place_id and not world.is_open(target_id, action.tick, profile):
+            return _reject_legacy(
+                action,
+                "locality",
+                gates,
+                {"reason": "unknown_place"},
+            )
+        if target_id != agent.home_place_id and not world.is_open(
+            target_id,
+            action.tick,
+            profile,
+        ):
             gates["locality"] = "fail"
-            return _reject(action, "locality", gates, {"reason": "closed"})
-    elif action.type not in _ECONOMIC_ACTIONS and not world.affords(
-        location.place_id, action.type.value
+            return _reject_legacy(action, "locality", gates, {"reason": "closed"})
+    elif action.type not in _LEGACY_DOMAIN_ACTIONS and not world.affords(
+        location.place_id,
+        action.type.value,
     ):
         gates["locality"] = "fail"
-        return _reject(action, "locality", gates)
+        return _reject_legacy(action, "locality", gates)
     gates["locality"] = "pass"
 
     if not budget.consume(action.actor_id):
         gates["resources"] = "fail"
-        return _reject(action, "resources", gates, {"reason": "action_slots"})
+        return _reject_legacy(
+            action,
+            "resources",
+            gates,
+            {"reason": "action_slots"},
+        )
     gates["resources"] = "pass"
     gates["legality"] = "clean"
     return Validation(True, action, None, gates, {})
+
+
+class ActionValidator:
+    """C10 PHASE 4 validator shared by native and external action origins."""
+
+    def __init__(
+        self,
+        registry: ResolverRegistry,
+        slots: SlotLedger,
+        *,
+        oracle: LegalityOracle | None = None,
+        emit: Emit | None = None,
+        max_params_bytes: int = 4_096,
+        reject_on_unregistered: bool = True,
+    ) -> None:
+        self.registry = registry
+        self.slots = slots
+        self.oracle = oracle or PermissiveLegalityOracle()
+        self.emit = emit
+        self.max_params_bytes = max_params_bytes
+        self.reject_on_unregistered = reject_on_unregistered
+
+    @classmethod
+    def from_settings(
+        cls,
+        registry: ResolverRegistry,
+        settings: ActionSettings,
+        profile: Literal["microscope", "chronicle"],
+        *,
+        oracle: LegalityOracle | None = None,
+        emit: Emit | None = None,
+    ) -> ActionValidator:
+        if settings.legality.oracle == "law" and oracle is None:
+            raise ValueError("actions.legality.oracle=law requires the C19 legality oracle")
+        return cls(
+            registry,
+            SlotLedger.from_settings(settings, profile),
+            oracle=oracle,
+            emit=emit,
+            max_params_bytes=settings.max_params_bytes,
+            reject_on_unregistered=settings.reject_on_unregistered,
+        )
+
+    def _emit(self, draft: NewEvent) -> Event | None:
+        return self.emit(draft) if self.emit is not None else None
+
+    def _reject(
+        self,
+        action: Action,
+        *,
+        gate: Gate | None,
+        reason: RejectReason,
+        detail: str,
+        cause_seq: int | None = None,
+        slot_consumed: bool = True,
+    ) -> Rejection:
+        substitute = null_action(action, reasoning=reason)
+        rejection = Rejection(
+            action_id=action.action_id,
+            actor_id=action.actor_id,
+            type=action.type,
+            gate=gate,
+            reason=reason,
+            detail=detail,
+            substitute=substitute,
+        )
+        self._emit(
+            NewEvent(
+                ACTION_REJECTED,
+                {
+                    "action_id": str(action.action_id),
+                    "actor_id": action.actor_id,
+                    "type": action.type.value,
+                    "gate": gate,
+                    "reason": reason,
+                    "detail": detail,
+                    "origin": action.origin,
+                    "slot_consumed": slot_consumed,
+                    "substituted_with": ActionType.NULL_ACTION.value,
+                },
+                actor_id=action.actor_id,
+                cause_seq=cause_seq,
+            )
+        )
+        return rejection
+
+    def _run_gate(
+        self,
+        action: Action,
+        resolver: InstitutionResolver,
+        ctx: ValidationContext,
+        gate: Gate,
+    ) -> GateFailure | None:
+        if gate == "capability":
+            return resolver.check_capability(action, ctx)
+        if gate == "locality":
+            return resolver.check_locality(action, ctx)
+        if gate == "resources":
+            return resolver.check_resources(action, ctx)
+        raise AssertionError(f"unsupported resolver gate: {gate}")
+
+    def validate(
+        self,
+        action: Action,
+        ctx: ValidationContext,
+    ) -> ValidatedAction | Rejection:
+        if action.origin == "reflex" and action.type not in REFLEX_ALLOWED:
+            raise ReflexActionViolation(
+                f"reflex action {action.type.value} is outside REFLEX_ALLOWED"
+            )
+
+        self.slots.reset(ctx.tick)
+        slot_index = self.slots.consume(action.actor_id, ctx.tick)
+        if slot_index is None:
+            return self._reject(
+                action,
+                gate=None,
+                reason="no_slots",
+                detail="the actor has exhausted this tick's action slots",
+                slot_consumed=False,
+            )
+
+        submitted = self._emit(
+            NewEvent(
+                ACTION_SUBMITTED,
+                {
+                    "action_id": str(action.action_id),
+                    "actor_id": action.actor_id,
+                    "type": action.type.value,
+                    "params": dict(action.params),
+                    "origin": action.origin,
+                    "salience": action.salience,
+                    "reasoning": action.reasoning,
+                    "llm_call_id": None,
+                    "slot_index": slot_index,
+                },
+                actor_id=action.actor_id,
+            )
+        )
+        cause_seq = submitted.seq if submitted is not None else None
+
+        resolver = self.registry.for_type(action.type)
+        if resolver is None:
+            if not self.reject_on_unregistered:
+                raise UnregisteredActionType(f"no resolver is registered for {action.type.value}")
+            return self._reject(
+                action,
+                gate=None,
+                reason="unavailable",
+                detail=f"no resolver is registered for {action.type.value}",
+                cause_seq=cause_seq,
+            )
+
+        try:
+            if action.tick != ctx.tick:
+                raise ValueError(
+                    f"action tick {action.tick} does not match validation tick {ctx.tick}"
+                )
+            if len(canonical_bytes(action.params)) > self.max_params_bytes:
+                raise ValueError(f"params exceed max_params_bytes={self.max_params_bytes}")
+            if action.origin == "external" and action.sig is None:
+                raise ValueError("external actions require sig")
+            params: ActionParams = PARAMS_MODELS[action.type].model_validate(action.params)
+        except (ConfigError, KeyError, ValidationError, ValueError) as exc:
+            return self._reject(
+                action,
+                gate="schema",
+                reason="schema",
+                detail=str(exc),
+                cause_seq=cause_seq,
+            )
+
+        for gate in ("capability", "locality", "resources"):
+            failure = self._run_gate(action, resolver, ctx, gate)
+            if failure is not None:
+                return self._reject(
+                    action,
+                    gate=gate,
+                    reason=failure.reason,
+                    detail=failure.detail,
+                    cause_seq=cause_seq,
+                )
+
+        verdict = self.oracle.assess(action, params, ctx)
+        if verdict.is_crime:
+            self._emit(
+                NewEvent(
+                    ACTION_FLAGGED_ILLEGAL,
+                    {
+                        "action_id": str(action.action_id),
+                        "actor_id": action.actor_id,
+                        "type": action.type.value,
+                        "crime_type": verdict.crime_type,
+                        "victim_id": verdict.victim_id,
+                        "amount_cents": verdict.amount_cents,
+                        "crime_id": verdict.crime_id,
+                        "proceeded": True,
+                    },
+                    actor_id=action.actor_id,
+                    subject_ids=(verdict.victim_id,) if verdict.victim_id is not None else (),
+                    cause_seq=cause_seq,
+                )
+            )
+        return ValidatedAction(action, params, verdict, slot_index)
+
+    def validate_batch(
+        self,
+        actions: Sequence[Action],
+        tick: int,
+        ctxs: Mapping[str, ValidationContext],
+    ) -> tuple[tuple[ValidatedAction, ...], tuple[Rejection, ...]]:
+        validated: list[ValidatedAction] = []
+        rejected: list[Rejection] = []
+        for action in sorted(
+            actions,
+            key=lambda item: (item.actor_id, str(item.action_id)),
+        ):
+            ctx = ctxs[action.actor_id]
+            if ctx.tick != tick:
+                raise ValueError(f"context tick {ctx.tick} does not match batch tick {tick}")
+            result = self.validate(action, ctx)
+            if isinstance(result, Rejection):
+                rejected.append(result)
+            else:
+                validated.append(result)
+        return tuple(validated), tuple(rejected)

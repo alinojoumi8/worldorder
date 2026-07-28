@@ -43,3 +43,26 @@ source_modules =
     polis.economy
 forbidden_modules =
     polis.agents.cognition
+
+[importlinter:contract:institutions-no-cognition]
+name = Institutions consume actions without importing agent internals
+type = forbidden
+source_modules =
+    polis.economy
+    polis.society
+    polis.world
+forbidden_modules =
+    polis.agents.cognition
+    polis.agents.memory
+    polis.agents.state
+ignore_imports =
+    polis.economy.banking -> polis.agents.state
+    polis.economy.credit -> polis.agents.state
+    polis.economy.exchange.engine -> polis.agents.state
+    polis.economy.fiscal -> polis.agents.state
+    polis.economy.genesis -> polis.agents.state
+    polis.economy.goods -> polis.agents.state
+    polis.economy.labour -> polis.agents.state
+    polis.economy.policy -> polis.agents.state
+    polis.economy.state -> polis.agents.state
+    polis.economy.ventures -> polis.agents.state

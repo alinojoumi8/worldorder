@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import math
 
-from polis.agents.actions.types import Action, ActionType, make_action
+from polis.agents.actions.types import (
+    Action,
+    ActionType,
+    make_legacy_action,
+)
 from polis.agents.cognition.observation import Observation
 from polis.agents.types import AgentState
 from polis.kernel.rng import RngRegistry
@@ -84,7 +88,7 @@ def reflex_decide(
             selected = candidate
             break
     action_type, params, _utility = selected
-    return make_action(
+    return make_legacy_action(
         actor_id=agent.agent_id,
         tick=observation.tick,
         action_type=action_type,

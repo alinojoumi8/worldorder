@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from polis.agents.actions.types import Action, make_action
+from polis.agents.actions.types import Action, make_legacy_action
 from polis.agents.cognition.observation import Observation
 from polis.agents.cognition.reflex import reflex_decide
 from polis.agents.memory import MemoryRecord, MemoryStore, ReflectionInsight, Retrieval
@@ -99,7 +99,7 @@ async def reflect_decide(
         identity_summary=str(parsed.get("identity_summary", "")),
     )
     reflex = reflex_decide(agent, observation, world, rng=rng)
-    action = make_action(
+    action = make_legacy_action(
         actor_id=reflex.actor_id,
         tick=reflex.tick,
         action_type=reflex.type,

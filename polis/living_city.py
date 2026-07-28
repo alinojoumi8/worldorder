@@ -25,12 +25,12 @@ from polis.economy.policy import MechanicalPolicy
 from polis.economy.state import EconomyState, EconomyWorldState
 from polis.economy_observations import augment_economic_observations
 from polis.events.kinds import (
-    ACTION_REJECTED,
     ACTION_VALIDATED,
     AGENT_BORN,
     AGENT_MOVED,
     COGNITION_ROUTED,
     JOURNEY_STARTED,
+    LEGACY_ACTION_REJECTED,
     LIVE_AGENTS,
     LIVE_TICK,
     MEMORY_RETRIEVED,
@@ -374,7 +374,7 @@ class LivingCityEngine:
         ctx.actions.extend(self.decisions.values())
 
     async def validate(self, ctx: TickContext) -> None:
-        budget = ActionBudget.for_profile(ctx.clock.profile)
+        budget = ActionBudget.for_profile(ctx.clock.profile, ctx.settings.actions)
         for agent_id, action in sorted(self.decisions.items()):
             validation = validate_action(
                 action,
@@ -402,7 +402,7 @@ class LivingCityEngine:
                 ctx.rejected.append(action)
                 ctx.emit(
                     NewEvent(
-                        ACTION_REJECTED,
+                        LEGACY_ACTION_REJECTED,
                         {
                             "action_id": str(action.action_id),
                             "agent_id": agent_id,
