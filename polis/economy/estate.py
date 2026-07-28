@@ -647,7 +647,12 @@ class EconomyEstatePort:
         cause: Event | None,
     ) -> tuple[Event, ...]:
         source = (
-            self._source_with_balance(loan.borrower_id, cents)
+            self._consolidated_source(
+                loan.borrower_id,
+                cents,
+                tick,
+                cause=cause,
+            )
             if loan.lender_id == "gv_treasury"
             else self._fund_lender_deposit(
                 loan.borrower_id,
@@ -714,17 +719,33 @@ class EconomyEstatePort:
             )
         return tuple(events)
 
-    def _source_with_balance(self, owner_id: str, cents: int) -> str:
-        source = next(
-            (
-                account
-                for account in self._liquid_accounts(owner_id)
-                if self.economy.ledger.balance(account) >= cents
-            ),
-            None,
+    def _consolidated_source(
+        self,
+        owner_id: str,
+        cents: int,
+        tick: int,
+        *,
+        cause: Event | None,
+    ) -> str:
+        accounts = self._liquid_accounts(owner_id)
+        source = max(
+            accounts,
+            key=lambda account: (self.economy.ledger.balance(account), account),
+            default=None,
         )
         if source is None:
-            raise RuntimeError(f"no liquid account can fund {cents} cents for {owner_id}")
+            raise RuntimeError(f"no liquid accounts exist for {owner_id}")
+        shortfall = cents - max(0, self.economy.ledger.balance(source))
+        if shortfall > 0:
+            self._move_between_owner_accounts(
+                owner_id,
+                source,
+                shortfall,
+                tick,
+                cause=cause,
+            )
+        if self.economy.ledger.balance(source) < cents:
+            raise RuntimeError(f"cannot consolidate {cents} cents for {owner_id}")
         return source
 
     def _fund_lender_deposit(
@@ -866,11 +887,14 @@ class EconomyEstatePort:
         agent_id: str,
         heirs: tuple[tuple[str, int], ...],
     ) -> None:
-        recipients = heirs or (("gv_treasury", 1),)
+        weighted = tuple((heir_id, weight) for heir_id, weight in heirs if weight > 0)
+        recipients = weighted or (("gv_treasury", 1),)
         for holding in tuple(self.economy.exchange.holdings.values()):
             if holding.holder_id != agent_id or holding.qty <= 0:
                 continue
             allocations = allocate(holding.qty, recipients)
+            if sum(allocations.values()) != holding.qty:
+                raise RuntimeError(f"security allocation lost quantity for {agent_id}")
             for recipient, qty in sorted(allocations.items()):
                 if qty:
                     target = self.economy.exchange.holding(recipient, holding.symbol)
@@ -882,6 +906,8 @@ class EconomyEstatePort:
             if row.holder_id != agent_id or row.shares <= 0:
                 continue
             allocations = allocate(row.shares, recipients)
+            if sum(allocations.values()) != row.shares:
+                raise RuntimeError(f"cap table allocation lost shares for {agent_id}")
             del self.economy.ventures.cap_table[key]
             for recipient, shares in sorted(allocations.items()):
                 if shares <= 0:

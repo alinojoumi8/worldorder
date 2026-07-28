@@ -218,9 +218,9 @@ class LivingCityEngine:
     async def demography_vitals(self, ctx: TickContext) -> None:
         if self.demography is not None:
             await self.demography.institution.run(ctx.tick)
-            if self.economy is not None:
-                self.economy.sync_denormalised(self.population)
-                self.economy.ledger.commit_tick(ctx.tick)
+        if self.economy is not None:
+            self.economy.sync_denormalised(self.population)
+            self.economy.ledger.commit_tick(ctx.tick)
 
     def _trace_kept(self, agent_id: str, tick: int, mode: str) -> bool:
         seed = self.rng.seed_for("cognition.sample", agent_id, tick)

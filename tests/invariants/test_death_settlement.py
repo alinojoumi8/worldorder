@@ -7,7 +7,7 @@ from polis.economy.credit import LoanDecision, LoanRequest, originate
 from polis.economy.invariants import check_ledger, check_money
 from polis.economy.ledger import parse_account_id
 from polis.economy.state import EconomyWorldState
-from polis.economy.venture_state import BankruptcyCaseState
+from polis.economy.venture_state import BankruptcyCaseState, CapTableState
 from polis.events.kinds import (
     AGENT_DIED,
     ESTATE_CLOSED,
@@ -19,6 +19,7 @@ from polis.events.kinds import (
     LOAN_REPAID,
     LOAN_WRITTEN_OFF,
     PAYROLL_SHORTFALL,
+    TICK_STARTED,
     WAGE_PAID,
 )
 from polis.events.types import NewEvent
@@ -276,6 +277,87 @@ async def test_fully_recovered_estate_loan_reports_payment_and_repayment() -> No
     assert estate.debts_cents == 1_000
     assert any(event.kind == LOAN_PAYMENT_MADE for event in events)
     assert any(event.kind == LOAN_REPAID for event in events)
+
+
+@pytest.mark.asyncio
+async def test_treasury_recovery_consolidates_split_liquid_accounts() -> None:
+    result = await demography_result()
+    assert result.demography is not None and result.economy is not None
+    settler = result.demography.institution.estate
+    port = settler.estate
+    borrower = max(
+        result.population.alive(),
+        key=lambda agent: result.economy.ledger.liquid(agent.agent_id),
+    )
+    accounts = port._liquid_accounts(borrower.agent_id)
+    if len(accounts) < 2:
+        bank_id = parse_account_id(accounts[0])[2]
+        assert bank_id is not None
+        result.economy.ledger.open_account(
+            "esc",
+            borrower.agent_id,
+            "agent",
+            bank_id=bank_id,
+            ref="split-liquidity",
+            tick=2,
+        )
+        accounts = port._liquid_accounts(borrower.agent_id)
+    assert len(accounts) >= 2
+    total = sum(max(0, result.economy.ledger.balance(account)) for account in accounts)
+    assert total > 1
+    richest = max(accounts, key=result.economy.ledger.balance)
+    other = next(account for account in accounts if account != richest)
+    cause = settler.log.stage(
+        NewEvent(TICK_STARTED, {"tick": 2}),
+        tick=2,
+        sim_time=settler.clock.sim_time_at(2),
+    )
+    if result.economy.ledger.balance(other) <= 0:
+        result.economy.ledger.post_transaction(
+            result.economy.ledger.transfer(richest, other, 1, "transfer"),
+            tick=2,
+            cause=cause,
+        )
+    assert all(result.economy.ledger.balance(account) < total for account in accounts)
+
+    source = port._consolidated_source(
+        borrower.agent_id,
+        total,
+        2,
+        cause=cause,
+    )
+
+    assert result.economy.ledger.balance(source) == total
+    assert all(
+        result.economy.ledger.balance(account) == 0 for account in accounts if account != source
+    )
+
+
+@pytest.mark.asyncio
+async def test_zero_weight_heirs_escheat_all_security_interests() -> None:
+    result = await demography_result()
+    assert result.demography is not None and result.economy is not None
+    port = result.demography.institution.estate.estate
+    decedent = next(iter(result.population.alive()))
+    symbol = "ZERO"
+    source_holding = result.economy.exchange.holding(decedent.agent_id, symbol)
+    source_holding.qty = 7
+    treasury_before = result.economy.exchange.holding("gv_treasury", symbol).qty
+    cap_row = CapTableState("fm_zero", decedent.agent_id, "common", 11)
+    source_key = result.economy.ventures.cap_key(
+        cap_row.firm_id,
+        cap_row.holder_id,
+        cap_row.share_class,
+    )
+    result.economy.ventures.cap_table[source_key] = cap_row
+
+    port._transfer_interests(decedent.agent_id, (("ag_zero", 0),))
+
+    assert source_holding.qty == 0
+    assert result.economy.exchange.holding("gv_treasury", symbol).qty == treasury_before + 7
+    assert source_key not in result.economy.ventures.cap_table
+    treasury_key = result.economy.ventures.cap_key("fm_zero", "gv_treasury", "common")
+    assert result.economy.ventures.cap_table[treasury_key].shares == 11
 
 
 @pytest.mark.asyncio
