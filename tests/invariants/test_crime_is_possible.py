@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, get_args
 from uuid import UUID
 
 from polis.agents.actions import (
@@ -10,7 +11,6 @@ from polis.agents.actions import (
     ActionType,
     ActionValidator,
     InstitutionSlot,
-    LegalityVerdict,
     ResolutionContext,
     ResolverRegistry,
     SlotLedger,
@@ -18,9 +18,23 @@ from polis.agents.actions import (
     ValidationContext,
     make_action,
 )
-from polis.agents.actions.params.base import ActionParams
-from polis.events.kinds import ACTION_FLAGGED_ILLEGAL, ACTION_SUBMITTED
+from polis.agents.actions.types import RejectReason
+from polis.config.settings import load_settings
+from polis.events.kinds import (
+    ACTION_FLAGGED_ILLEGAL,
+    ACTION_SUBMITTED,
+    CRIME_COMMITTED,
+    LEGALITY_FLAGGED,
+)
+from polis.events.log import EventLog, MemoryEventSink
 from polis.events.types import Event, NewEvent
+from polis.society.law import (
+    LawLegalityOracle,
+    MemoryCrimeRepository,
+    MnpiIndex,
+    ObligationIndex,
+)
+from tests.law_support import Memories, checker, clock, law_cfg, runtime
 
 
 class LawResolver:
@@ -48,13 +62,17 @@ class LawResolver:
     ) -> None:
         del action, ctx
 
+    def __init__(self) -> None:
+        self.seen: list[ValidatedAction] = []
+
     def resolve(
         self,
         actions: Sequence[ValidatedAction],
         tick: int,
         ctx: ResolutionContext,
     ) -> Sequence[Event]:
-        del actions, tick, ctx
+        del tick, ctx
+        self.seen.extend(actions)
         return ()
 
     def options_for(
@@ -66,27 +84,32 @@ class LawResolver:
         return ()
 
 
-class CrimeOracle:
-    def assess(
-        self,
-        action: Action,
-        params: ActionParams,
-        ctx: ValidationContext,
-    ) -> LegalityVerdict:
-        del action, params, ctx
-        return LegalityVerdict(
-            is_crime=True,
-            crime_type="theft",
-            victim_id="ag_victim",
-            amount_cents=500,
-            crime_id="cr_test",
-        )
-
-
 def test_flagged_crime_proceeds_to_the_law_resolver() -> None:
     registry = ResolverRegistry()
-    registry.register(LawResolver())
+    resolver = LawResolver()
+    registry.register(resolver)
     drafts: list[NewEvent] = []
+    law_sink = MemoryEventSink()
+    law_log = EventLog(UUID(int=1919), law_sink)
+    memories = Memories()
+    configured_clock = clock()
+    configured_checker = checker(law_log)
+    configured_oracle = LawLegalityOracle(
+        log=law_log,
+        clock=configured_clock,
+        runtime=runtime(),
+        mnpi=MnpiIndex(
+            memories=memories,
+            cfg=law_cfg(),
+            clock=configured_clock,
+            events=(),
+        ),
+        obligations=ObligationIndex(),
+        checker=configured_checker,
+        memories=memories,
+        repo=MemoryCrimeRepository(),
+        cfg=law_cfg(),
+    )
 
     def emit(draft: NewEvent) -> Event:
         drafts.append(draft)
@@ -114,7 +137,7 @@ def test_flagged_crime_proceeds_to_the_law_resolver() -> None:
     validator = ActionValidator(
         registry,
         SlotLedger(1),
-        oracle=CrimeOracle(),
+        oracle=configured_oracle,
         emit=emit,
     )
     action = make_action(
@@ -140,3 +163,20 @@ def test_flagged_crime_proceeds_to_the_law_resolver() -> None:
         ACTION_FLAGGED_ILLEGAL,
     ]
     assert drafts[-1].payload["proceeded"] is True
+    resolver.resolve(
+        (result,),
+        1,
+        ResolutionContext(emit=lambda draft: emit(draft)),
+    )
+    assert resolver.seen == [result]
+    assert [event.kind for event in law_log.staged()] == [
+        LEGALITY_FLAGGED,
+        CRIME_COMMITTED,
+    ]
+
+
+def test_m4_baseline_requires_the_law_oracle_and_legality_never_rejects() -> None:
+    settings = load_settings(Path("configs/baseline.yaml"))
+
+    assert settings.actions.legality.oracle == "law"
+    assert "legality" not in get_args(RejectReason)

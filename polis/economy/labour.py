@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from math import isqrt
 from pathlib import Path
 from statistics import median
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
@@ -45,6 +45,9 @@ from polis.events.kinds import (
 from polis.events.types import Event, NewEvent
 from polis.kernel.rng import RngRegistry
 from polis.world.api import World
+
+if TYPE_CHECKING:
+    from polis.society.law import GarnishmentProtocol, WagePenaltyProtocol
 
 Emit = Callable[[NewEvent], Event]
 _EDU_BONUS_BP = {
@@ -365,6 +368,8 @@ class LabourMarket:
         economy: EconomyState,
         rng: RngRegistry,
         occupations: Mapping[str, Occupation],
+        garnishment: GarnishmentProtocol | None = None,
+        wage_penalty: WagePenaltyProtocol | None = None,
     ) -> None:
         self.settings = settings
         self.population = population
@@ -372,6 +377,8 @@ class LabourMarket:
         self.economy = economy
         self.rng = rng
         self.occupations = occupations
+        self.garnishment = garnishment
+        self.wage_penalty = wage_penalty
 
     def resolve(self, actions: Sequence[Action], tick: int, emit: Emit) -> tuple[Event, ...]:
         events: list[Event] = []
@@ -595,7 +602,12 @@ class LabourMarket:
             return None
         ordinal = sum(row.made_tick == tick for row in self.economy.offers.values())
         offer_id = mint("off", tick, ordinal)
-        wage = max(self.settings.labour.minimum_wage_cents, int(action.params["wage_cents"]))
+        wage = max(
+            self.settings.labour.minimum_wage_cents,
+            int(action.params["wage_cents"]),
+        )
+        if self.wage_penalty is not None:
+            wage = round(wage * self.wage_penalty.wage_multiplier(application.agent_id))
         offer = OfferState(
             offer_id,
             application_id,
@@ -902,6 +914,8 @@ class LabourMarket:
                 if txn_id != expected:
                     raise RuntimeError("payroll transaction ordinal diverged")
                 txn_ids.append(str(txn_id))
+                if self.garnishment is not None and net:
+                    self.garnishment.garnish(employment.agent_id, net, tick)
                 employment.total_paid_cents += gross
                 income = self.economy.gross_income_by_tick.setdefault(tick, {})
                 income[employment.agent_id] = income.get(employment.agent_id, 0) + gross

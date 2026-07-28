@@ -25,6 +25,7 @@ PlaceType = Literal[
     "town_hall",
     "courthouse",
     "police",
+    "prison",
     "hospital",
     "park",
     "bar",
@@ -85,6 +86,7 @@ _SCHEDULES: dict[str, tuple[tuple[int, int], frozenset[int]]] = {
     "park": ((0, 24), frozenset(range(7))),
     "shelter": ((0, 24), frozenset(range(7))),
     "police": ((0, 24), frozenset(range(7))),
+    "prison": ((0, 24), frozenset(range(7))),
     "hospital": ((0, 24), frozenset(range(7))),
     "office": ((8, 18), frozenset(range(5))),
     "bank": ((8, 18), frozenset(range(5))),
@@ -101,9 +103,9 @@ _SCHEDULES: dict[str, tuple[tuple[int, int], frozenset[int]]] = {
 }
 
 _AFFORDANCES: dict[str, frozenset[str]] = {
-    "SLEEP": frozenset({"home", "shelter", "hospital"}),
-    "EAT": frozenset({"home", "shop", "bar", "shelter"}),
-    "STUDY": frozenset({"school", "university", "home"}),
+    "SLEEP": frozenset({"home", "shelter", "hospital", "prison"}),
+    "EAT": frozenset({"home", "shop", "bar", "shelter", "prison"}),
+    "STUDY": frozenset({"school", "university", "home", "prison"}),
 }
 
 

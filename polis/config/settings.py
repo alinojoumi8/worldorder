@@ -863,6 +863,76 @@ class PolitySettings(FrozenModel):
         return self
 
 
+class LawSettings(FrozenModel):
+    detection_window_sim_days: int = Field(default=180, ge=1)
+    mnpi_window_sim_days: int = Field(default=14, ge=1)
+    base_detect: dict[str, float] = {
+        "theft": 0.35,
+        "assault": 0.45,
+        "fraud": 0.12,
+        "insider_trading": 0.06,
+        "embezzlement": 0.10,
+        "contract_breach": 0.30,
+        "perjury": 0.20,
+    }
+    victim_awareness: dict[str, float] = {
+        "theft": 0.95,
+        "assault": 0.95,
+        "fraud": 0.30,
+        "insider_trading": 0.05,
+        "embezzlement": 0.15,
+        "contract_breach": 0.85,
+        "perjury": 0.40,
+    }
+    capacity_exponent: float = Field(default=0.6, gt=0)
+    witness_bonus_per_witness: float = Field(default=0.4, ge=0)
+    witness_bonus_cap: float = Field(default=1.2, ge=0)
+    cost_per_patrol_cents: int = Field(default=20_000, ge=1)
+    cost_per_investigation_cents: int = Field(default=150_000, ge=1)
+    cost_per_case_cents: int = Field(default=400_000, ge=1)
+    charge_threshold: float = Field(default=0.45, ge=0, le=1)
+    conviction_threshold: float = Field(default=0.60, ge=0, le=1)
+    evidence_window_sim_days: int = Field(default=30, ge=1)
+    strength_norm: float = Field(default=6.0, gt=0)
+    counsel_base_evidence: int = Field(default=3, ge=0)
+    counsel_skill_factor: int = Field(default=8, ge=0)
+    legal_aid_wealth_pct: float = Field(default=0.25, ge=0, le=1)
+    min_counsel_skill_law: float = Field(default=0.5, ge=0, le=1)
+    filing_fee_cents: int = Field(default=50_000, ge=0)
+    filing_fee_waiver_pct: float = Field(default=0.25, ge=0, le=1)
+    garnishment_rate: float = Field(default=0.20, ge=0, le=1)
+    fine_per_tick_cents: int = Field(default=8_000, ge=0)
+    ex_offender_wage_penalty: float = Field(default=0.08, ge=0, le=1)
+    ex_offender_penalty_floor: float = Field(default=0.6, ge=0, le=1)
+    incarceration_decay_multiplier: float = Field(default=2.0, ge=1)
+    civil_causes: tuple[str, ...] = (
+        "contract_breach",
+        "negligence",
+        "fraud",
+        "defamation",
+        "wrongful_dismissal",
+    )
+
+    @model_validator(mode="after")
+    def validate_crime_maps(self) -> LawSettings:
+        expected = {
+            "theft",
+            "fraud",
+            "insider_trading",
+            "assault",
+            "contract_breach",
+            "embezzlement",
+            "perjury",
+        }
+        if set(self.base_detect) != expected or set(self.victim_awareness) != expected:
+            raise ValueError("law detection maps must define all seven crime types")
+        if any(not 0 <= value <= 1 for value in self.base_detect.values()):
+            raise ValueError("law.base_detect values must be probabilities")
+        if any(not 0 <= value <= 1 for value in self.victim_awareness.values()):
+            raise ValueError("law.victim_awareness values must be probabilities")
+        return self
+
+
 class AblationSettings(FrozenModel):
     reflex_only: bool = False
     obfuscate_domain: bool = False
@@ -871,6 +941,7 @@ class AblationSettings(FrozenModel):
     feed_off: bool = False
     social_influence_off: bool = False
     backfire_off: bool = False
+    no_record_penalty: bool = False
 
 
 class StoreSettings(FrozenModel):
@@ -929,6 +1000,7 @@ class Settings(FrozenModel):
     ventures: VentureSettings = VentureSettings()
     bankruptcy: BankruptcySettings = BankruptcySettings()
     polity: PolitySettings = PolitySettings()
+    law: LawSettings = LawSettings()
     ablations: AblationSettings = AblationSettings()
     store: StoreSettings
     telemetry: TelemetrySettings = TelemetrySettings()

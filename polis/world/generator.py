@@ -111,6 +111,7 @@ _CAPACITY: Final[dict[str, int]] = {
     "town_hall": 300,
     "courthouse": 120,
     "police": 40,
+    "prison": 40,
     "hospital": 150,
     "park": 100_000,
     "bar": 40,
@@ -150,9 +151,12 @@ def _scaled_types(archetype: str, count: int) -> tuple[PlaceType, ...]:
     expanded = tuple(
         place_type for place_type, amount in _MIX[archetype].items() for _ in range(amount)
     )
-    return tuple(
+    selected = tuple(
         expanded[min(len(expanded) - 1, index * len(expanded) // count)] for index in range(count)
     )
+    if archetype == "core" and selected and "prison" not in selected:
+        return (*selected[:-1], "prison")
+    return selected
 
 
 def _terrain(

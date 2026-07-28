@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "JudgeDecision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "findings", "penalty", "reasoning"],
+  "properties": {
+    "verdict": {
+      "enum": ["guilty", "not_guilty", "liable", "not_liable", "dismissed"]
+    },
+    "findings": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "penalty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fine_cents",
+        "sentence_ticks",
+        "damages_cents",
+        "restitution_cents",
+        "disqualification_ticks"
+      ],
+      "properties": {
+        "fine_cents": {"type": "integer", "minimum": 0},
+        "sentence_ticks": {"type": "integer", "minimum": 0},
+        "damages_cents": {"type": "integer", "minimum": 0},
+        "restitution_cents": {"type": "integer", "minimum": 0},
+        "disqualification_ticks": {"type": "integer", "minimum": 0}
+      }
+    },
+    "reasoning": {"type": "string"}
+  }
+}
