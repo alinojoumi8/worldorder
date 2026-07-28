@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from copy import deepcopy
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -56,14 +57,14 @@ class Router:
             "stance_proposition": "policy.tax.progressivity",
             "stance_value": 0.0,
         }
-        result = [
+        return [
             SimpleNamespace(
                 parsed_ok=not self.fail,
-                parsed=None if self.fail else parsed,
+                parsed=None if self.fail else deepcopy(parsed),
                 call_id=UUID(int=25),
             )
+            for _ in requests
         ]
-        return result * len(requests)
 
 
 def cycle(*, fail: bool = False, source_count: int = 1) -> tuple[NewsCycle, EventLog]:

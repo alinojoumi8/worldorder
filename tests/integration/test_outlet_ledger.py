@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -171,3 +172,60 @@ def test_rejected_revenue_post_rolls_back_staged_event(
         )
     assert log.staged() == ()
     assert adapter.advertiser_budgets["fm_ad"] == 50
+
+
+def test_divergent_revenue_ordinal_rolls_back_staged_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = UUID(int=28)
+    ledger = Ledger(run_id)
+    payer = ledger.open_account("cash", "fm_ad", "firm", tick=0)
+    outlet_account = ledger.open_account("cash", "fm_outlet", "firm", tick=0)
+    issuance = ledger.open_account("iss", "bk_cb", "central_bank", tick=0)
+    ledger.issue_base_money(
+        (
+            Leg(payer, 1, 50, "issuance"),
+            Leg(issuance, -1, 50, "issuance"),
+        ),
+        tick=0,
+        cause=cause(run_id),
+    )
+    log = EventLog(run_id, MemoryEventSink())
+    adapter = EconomyNewsLedgerAdapter(
+        ledger,
+        log,
+        Clock(PROFILES["microscope"]),
+        {"fm_ad": 50},
+        {},
+    )
+    post_transaction = ledger.post_transaction
+
+    def diverge(
+        legs: Sequence[Leg],
+        *,
+        tick: int,
+        cause: Event,
+        allow_negative: frozenset[str] = frozenset(),
+    ) -> UUID:
+        post_transaction(
+            legs,
+            tick=tick,
+            cause=cause,
+            allow_negative=allow_negative,
+        )
+        return UUID(int=1)
+
+    monkeypatch.setattr(ledger, "post_transaction", diverge)
+    with pytest.raises(RuntimeError, match="ordinal diverged"):
+        adapter.book_outlet_revenue(
+            outlet=Outlet("ol_one", "One", "fm_outlet", 0.0, 0.8, 0, None),
+            period_start_tick=1,
+            tick=7,
+            impressions=1_000,
+            cpm_cents=40,
+            subscribers=(),
+        )
+    assert log.staged() == ()
+    assert adapter.advertiser_budgets["fm_ad"] == 50
+    assert ledger.balance(payer) == 10
+    assert ledger.balance(outlet_account) == 40

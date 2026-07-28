@@ -239,11 +239,11 @@ class EconomyNewsLedgerAdapter:
                     cause=event,
                 )
             )
+            if actual != predicted:
+                raise RuntimeError("media revenue ledger transaction ordinal diverged")
         except Exception:
             self.log.rollback()
             raise
-        if actual != predicted:
-            raise RuntimeError("media revenue ledger transaction ordinal diverged")
         for advertiser_id, cents in advertiser_rows:
             self.advertiser_budgets[advertiser_id] -= cents
         return RevenueBooking(
