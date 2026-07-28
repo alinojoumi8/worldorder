@@ -20,6 +20,8 @@ class Enactment:
 
 
 class RuntimeOverlay(Protocol):
+    def get(self, parameter: str, tick: int) -> Any: ...
+
     def bp(self, key: str, tick: int) -> int: ...
 
     def cents(self, key: str, tick: int) -> int: ...
@@ -30,6 +32,19 @@ class RuntimeOverlay(Protocol):
 
     def as_of(self, tick: int) -> Mapping[str, Any]: ...
 
+    def enact(
+        self,
+        parameter: str,
+        value: Any,
+        effective_tick: int,
+        policy_id: str,
+        event_seq: int,
+        *,
+        enacted_tick: int = 0,
+    ) -> None: ...
+
+    def history(self, parameter: str) -> tuple[Enactment, ...]: ...
+
 
 class RuntimeConfig:
     name: ClassVar[str] = "runtime_config"
@@ -39,12 +54,23 @@ class RuntimeConfig:
         self._history: dict[str, list[Enactment]] = defaultdict(list)
 
     def _static(self, parameter: str) -> Any:
-        current: Any = self.base
-        for part in parameter.split("."):
-            if not hasattr(current, part):
-                raise RuntimeOverlayError(f"unknown runtime parameter: {parameter}")
-            current = getattr(current, part)
-        return current
+        def resolve(root: Any) -> Any:
+            current = root
+            for part in parameter.split("."):
+                if not hasattr(current, part):
+                    raise AttributeError(part)
+                current = getattr(current, part)
+            return current
+
+        if parameter in self.base.polity.policy.flat():
+            try:
+                return resolve(self.base.polity.policy)
+            except AttributeError as exc:
+                raise RuntimeOverlayError(f"unknown runtime parameter: {parameter}") from exc
+        try:
+            return resolve(self.base)
+        except AttributeError as exc:
+            raise RuntimeOverlayError(f"unknown runtime parameter: {parameter}") from exc
 
     def get(self, parameter: str, tick: int) -> Any:
         candidates = [item for item in self._history[parameter] if item.effective_tick <= tick]

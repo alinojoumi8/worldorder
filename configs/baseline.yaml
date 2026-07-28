@@ -79,7 +79,9 @@ memory:
   retrieval_max_tokens: 600
   reflection_threshold: 4.0
   reflection_min_gap_ticks: 24
-mechanisms: {}
+mechanisms:
+  party_platform_drift: member_mean
+  fiscal_scoring: static
 society:
   feed_algorithm: engagement
   outlets: 4
@@ -112,6 +114,62 @@ beliefs:
   confidence_dilution: 0.5
   sigma_belief: 0.08
   consensus_floor: 0.02
+polity:
+  election_method: plurality
+  offices:
+    president: {seats: 1, term_sim_years: 4, term_limit: 2, salary_cents: 900000}
+    council: {seats: 7, term_sim_years: 2, method: proportional, salary_cents: 450000}
+    judge: {seats: 2, term_sim_years: 6, salary_cents: 700000, min_skill_law: 0.6}
+    police_chief: {seats: 1, salary_cents: 600000}
+    cb_governor: {seats: 1, term_sim_years: 6, salary_cents: 800000}
+  council_session: weekly
+  policy_review: weekly
+  court_session: twice_weekly
+  campaign_length_sim_days: 30
+  candidacy_close_sim_days: 7
+  candidacy_deposit_cents: 250000
+  deposit_refund_share: 0.05
+  candidacy_record_bar: [fraud, embezzlement, perjury]
+  party_founding_fee_cents: 100000
+  max_platform_planks: 8
+  initiative_signatures: 50
+  exposure_halflife_sim_days: 14
+  outlet_efficiency: 0.6
+  abstain: {theta_0: 0.35, theta_conscientiousness: 0.15, theta_civic: 0.10}
+  vote_model: fitted_from_deliberate
+  vote_holdout_share: 0.20
+  vote_min_holdout_lift: 0.5
+  omega_prior: {congruence: 1.0, self_interest: 0.6, social: 0.4, media: 0.3, party_id: 0.8, incumbency: 0.2}
+  llm_election_multiplier: 6.0
+  can_regulate_feed: false
+  policy:
+    tax:
+      income: {brackets: [[0, 0], [3000000, 2000], [9000000, 3500]]}
+      corporate_bp: 2000
+      capital_gains_bp: 1500
+      inheritance_bp: 1000
+      vat_bp: 1000
+    money: {policy_rate_bp: 200}
+    welfare:
+      unemployment_benefit_cents: 120000
+      benefit_duration_ticks: 8640
+      pension_cents: 150000
+      child_benefit_cents: 40000
+    education: {spend_cents_per_student: 0, compulsory_until_age: 18}
+    police: {budget_cents: 5000000}
+    courts: {budget_cents: 3000000, loser_pays: false}
+    prison: {capacity: 40}
+    sentencing: {multiplier_bp: 10000}
+    labour: {minimum_wage_cents: 1200, max_hours_per_sim_week: 48}
+    regulation:
+      finance: {margin_allowed: true, short_selling_allowed: true, insider_trading_enforced: true}
+      labour: {at_will_dismissal: true}
+      media: {disclosure_required: false}
+      housing: {rent_cap_bp: null}
+    migration: {quota_per_sim_year: 60}
+    polity: {campaign_cap_cents: null, felon_franchise: false}
+    government: {debt_ceiling_cents: 500000000, public_notices_budget_cents: 0}
+    society: {feed_algorithm: engagement}
 ablations:
   reflex_only: false
   obfuscate_domain: false

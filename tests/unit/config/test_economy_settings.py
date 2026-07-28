@@ -38,7 +38,7 @@ def test_static_and_layered_runtime_overlays_are_typed_and_temporal() -> None:
     configured = load_settings(Path("configs/smoke.yaml"))
     static = StaticOverlay(configured)
     assert static.bp("banking.reserve_ratio_bp", 1) == 1_000
-    assert static.cents("labour.minimum_wage_cents", 99) == 0
+    assert static.cents("labour.minimum_wage_cents", 99) == 1_200
     assert static.brackets("treasury.tax.income_brackets", 1)[1] == (2_000_000, 1_500)
     with pytest.raises(RuntimeOverlayError):
         static.enact("banking.reserve_ratio_bp", 900, 2, "policy", 1, enacted_tick=1)

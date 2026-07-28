@@ -54,3 +54,20 @@ def test_broadcast_adapter_posts_one_balanced_venue_fee() -> None:
     assert ledger.balance(payee) == 250
     assert ledger.global_balance_cents() == 0
     assert adapter.can_pay_broadcast("ag_payer", "ag_owner", 751) is False
+
+    transfer_id = adapter.next_transfer_id(2)
+    assert adapter.can_pay("ag_payer", 100)
+    assert (
+        adapter.post_transfer(
+            "ag_payer",
+            "ag_owner",
+            100,
+            reason="transfer",
+            tick=2,
+            cause=cause(run_id, 2, 2),
+        )
+        == transfer_id
+    )
+    assert ledger.balance(payer) == 650
+    assert ledger.balance(payee) == 350
+    assert ledger.global_balance_cents() == 0

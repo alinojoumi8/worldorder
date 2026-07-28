@@ -14,7 +14,7 @@ from polis.society.media.news import Outlet, RevenueBooking
 
 @dataclass(slots=True)
 class EconomyLedgerAdapter:
-    """Narrow, balanced bridge from society venue fees to the economy ledger."""
+    """Narrow, balanced bridge from society institutions to the economy ledger."""
 
     ledger: Ledger
 
@@ -48,7 +48,19 @@ class EconomyLedgerAdapter:
     ) -> bool:
         return amount_cents >= 0 and self.compatible_balance(payer_id, payee_id) >= amount_cents
 
+    def can_pay(self, payer_id: str, cents: int) -> bool:
+        return (
+            cents >= 0
+            and sum(
+                max(0, self.ledger.balance(account)) for account in self._liquid_accounts(payer_id)
+            )
+            >= cents
+        )
+
     def next_broadcast_txn_id(self, tick: int) -> str:
+        return str(self.ledger.next_txn_id(tick))
+
+    def next_transfer_id(self, tick: int) -> str:
         return str(self.ledger.next_txn_id(tick))
 
     def transfer_legs(
@@ -56,10 +68,11 @@ class EconomyLedgerAdapter:
         payer_id: str,
         payee_id: str,
         amount_cents: int,
+        reason: str = "rent",
     ) -> tuple[Leg, ...]:
         destinations = self._liquid_accounts(payee_id)
         if not destinations:
-            raise RuntimeError(f"venue owner {payee_id} has no open liquid account")
+            raise RuntimeError(f"payee {payee_id} has no open liquid account")
         remaining = amount_cents
         legs: list[Leg] = []
         for source in self._liquid_accounts(payer_id):
@@ -78,12 +91,10 @@ class EconomyLedgerAdapter:
             amount = min(remaining, max(0, self.ledger.balance(source)))
             if amount == 0:
                 continue
-            legs.extend(self.ledger.transfer(source, compatible, amount, "rent"))
+            legs.extend(self.ledger.transfer(source, compatible, amount, reason))
             remaining -= amount
         if remaining:
-            raise RuntimeError(
-                f"broadcaster {payer_id} lacks a compatible liquid account for venue fee"
-            )
+            raise RuntimeError(f"payer {payer_id} lacks a compatible liquid account")
         totals: dict[tuple[str, int, str], int] = defaultdict(int)
         for leg in legs:
             totals[(leg.account_id, leg.direction, leg.reason)] += leg.amount_cents
@@ -110,6 +121,24 @@ class EconomyLedgerAdapter:
         if str(transaction_id) != txn_id:
             raise RuntimeError("broadcast ledger transaction ordinal diverged")
         return str(transaction_id)
+
+    def post_transfer(
+        self,
+        payer_id: str,
+        payee_id: str,
+        cents: int,
+        *,
+        reason: str,
+        tick: int,
+        cause: Event,
+    ) -> str:
+        return str(
+            self.ledger.post_transaction(
+                self.transfer_legs(payer_id, payee_id, cents, reason),
+                tick=tick,
+                cause=cause,
+            )
+        )
 
 
 @dataclass(slots=True)

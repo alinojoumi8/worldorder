@@ -54,6 +54,7 @@ KIND_RANGES: Final = (
     KindRange(11000, 11020, "social_media", "polis.society", Persistence.PERSISTED),
     KindRange(11021, 11021, "feed_sample", "polis.society", Persistence.SAMPLED),
     KindRange(11022, 11999, "social_media", "polis.society", Persistence.PERSISTED),
+    KindRange(12000, 12999, "polity", "polis.society", Persistence.PERSISTED),
     KindRange(14000, 14999, "education", "polis.agents", Persistence.PERSISTED),
     KindRange(90000, 90999, "ephemeral", "*", Persistence.EPHEMERAL),
     KindRange(99000, 99999, "research", "polis.research", Persistence.PERSISTED),
@@ -2374,6 +2375,258 @@ ESTATE_DEFERRED_TO_CASE = register_kind(
     owner="polis.economy.ventures",
     persistence=Persistence.PERSISTED,
     schema=_schema("case_id", "deceased_agent_id", "estate_cents", "heirs"),
+)
+PARTY_FOUNDED = register_kind(
+    12001,
+    "PARTY_FOUNDED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "party_id",
+        "founder_id",
+        "name",
+        "platform",
+        "founding_member_ids",
+        "fee_cents",
+        "txn_id",
+    ),
+)
+PARTY_JOINED = register_kind(
+    12002,
+    "PARTY_JOINED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "party_id", "alignment_score", "prior_party_id"),
+)
+PARTY_LEFT = register_kind(
+    12003,
+    "PARTY_LEFT",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "party_id", "reason"),
+)
+PARTY_PLATFORM_CHANGED = register_kind(
+    12004,
+    "PARTY_PLATFORM_CHANGED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("party_id", "changes", "driver"),
+)
+PARTY_DISSOLVED = register_kind(
+    12005,
+    "PARTY_DISSOLVED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("party_id", "reason", "final_membership", "merged_into"),
+)
+ELECTION_CALLED = register_kind(
+    12010,
+    "ELECTION_CALLED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "election_id",
+        "office",
+        "seats",
+        "method",
+        "called_tick",
+        "voting_tick",
+        "campaign_ends_tick",
+        "electorate_size",
+    ),
+)
+CANDIDACY_ANNOUNCED = register_kind(
+    12011,
+    "CANDIDACY_ANNOUNCED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "candidacy_id",
+        "agent_id",
+        "election_id",
+        "party_id",
+        "platform",
+        "deposit_cents",
+        "txn_id",
+    ),
+)
+CAMPAIGN_SPEND = register_kind(
+    12012,
+    "CAMPAIGN_SPEND",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "candidacy_id",
+        "agent_id",
+        "amount_cents",
+        "channel",
+        "target_id",
+        "reached_agent_ids",
+        "reach",
+        "txn_id",
+    ),
+)
+VOTE_CAST = register_kind(
+    12020,
+    "VOTE_CAST",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("election_id", "voter_id", "origin", "utility"),
+)
+ABSTAINED = register_kind(
+    12021,
+    "ABSTAINED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("election_id", "agent_id", "reason", "max_utility"),
+)
+ELECTION_RESOLVED = register_kind(
+    12022,
+    "ELECTION_RESOLVED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "election_id",
+        "method",
+        "tallies",
+        "winner_ids",
+        "turnout",
+        "margin",
+        "rounds",
+        "n_deliberate",
+        "n_reflex",
+        "fitted_omega",
+        "holdout_accuracy",
+    ),
+)
+OFFICE_ASSUMED = register_kind(
+    12023,
+    "OFFICE_ASSUMED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "office",
+        "agent_id",
+        "via",
+        "term_start_tick",
+        "term_end_tick",
+        "salary_cents",
+    ),
+)
+OFFICE_VACATED = register_kind(
+    12024,
+    "OFFICE_VACATED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("office", "agent_id", "reason", "successor_id"),
+)
+POLICY_PROPOSED = register_kind(
+    12025,
+    "POLICY_PROPOSED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "proposal_id",
+        "proposer_id",
+        "parameter",
+        "old_value",
+        "proposed_value",
+        "rationale",
+        "cosigners",
+    ),
+)
+POLICY_REJECTED = register_kind(
+    12026,
+    "POLICY_REJECTED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("proposal_id", "yeas", "nays", "abstentions"),
+)
+POLICY_VOTED = register_kind(
+    12027,
+    "POLICY_VOTED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "proposal_id",
+        "chamber",
+        "votes",
+        "yeas",
+        "nays",
+        "abstentions",
+        "passed",
+        "margin",
+    ),
+)
+POLICY_VETOED = register_kind(
+    12028,
+    "POLICY_VETOED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("proposal_id", "president_id", "overridden", "override_margin"),
+)
+POLICY_ENACTED = register_kind(
+    12030,
+    "POLICY_ENACTED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "policy_id",
+        "parameter",
+        "old_value",
+        "new_value",
+        "effective_tick",
+        "enacted_by",
+        "vote_margin",
+        "proposal_seq",
+    ),
+)
+POLICY_REPEALED = register_kind(
+    12032,
+    "POLICY_REPEALED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("policy_id", "parameter", "restored_value", "repealed_policy_id"),
+)
+POLICY_BLOCKED = register_kind(
+    12033,
+    "POLICY_BLOCKED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("proposal_id", "predicate", "detail"),
+)
+BUDGET_SET = register_kind(
+    12034,
+    "BUDGET_SET",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "period_start_tick",
+        "revenue_projection_cents",
+        "outlay_projection_cents",
+        "allocations",
+        "debt_cents",
+    ),
+)
+APPOINTMENT_MADE = register_kind(
+    12040,
+    "APPOINTMENT_MADE",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "office",
+        "appointee_id",
+        "appointed_by",
+        "confirmed",
+        "confirm_margin",
+    ),
+)
+OFFICER_REMOVED = register_kind(
+    12041,
+    "OFFICER_REMOVED",
+    owner="polis.society.polity",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("office", "agent_id", "removed_by", "margin", "reason"),
 )
 EXIT_COMPLETED = register_kind(
     9040,
