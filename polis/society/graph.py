@@ -102,6 +102,8 @@ class GraphRepository(Protocol):
 
     def put(self, tie: Tie) -> None: ...
 
+    def replace(self, ties: Sequence[Tie]) -> None: ...
+
 
 class MemoryGraphRepository:
     def __init__(self, ties: Sequence[Tie] = ()) -> None:
@@ -125,6 +127,9 @@ class MemoryGraphRepository:
 
     def put(self, tie: Tie) -> None:
         self._ties[(tie.a_id, tie.b_id, tie.type)] = tie
+
+    def replace(self, ties: Sequence[Tie]) -> None:
+        self._ties = {(tie.a_id, tie.b_id, tie.type): tie for tie in ties}
 
 
 class ContactLedger:

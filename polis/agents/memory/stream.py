@@ -280,8 +280,7 @@ class MemoryStore:
     def archive_agent(self, agent_id: str, tick: int) -> int:
         del tick
         rows = self.for_agent(agent_id)
-        for row in rows:
-            row.archived = True
+        self.archive(agent_id)
         return len(rows)
 
     def _evict(self, agent_id: str, tick: int) -> None:

@@ -15,7 +15,7 @@ async def test_child_costs_use_real_balanced_ledger_transactions() -> None:
     events = tuple(event for event in result.events if event.kind == CHILD_COST_CHARGED)
     assert events
     assert any(event.payload["txn_id"] is not None for event in events)
-    assert check_money(result.economy.ledger).invariant_id == "INV-MONEY"
+    assert check_money(result.economy.ledger, result.economy).invariant_id == "INV-MONEY"
 
 
 @pytest.mark.asyncio
@@ -54,4 +54,4 @@ async def test_state_care_and_child_benefit_are_real_government_spending() -> No
     assert charged.payload["txn_id"] is not None
     assert household.arrears_cents == 0
     assert result.economy.ledger.balance(treasury) < before
-    assert check_money(result.economy.ledger).invariant_id == "INV-MONEY"
+    assert check_money(result.economy.ledger, result.economy).invariant_id == "INV-MONEY"

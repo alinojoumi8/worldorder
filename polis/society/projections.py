@@ -24,6 +24,7 @@ from polis.events.kinds import (
     FOLLOW_CREATED,
     FOLLOW_ENDED,
     JUDGMENT_RENDERED,
+    MIGRATION_IN,
     OUTLET_CLOSED,
     OUTLET_FOUNDED,
     OUTLET_REVENUE_BOOKED,
@@ -435,7 +436,9 @@ class ArticlesProjection:
 class BeliefsProjection:
     name = "beliefs_projection"
     tables: tuple[str, ...] = ("beliefs",)
-    handles: frozenset[int] = frozenset({BELIEF_UPDATED, BELIEF_DRIFT_APPLIED, BELIEF_PRIORS_SET})
+    handles: frozenset[int] = frozenset(
+        {BELIEF_UPDATED, BELIEF_DRIFT_APPLIED, BELIEF_PRIORS_SET, MIGRATION_IN}
+    )
 
     async def _upsert(
         self,
@@ -486,17 +489,29 @@ class BeliefsProjection:
                 source=str(payload["channel"]),
                 source_ref=(None if payload["source_ref"] is None else str(payload["source_ref"])),
             )
-        elif event.kind == BELIEF_PRIORS_SET:
-            for row in payload["propositions"]:
+        elif event.kind in {BELIEF_PRIORS_SET, MIGRATION_IN}:
+            rows = (
+                payload["propositions"]
+                if event.kind == BELIEF_PRIORS_SET
+                else payload["belief_priors"]
+            )
+            for row in rows:
+                proposition = str(row["proposition"])
+                if proposition.startswith("fact.") or proposition_spec(proposition) is None:
+                    raise ValueError(f"invalid inherited proposition: {proposition}")
                 await self._upsert(
                     ctx,
                     event,
                     agent_id=str(payload["agent_id"]),
-                    proposition=str(row["proposition"]),
+                    proposition=proposition,
                     value=float(row["value"]),
                     confidence=float(row["confidence"]),
-                    source="inherited",
-                    source_ref=str(payload["source"]),
+                    source=("inherited" if event.kind == BELIEF_PRIORS_SET else "migration"),
+                    source_ref=str(
+                        payload["source"]
+                        if event.kind == BELIEF_PRIORS_SET
+                        else payload["cohort_id"]
+                    ),
                 )
         else:
             for row in payload["updates"]:

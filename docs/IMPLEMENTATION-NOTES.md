@@ -312,15 +312,17 @@ no LLM spend.
 
 The reproducible command
 `python scripts/validate_c20_calibration.py --agents 300 --years 3 --progress-ticks 100`
-completed all 1,080 chronicle ticks in 2,725.988 seconds with no halt. It recorded 300
-births, 180 arrivals, 73 departures, and 361 living residents at the end. Yearly
-birth/arrival/departure counts were `300/55/17`, `0/60/27`, and `0/60/29`.
+completed all 1,080 chronicle ticks in 2,687.827 seconds with no halt. The corrected
+lifecycle accounting separates the 300 tick-zero genesis records from births: it recorded
+0 lifecycle births, 180 arrivals, 72 departures, and 362 living residents at the end.
+Yearly lifecycle-birth/arrival/departure counts were `0/55/17`, `0/60/27`, and
+`0/60/28`.
 
 The reflex-only calibration's mean deliberate share was exactly 0.0 in every year, so the
-births-versus-deliberate-share correlation is undefined rather than zero. The first-year
-birth pulse followed by two zero-birth years is an F10 warning and cannot be presented as
-evidence that budget selection is absent. A non-reflex multi-budget sweep is still required
-before demographic findings use this mechanism. The calibration also exposed and fixed two
+births-versus-deliberate-share correlation is undefined rather than zero. The absence of
+lifecycle births across all three years is an F10 warning and cannot be presented as evidence
+that budget selection is absent. A non-reflex multi-budget sweep is still required before
+demographic findings use this mechanism. The calibration also exposed and fixed two
 long-horizon lifecycle gaps: death now settles funded accrued wages before estate closure
 and records unfunded terminal claims as `PAYROLL_SHORTFALL`; ordinary payroll
 deterministically opens a deposit at an active bank for a living worker whose prior bank

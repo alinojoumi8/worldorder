@@ -66,4 +66,4 @@ async def test_birth_path_supports_three_living_generations() -> None:
     assert result.population[child_id].generation == 1
     assert result.population[grandchild_id].generation == 2
     assert {agent.generation for agent in result.population.alive()} >= {0, 1, 2}
-    assert check_money(result.economy.ledger).invariant_id == "INV-MONEY"
+    assert check_money(result.economy.ledger, result.economy).invariant_id == "INV-MONEY"

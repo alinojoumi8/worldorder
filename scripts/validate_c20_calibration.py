@@ -26,12 +26,15 @@ class DemographyCountingSink:
         self.progress_ticks = progress_ticks
         self.counts: Counter[int] = Counter()
         self.yearly: defaultdict[int, Counter[int]] = defaultdict(Counter)
+        self.genesis_births = 0
         self._last_progress = -1
 
     async def append(self, events: Sequence[Event]) -> None:
         for event in events:
             self.counts[event.kind] += 1
-            if event.kind in {AGENT_BORN, MIGRATION_IN, MIGRATION_OUT}:
+            if event.kind == AGENT_BORN and event.tick == 0:
+                self.genesis_births += 1
+            elif event.kind in {AGENT_BORN, MIGRATION_IN, MIGRATION_OUT}:
                 self.yearly[event.tick // self.ticks_per_year][event.kind] += 1
             if (
                 event.kind == TICK_COMPLETED
@@ -117,7 +120,9 @@ async def calibrate(args: argparse.Namespace) -> dict[str, object]:
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         "initial_population": args.agents,
         "final_alive": len(result.population.alive()),
-        "births": sink.counts[AGENT_BORN],
+        "genesis_births": sink.genesis_births,
+        "births": sink.counts[AGENT_BORN] - sink.genesis_births,
+        "lifecycle_births": sink.counts[AGENT_BORN] - sink.genesis_births,
         "migration_in": sink.counts[MIGRATION_IN],
         "migration_out": sink.counts[MIGRATION_OUT],
         "yearly": yearly,

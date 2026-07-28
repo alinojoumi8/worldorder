@@ -11,6 +11,7 @@ from polis.config.mechanisms import mechanism_manifest
 from polis.config.settings import load_settings
 from polis.economy.firms import production_output_micro
 from polis.economy.labour import LabourMarket, labour_force, load_occupations
+from polis.economy.ledger import LedgerError
 from polis.events.kinds import (
     HIRED,
     OFFER_ACCEPTED,
@@ -162,6 +163,31 @@ def test_payroll_rebanks_a_living_worker_after_account_resolution() -> None:
 
     assert account == "dep:ag_worker@bk_02"
     assert opened == [("dep", "ag_worker", "agent", "bk_02", 17)]
+
+
+def test_payroll_rebanking_requires_an_active_commercial_bank() -> None:
+    market = object.__new__(LabourMarket)
+    market.economy = SimpleNamespace(
+        ledger=SimpleNamespace(
+            accounts_of=lambda _owner_id: (),
+            is_open=lambda _account_id: False,
+        ),
+        banks={
+            "bk_cb": SimpleNamespace(
+                bank_id="bk_cb",
+                is_central=True,
+                status="active",
+            ),
+            "bk_failed": SimpleNamespace(
+                bank_id="bk_failed",
+                is_central=False,
+                status="resolved",
+            ),
+        },
+    )
+
+    with pytest.raises(LedgerError, match="active commercial bank"):
+        market._deposit_account("ag_worker", 17)
 
 
 @pytest.mark.asyncio

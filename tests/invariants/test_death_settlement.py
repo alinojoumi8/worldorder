@@ -49,7 +49,7 @@ async def test_plain_death_closes_to_zero_and_preserves_money() -> None:
         event.kind for event in events
     }
     assert check_ledger(result.economy.ledger).invariant_id == "INV-LEDGER"
-    assert check_money(result.economy.ledger).invariant_id == "INV-MONEY"
+    assert check_money(result.economy.ledger, result.economy).invariant_id == "INV-MONEY"
     assert result.economy.ledger.base_money_imbalance_cents() == money_before
 
 
@@ -119,6 +119,29 @@ async def test_terminal_wage_reopens_a_missing_deposit_account() -> None:
     _estate, events = settler.settle(employment.agent_id, "mortality", 6)
 
     assert any(event.kind == WAGE_PAID for event in events)
+    assert employment.accrued_wage_cents == 0
+
+
+@pytest.mark.asyncio
+async def test_terminal_wage_missing_firm_is_an_audited_shortfall() -> None:
+    result = await demography_result(ticks=5)
+    assert result.demography is not None and result.economy is not None
+    settler = result.demography.institution.estate
+    employment = next(row for row in result.economy.employments.values() if row.ended_tick is None)
+    employment.accrued_wage_cents = 1_000
+    result.economy.firms.pop(employment.firm_id)
+
+    events = settler.estate._settle_accrued_wage(
+        employment,
+        6,
+        lambda draft: settler.log.stage(
+            draft,
+            tick=6,
+            sim_time=settler.clock.sim_time_at(6),
+        ),
+    )
+
+    assert [event.kind for event in events] == [PAYROLL_SHORTFALL]
     assert employment.accrued_wage_cents == 0
 
 
@@ -375,5 +398,5 @@ async def test_orders_loan_and_escheat_close_together_without_leak() -> None:
     assert view.order_invariant_failures() == {}
     assert view.share_invariant_failures() == {}
     assert check_ledger(result.economy.ledger).invariant_id == "INV-LEDGER"
-    assert check_money(result.economy.ledger).invariant_id == "INV-MONEY"
+    assert check_money(result.economy.ledger, result.economy).invariant_id == "INV-MONEY"
     assert result.economy.ledger.base_money_imbalance_cents() == money_before

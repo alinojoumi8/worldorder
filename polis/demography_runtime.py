@@ -31,7 +31,7 @@ from polis.events.types import Event, NewEvent
 from polis.kernel.clock import Clock
 from polis.kernel.rng import RngRegistry
 from polis.society.beliefs import BeliefEngine, MemoryBeliefRepository
-from polis.society.graph import MemoryGraphRepository, SocialGraph
+from polis.society.graph import MemoryGraphRepository, SocialGraph, Tie
 from polis.world.api import World
 
 
@@ -118,7 +118,7 @@ class DemographyGraphPort:
         return {"ties": copy.deepcopy(self.graph.repo.all())}
 
     def load(self, state: Mapping[str, object]) -> None:
-        self.graph.repo = MemoryGraphRepository(copy.deepcopy(cast(Sequence[Any], state["ties"])))
+        self.graph.repo.replace(copy.deepcopy(cast(Sequence[Tie], state["ties"])))
 
 
 @dataclass(slots=True)
@@ -200,20 +200,6 @@ def build_demography_runtime(
         credit=economy_policy.banking.credit_context,
         emit_at=emit_at,
     )
-    estate = EstateSettler(
-        log=log,
-        clock=clock,
-        rng=rng,
-        world=world,
-        agents=population,
-        households=households,
-        estate=estate_port,
-        ledger=ledger,
-        housing=housing,
-        graph=graph_port,
-        memories=memory,
-        cfg=settings.demography,
-    )
     fertility = Fertility(
         log=log,
         clock=clock,
@@ -228,6 +214,21 @@ def build_demography_runtime(
         demographic_acceleration=settings.clock.demographic_acceleration,
         heritability_beliefs=settings.beliefs.heritability_beliefs,
         hazard_mode=settings.mechanisms.get("fertility_hazard", "income_conditional"),
+    )
+    estate = EstateSettler(
+        log=log,
+        clock=clock,
+        rng=rng,
+        world=world,
+        agents=population,
+        households=households,
+        estate=estate_port,
+        ledger=ledger,
+        housing=housing,
+        graph=graph_port,
+        memories=memory,
+        fertility=fertility,
+        cfg=settings.demography,
     )
 
     def child_supplier(_tick: int) -> str | None:

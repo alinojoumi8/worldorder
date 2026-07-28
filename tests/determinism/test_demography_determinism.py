@@ -5,7 +5,54 @@ from pathlib import Path
 import pytest
 
 from polis.config.settings import load_settings
+from polis.events.kinds import (
+    BELIEF_PRIORS_INHERITED,
+    BEREAVEMENT_APPLIED,
+    CHILD_COST_CHARGED,
+    CONCEPTION,
+    COURTSHIP_ENDED,
+    COURTSHIP_STARTED,
+    ESTATE_CLOSED,
+    ESTATE_DEBTS_SETTLED,
+    ESTATE_DISTRIBUTED,
+    ESTATE_OPENED,
+    HOUSEHOLD_DISSOLVED,
+    HOUSEHOLD_FORMED,
+    HOUSEHOLD_JOINED,
+    HOUSEHOLD_LEFT,
+    MIGRATION_IN,
+    MIGRATION_OUT,
+    PREGNANCY_ENDED,
+    STATE_CARE_STARTED,
+    UNION_DISSOLVED,
+    UNION_FORMED,
+)
 from polis.living_city import run_living_city
+
+DEMOGRAPHY_EVENT_KINDS = frozenset(
+    {
+        COURTSHIP_STARTED,
+        COURTSHIP_ENDED,
+        UNION_FORMED,
+        UNION_DISSOLVED,
+        HOUSEHOLD_FORMED,
+        HOUSEHOLD_JOINED,
+        HOUSEHOLD_LEFT,
+        HOUSEHOLD_DISSOLVED,
+        CONCEPTION,
+        PREGNANCY_ENDED,
+        CHILD_COST_CHARGED,
+        STATE_CARE_STARTED,
+        BELIEF_PRIORS_INHERITED,
+        MIGRATION_IN,
+        MIGRATION_OUT,
+        ESTATE_OPENED,
+        ESTATE_DEBTS_SETTLED,
+        ESTATE_DISTRIBUTED,
+        ESTATE_CLOSED,
+        BEREAVEMENT_APPLIED,
+    }
+)
 
 
 @pytest.mark.determinism
@@ -29,7 +76,7 @@ async def test_demography_event_sequence_is_seed_replayable() -> None:
                 event.payload,
             )
             for event in result.events
-            if 15_000 <= event.kind <= 15_999 or 2_005 <= event.kind <= 2_009 or event.kind == 2_051
+            if event.kind in DEMOGRAPHY_EVENT_KINDS
         )
 
     first_events = demography_events(first)

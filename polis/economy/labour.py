@@ -14,7 +14,7 @@ from polis.agents.state import AgentPopulation
 from polis.agents.types import SKILLS, AgentState, Skill
 from polis.config.mechanisms import mechanism
 from polis.config.settings import Settings
-from polis.economy.ledger import Leg, parse_account_id
+from polis.economy.ledger import LedgerError, Leg, parse_account_id
 from polis.economy.money import bp, mint
 from polis.economy.state import (
     ApplicationState,
@@ -871,6 +871,7 @@ class LabourMarket:
             paid_tax = 0
             employer_tax_total = 0
             unpaid: list[str] = []
+            dead_write_off_cents = 0
             for employment in sorted(employments, key=lambda row: row.employment_id):
                 gross = employment.accrued_wage_cents
                 agent = self.population[employment.agent_id]
@@ -892,6 +893,7 @@ class LabourMarket:
                         )
                     )
                     employment.accrued_wage_cents = 0
+                    dead_write_off_cents += gross
                     if employment.ended_tick is None:
                         employment.ended_tick = tick
                         firm.headcount = max(0, firm.headcount - 1)
@@ -972,7 +974,7 @@ class LabourMarket:
                             PAYROLL_SHORTFALL,
                             {
                                 "firm_id": firm.firm_id,
-                                "required_cents": required,
+                                "required_cents": required - dead_write_off_cents,
                                 "available_cents": available_before,
                                 "unpaid_employment_ids": unpaid,
                                 "accrued_claim_cents": sum(
@@ -1149,11 +1151,14 @@ class LabourMarket:
             code, _owner, _bank, _ref = parse_account_id(account_id)
             if code == "dep" and self.economy.ledger.is_open(account_id):
                 return account_id
-        bank_id = min(
+        bank_ids = tuple(
             bank.bank_id
             for bank in self.economy.banks.values()
             if not bank.is_central and bank.status == "active"
         )
+        if not bank_ids:
+            raise LedgerError("payroll cannot open a deposit without an active commercial bank")
+        bank_id = min(bank_ids)
         return self.economy.ledger.open_account(
             "dep",
             owner_id,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -109,6 +109,12 @@ class EconomyLedgerPort:
             bank_id=bank_id,
             tick=tick,
         )
+
+    def dump(self) -> Mapping[str, object]:
+        return copy.deepcopy(self.economy.ledger.dump())
+
+    def load(self, state: Mapping[str, object]) -> None:
+        self.economy.ledger.load(copy.deepcopy(state))
 
 
 @dataclass(slots=True)
@@ -239,6 +245,7 @@ class EconomyEstatePort:
                 tick,
                 emit,
                 settle_accrued=getattr(ctx, "cause", None) != "emigrated",
+                reason=("emigration" if getattr(ctx, "cause", None) == "emigrated" else "death"),
             )
         )
 
@@ -454,6 +461,7 @@ class EconomyEstatePort:
         emit: Emit,
         *,
         settle_accrued: bool,
+        reason: Literal["death", "emigration"],
     ) -> tuple[Event, ...]:
         events: list[Event] = []
         for employment in sorted(
@@ -462,9 +470,32 @@ class EconomyEstatePort:
         ):
             if employment.agent_id != agent_id or employment.ended_tick is not None:
                 continue
-            wage_events = (
-                self._settle_accrued_wage(employment, tick, emit) if settle_accrued else ()
-            )
+            if settle_accrued:
+                wage_events = self._settle_accrued_wage(employment, tick, emit)
+            elif employment.accrued_wage_cents > 0:
+                gross = employment.accrued_wage_cents
+                firm = self.economy.firms.get(employment.firm_id)
+                wage_events = (
+                    emit(
+                        NewEvent(
+                            PAYROLL_SHORTFALL,
+                            {
+                                "firm_id": employment.firm_id,
+                                "required_cents": gross,
+                                "available_cents": (
+                                    0 if firm is None else self.economy.ledger.liquid(firm.firm_id)
+                                ),
+                                "unpaid_employment_ids": [employment.employment_id],
+                                "accrued_claim_cents": gross,
+                            },
+                            actor_id=employment.firm_id,
+                            subject_ids=(employment.agent_id,),
+                        )
+                    ),
+                )
+                employment.accrued_wage_cents = 0
+            else:
+                wage_events = ()
             events.extend(wage_events)
             employment.ended_tick = tick
             firm = self.economy.firms.get(employment.firm_id)
@@ -478,7 +509,7 @@ class EconomyEstatePort:
                             "employment_id": employment.employment_id,
                             "agent_id": agent_id,
                             "firm_id": employment.firm_id,
-                            "reason": "death",
+                            "reason": reason,
                             "severance_cents": 0,
                             "notice_ticks": 0,
                         },
@@ -498,7 +529,25 @@ class EconomyEstatePort:
         gross = employment.accrued_wage_cents
         if gross <= 0:
             return ()
-        firm = self.economy.firms[employment.firm_id]
+        firm = self.economy.firms.get(employment.firm_id)
+        if firm is None:
+            employment.accrued_wage_cents = 0
+            return (
+                emit(
+                    NewEvent(
+                        PAYROLL_SHORTFALL,
+                        {
+                            "firm_id": employment.firm_id,
+                            "required_cents": gross,
+                            "available_cents": 0,
+                            "unpaid_employment_ids": [employment.employment_id],
+                            "accrued_claim_cents": gross,
+                        },
+                        actor_id=employment.firm_id,
+                        subject_ids=(employment.agent_id,),
+                    )
+                ),
+            )
         income_tax = progressive_income_tax_cents(
             gross,
             self.settings.treasury.tax.income_brackets,

@@ -11,7 +11,7 @@ async def test_graph_snapshot_restores_ties_without_replacing_collaborators() ->
     assert result.demography is not None
     port = result.demography.institution.estate.graph
     graph = port.graph
-    collaborators = (graph.log, graph.clock, graph.rng, graph.cfg)
+    collaborators = (graph.log, graph.clock, graph.rng, graph.repo, graph.cfg)
     snapshot = port.dump()
     adults = sorted(
         (agent for agent in result.population.alive() if agent.age_years >= 18),
@@ -23,5 +23,5 @@ async def test_graph_snapshot_restores_ties_without_replacing_collaborators() ->
 
     port.load(snapshot)
 
-    assert (graph.log, graph.clock, graph.rng, graph.cfg) == collaborators
+    assert (graph.log, graph.clock, graph.rng, graph.repo, graph.cfg) == collaborators
     assert port.strength(a.agent_id, b.agent_id) == 0

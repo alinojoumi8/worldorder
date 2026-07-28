@@ -56,6 +56,7 @@ def downgrade() -> None:
         """
         DROP INDEX IF EXISTS agents_parents;
         DROP INDEX IF EXISTS agents_household;
+        ALTER TABLE agents ALTER COLUMN home_place_id DROP NOT NULL;
         ALTER TABLE agents
             DROP COLUMN IF EXISTS death_cause,
             DROP COLUMN IF EXISTS died_at_tick,

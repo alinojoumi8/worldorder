@@ -29,7 +29,7 @@ async def test_intestacy_is_exact_for_ten_thousand_odd_and_even_estates() -> Non
 
     stream = random.Random(20260728)
     for _ in range(10_000):
-        cents = stream.randrange(0, 10_000_000)
+        cents = stream.randrange(1, 10_000_000)
         shares = dict(estate.intestacy_shares(decedent.agent_id, cents))
         assert sum(shares.values()) == cents
         assert set(shares) == {
@@ -42,6 +42,7 @@ async def test_intestacy_is_exact_for_ten_thousand_odd_and_even_estates() -> Non
             shares[child_a.agent_id] + shares[child_b.agent_id] == cents - shares[partner.agent_id]
         )
         assert abs(shares[child_a.agent_id] - shares[child_b.agent_id]) <= 1
+    assert estate.intestacy_shares(decedent.agent_id, 0) == ()
 
 
 @pytest.mark.asyncio

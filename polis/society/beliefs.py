@@ -340,6 +340,15 @@ class BeliefEngine:
             raise ValueError(f"unknown proposition: {proposition}")
         return spec.default_value if not rows else sum(row.value for row in rows) / len(rows)
 
+    def population_mean_confidence(self, proposition: str) -> float:
+        rows = self.repo.for_proposition(proposition)
+        spec = _spec_for(proposition)
+        if spec is None:
+            raise ValueError(f"unknown proposition: {proposition}")
+        return (
+            spec.default_confidence if not rows else sum(row.confidence for row in rows) / len(rows)
+        )
+
     def trust_in(self, agent_id: str, source_id: str, channel: Channel) -> float:
         if channel in {"experience", "inherited", "reflection"}:
             return 1.0
@@ -707,6 +716,7 @@ class BeliefEngine:
         agent_id: str,
         offsets: Mapping[str, float],
     ) -> tuple[tuple[str, float, float], ...]:
+        rng = self.rng.numpy("beliefs.noise", agent_id)
         rows: list[tuple[str, float, float]] = []
         for proposition in (*POLICY_PROPOSITIONS, "trust.generalised"):
             spec = _spec_for(proposition)
@@ -716,10 +726,13 @@ class BeliefEngine:
                 spec.lo,
                 min(
                     spec.hi,
-                    self.population_mean(proposition) + float(offsets.get(proposition, 0.0)),
+                    self.population_mean(proposition)
+                    + float(offsets.get(proposition, 0.0))
+                    + float(rng.normal(0.0, self.cfg.sigma_belief)),
                 ),
             )
-            rows.append((proposition, value, self.cfg.confidence_dilution))
+            confidence = self.population_mean_confidence(proposition) * self.cfg.confidence_dilution
+            rows.append((proposition, value, confidence))
         return tuple(rows)
 
     def apply_priors(

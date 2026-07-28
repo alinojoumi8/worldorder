@@ -36,7 +36,7 @@ from polis.agents.ports import (
     SocialGraphPort,
 )
 from polis.agents.state import AgentPopulation
-from polis.agents.types import SKILLS, AgentState, Needs
+from polis.agents.types import SKILLS, AgentState, Needs, Traits
 from polis.config.mechanisms import mechanism
 from polis.config.runtime import RuntimeOverlay
 from polis.config.settings import DemographySettings
@@ -133,14 +133,18 @@ def _numeric_agent_id(namespace: str, *parts: object) -> str:
 
 
 def _restore_object(target: object, snapshot: object) -> None:
+    if not isinstance(snapshot, Mapping):
+        raise TypeError("rollback snapshot must be a mapping")
     loader = getattr(target, "load", None)
-    if callable(loader) and isinstance(snapshot, Mapping):
+    if callable(loader):
         loader(snapshot)
         return
     target_dict = getattr(target, "__dict__", None)
-    if isinstance(target_dict, dict) and isinstance(snapshot, Mapping):
+    if isinstance(target_dict, dict):
         target_dict.clear()
         target_dict.update(copy.deepcopy(snapshot))
+        return
+    raise TypeError(f"rollback target cannot be restored: {type(target).__name__}")
 
 
 def _snapshot_object(target: object) -> object:
@@ -476,14 +480,11 @@ class HouseholdRegistry:
         return len(row.member_ids) < self.world.place(row.home_place_id).capacity
 
     def state_household(self, tick: int) -> Household:
-        shelters = self.world.places_of_type("shelter")
-        if not shelters:
-            raise RuntimeError("state household requires a shelter place")
-        place = shelters[0]
-        household_id = det_id("hh", "demography.state", place.place_id)
+        household_id, place_id = self.state_household_identity()
         existing = self.households.get(household_id)
         if existing is not None and existing.dissolved_at_tick is None:
             return existing
+        place = self.world.place(place_id)
         row = Household(
             household_id,
             tick,
@@ -496,6 +497,14 @@ class HouseholdRegistry:
         )
         self.households[household_id] = row
         return row
+
+    def state_household_identity(self) -> tuple[str, str]:
+        shelters = self.world.places_of_type("shelter")
+        if not shelters:
+            raise RuntimeError("state household requires a shelter place")
+        place = shelters[0]
+        household_id = det_id("hh", "demography.state", place.place_id)
+        return household_id, place.place_id
 
     def update_arrears(self, household_id: str, cents: int) -> Household:
         row = self.households[household_id]
@@ -520,6 +529,7 @@ class HouseholdRegistry:
         *,
         age_step_years: float,
     ) -> Sequence[Event]:
+        del age_step_years
         events: list[Event] = []
         for agent in stable(self.agents.alive(), key=lambda row: row.agent_id):
             household = self.of(agent.agent_id)
@@ -527,7 +537,6 @@ class HouseholdRegistry:
                 household is None
                 or len(household.member_ids) <= 1
                 or agent.age_years < self.cfg.leave_home_age
-                or agent.age_years - age_step_years >= self.cfg.leave_home_age
                 or self.income_cents_for(agent.agent_id, tick)
                 < self.cfg.independence_threshold_cents
             ):
@@ -783,6 +792,45 @@ class CourtshipRegistry:
         household = self.households.of(initiator_id)
         if household is None or household.household_id != self.agents[target_id].household_id:
             return ()
+        savepoint = self.log.savepoint()
+        household_snapshot = self.households.dump()
+        agent_snapshots = {
+            agent_id: copy.deepcopy(self.agents[agent_id]) for agent_id in household.member_ids
+        }
+        location_snapshots = {
+            agent_id: copy.deepcopy(self.world.locations.get(agent_id))
+            for agent_id in household.member_ids
+        }
+        graph_snapshot = _snapshot_object(self.graph)
+        ledger = self.households.ledger
+        ledger_snapshot = None if ledger is None else ledger.dump()
+        try:
+            return self._dissolve_union(household, initiator_id, target_id, tick)
+        except Exception:
+            try:
+                if ledger is not None and ledger_snapshot is not None:
+                    ledger.load(ledger_snapshot)
+                _restore_object(self.graph, graph_snapshot)
+                for agent_id, agent_snapshot in agent_snapshots.items():
+                    self.agents.agents[agent_id] = copy.deepcopy(agent_snapshot)
+                self.households.load(household_snapshot)
+                for agent_id, location_snapshot in location_snapshots.items():
+                    if location_snapshot is None:
+                        self.world.locations.pop(agent_id, None)
+                    else:
+                        self.world.locations[agent_id] = copy.deepcopy(location_snapshot)
+                self.world.freeze_occupancy()
+            finally:
+                self.log.rollback_to(savepoint)
+            raise
+
+    def _dissolve_union(
+        self,
+        household: Household,
+        initiator_id: str,
+        target_id: str,
+        tick: int,
+    ) -> Sequence[Event]:
         dependants = tuple(
             sorted(
                 agent_id
@@ -1015,10 +1063,33 @@ class RelationalResolver:
         actor_id = str(getattr(ctx.state, "agent_id", ""))
         if action_type == ActionType.HAVE_CHILD_INTENT:
             return ({},)
+        actor = self.agents.agents.get(actor_id)
+        if actor is None or not actor.alive:
+            return ()
+        partner_id = self.graph.live_partner(actor_id)
+        if action_type == ActionType.DISSOLVE_UNION:
+            if partner_id is None:
+                return ()
+            partner = self.agents.agents.get(partner_id)
+            return () if partner is None or not partner.alive else ({"target_id": partner_id},)
+        if actor.age_years < 18 or partner_id is not None:
+            return ()
+        actor_location = self.world.locations.get(actor_id)
         return tuple(
             {"target_id": agent.agent_id}
             for agent in self.agents.alive()
             if agent.agent_id != actor_id
+            and agent.age_years >= 18
+            and self.graph.live_partner(agent.agent_id) is None
+            and (
+                action_type != ActionType.COURT
+                or self.graph.strength(actor_id, agent.agent_id) > 0
+                or (
+                    actor_location is not None
+                    and (target_location := self.world.locations.get(agent.agent_id)) is not None
+                    and target_location.place_id == actor_location.place_id
+                )
+            )
         )
 
 
@@ -1242,6 +1313,30 @@ class Fertility:
             del self.pregnancies[mother_id]
         return tuple(events)
 
+    def terminate_for_parent(self, parent_id: str, tick: int) -> Sequence[Event]:
+        events: list[Event] = []
+        for mother_id, pregnancy in sorted(tuple(self.pregnancies.items())):
+            if parent_id not in {pregnancy.mother_id, pregnancy.father_id}:
+                continue
+            events.append(
+                _stage(
+                    self.log,
+                    self.clock,
+                    tick,
+                    PREGNANCY_ENDED,
+                    {
+                        "mother_id": mother_id,
+                        "outcome": "loss",
+                        "child_id": None,
+                        "gestation_ticks": tick - pregnancy.conceived_tick,
+                    },
+                    actor_id=mother_id,
+                    subjects=(pregnancy.mother_id, pregnancy.father_id),
+                )
+            )
+            del self.pregnancies[mother_id]
+        return tuple(events)
+
     def _birth(self, pregnancy: Pregnancy, tick: int) -> Sequence[Event]:
         mother = self.agents[pregnancy.mother_id]
         father = self.agents[pregnancy.father_id]
@@ -1413,6 +1508,7 @@ class ChildCosts:
 
     def charge(self, tick: int) -> Sequence[Event]:
         events: list[Event] = []
+        state_household_id, _state_place_id = self.households.state_household_identity()
         for household in stable(
             (row for row in self.households.households.values() if row.dissolved_at_tick is None),
             key=lambda row: row.household_id,
@@ -1431,7 +1527,10 @@ class ChildCosts:
                 "welfare.child_benefit_cents",
                 tick,
             )
-            benefit = min(amount, benefit_monthly * len(children) // 30)
+            benefit = min(
+                amount,
+                benefit_monthly * len(children) // self.clock.profile.days_per_sim_month,
+            )
             due = max(0, amount - benefit)
             paid = 0
             txn_id: str | None = None
@@ -1439,7 +1538,7 @@ class ChildCosts:
             head = household.head_agent_id
             supplier = None if self.supplier_account is None else self.supplier_account(tick)
             government = None if self.government_account is None else self.government_account(tick)
-            state_care = household.tenure == "shelter" and head is None
+            state_care = household.household_id == state_household_id
             household_due = 0 if state_care else due
             government_due = benefit + (due if state_care else 0)
             if self.ledger is not None and supplier is not None:
@@ -1592,6 +1691,7 @@ class EstateSettler:
         housing: HousingPort,
         graph: SocialGraphPort,
         memories: MemoryArchivePort,
+        fertility: Fertility,
         cfg: DemographySettings,
     ) -> None:
         self.log = log
@@ -1605,6 +1705,7 @@ class EstateSettler:
         self.housing = housing
         self.graph = graph
         self.memories = memories
+        self.fertility = fertility
         self.cfg = cfg
         self._wealth_cache_tick: int | None = None
         self._wealth_distribution: tuple[int, ...] = ()
@@ -1688,12 +1789,14 @@ class EstateSettler:
         location_snapshot = copy.deepcopy(self.world.locations.get(decedent_id))
         graph_snapshot = _snapshot_object(self.graph)
         memory_snapshot = _snapshot_object(self.memories)
+        pregnancy_snapshot = copy.deepcopy(self.fertility.pregnancies)
         settlement = DeathSettlementContext(cause=cause)
         settlement.add_rollback(lambda: self._restore_agent(decedent_id, agent_snapshot))
         settlement.add_rollback(lambda: self.households.load(household_snapshot))
         settlement.add_rollback(lambda: self._restore_location(decedent_id, location_snapshot))
         settlement.add_rollback(lambda: _restore_object(self.graph, graph_snapshot))
         settlement.add_rollback(lambda: _restore_object(self.memories, memory_snapshot))
+        settlement.add_rollback(lambda: self._restore_pregnancies(pregnancy_snapshot))
         try:
             agent.alive = False
             agent.died_at_tick = tick
@@ -1722,6 +1825,7 @@ class EstateSettler:
                 subjects=(decedent_id, *dependants),
             )
             settlement.cause_event = opened
+            pregnancy_events = self.fertility.terminate_for_parent(decedent_id, tick)
             delegated = tuple(
                 self.estate.settle_death(
                     decedent_id,
@@ -1856,6 +1960,7 @@ class EstateSettler:
             )
             return estate, (
                 opened,
+                *pregnancy_events,
                 *delegated,
                 debts,
                 distributed,
@@ -1879,6 +1984,9 @@ class EstateSettler:
         else:
             self.world.locations[agent_id] = copy.deepcopy(snapshot)
         self.world.freeze_occupancy()
+
+    def _restore_pregnancies(self, snapshot: Mapping[str, Pregnancy]) -> None:
+        self.fertility.pregnancies = copy.deepcopy(dict(snapshot))
 
     def _dependants(self, agent_id: str) -> tuple[str, ...]:
         return tuple(
@@ -2010,12 +2118,20 @@ class Migration:
     def arrive(self, tick: int) -> Sequence[Event]:
         quota = max(0, int(self.runtime.get("migration.quota_per_sim_year", tick)))
         self._arrival_carry += quota
-        count, self._arrival_carry = divmod(self._arrival_carry, 12)
+        months_per_year = max(
+            1,
+            self.clock.profile.days_per_sim_year // self.clock.profile.days_per_sim_month,
+        )
+        count, self._arrival_carry = divmod(self._arrival_carry, months_per_year)
         if count == 0:
             return ()
         events: list[Event] = []
         cohort_id = det_id("coh", "demography.migration", tick)
-        means = population_mean_traits(self.agents)
+        means = (
+            population_mean_traits(self.agents)
+            if self.agents.alive()
+            else Traits(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)
+        )
         for index in range(count):
             agent_id = _numeric_agent_id("demography.migrant", tick, index)
             if agent_id in self.agents.agents:

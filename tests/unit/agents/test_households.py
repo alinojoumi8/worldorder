@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from polis.agents.demography import Household
@@ -124,7 +126,7 @@ async def test_higher_income_custody_and_coin_flip_are_deterministic() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_leaves_home_when_crossing_independence_threshold() -> None:
+async def test_agent_can_leave_home_after_the_age_threshold_tick() -> None:
     result = await demography_result()
     assert result.demography is not None
     households = result.demography.households
@@ -139,7 +141,7 @@ async def test_agent_leaves_home_when_crossing_independence_threshold() -> None:
         households.cfg.independence_threshold_cents,
     )
     original_household_id = candidate.household_id
-    candidate.age_years = 18.0
+    candidate.age_years = 19.0
 
     events = households.advance_independence(2, age_step_years=0.1)
 
@@ -188,3 +190,57 @@ async def test_household_reformation_records_departures_before_formation() -> No
 
     assert sum(event.kind == HOUSEHOLD_LEFT for event in events) == 2
     assert events[-1].kind == HOUSEHOLD_FORMED
+
+
+@pytest.mark.asyncio
+async def test_dissolution_failure_rolls_back_split_households_graph_and_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = await demography_result()
+    assert result.demography is not None and result.economy is not None
+    registry = result.demography.courtships
+    households = result.demography.households
+    adults = sorted(
+        (agent for agent in result.population.alive() if agent.age_years >= 18),
+        key=lambda agent: agent.agent_id,
+    )
+    a = adults[0]
+    b = next(agent for agent in adults[1:] if agent.household_id != a.household_id)
+    registry.court(a.agent_id, b.agent_id, 2)
+    registry.court(b.agent_id, a.agent_id, 2)
+    registry.propose_union(a.agent_id, b.agent_id, 2)
+    formed = registry.propose_union(b.agent_id, a.agent_id, 2)
+    union_event = next(event for event in formed if event.kind == UNION_FORMED)
+    recipient = next(
+        account
+        for account in result.economy.ledger.accounts_of(a.agent_id)
+        if parse_account_id(account)[0] == "dep"
+    )
+    result.economy.ledger.post_transaction(
+        government_transfer_legs(recipient, 1_001, result.economy),
+        tick=2,
+        cause=union_event,
+    )
+    before_ledger = copy.deepcopy(result.economy.ledger.dump())
+    before_households = households.dump()
+    union_household = households.of(a.agent_id)
+    assert union_household is not None
+    before_agents = {
+        agent_id: copy.deepcopy(result.population[agent_id])
+        for agent_id in union_household.member_ids
+    }
+    before_staged = registry.log.staged()
+
+    def fail_dissolution(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("injected dissolution failure")
+
+    monkeypatch.setattr(households, "dissolve", fail_dissolution)
+
+    with pytest.raises(RuntimeError, match="injected dissolution failure"):
+        registry.dissolve_union(a.agent_id, b.agent_id, 3)
+
+    assert result.economy.ledger.dump() == before_ledger
+    assert households.dump() == before_households
+    assert {agent_id: result.population[agent_id] for agent_id in before_agents} == before_agents
+    assert result.demography.graph.live_partner(a.agent_id) == b.agent_id
+    assert registry.log.staged() == before_staged
