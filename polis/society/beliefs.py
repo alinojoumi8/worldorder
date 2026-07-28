@@ -214,6 +214,12 @@ def _spec_for(proposition: str) -> PropositionSpec | None:
     return None
 
 
+def proposition_spec(proposition: str) -> PropositionSpec | None:
+    """Resolve a concrete proposition to its value bounds and defaults."""
+
+    return _spec_for(proposition)
+
+
 _SOCIAL_ENTAILS = (
     "exposure to an annotated stance moves the receiver toward it in proportion to source "
     "trust and inversely to own confidence. Consensus formation within trusting clusters "
@@ -734,6 +740,7 @@ __all__ = [
     "MemoryBeliefRepository",
     "PropClass",
     "PropositionSpec",
+    "proposition_spec",
     "resolve_proposition",
     "update_kernel",
 ]

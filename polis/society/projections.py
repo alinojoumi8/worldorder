@@ -24,6 +24,7 @@ from polis.events.kinds import (
     TIE_UPDATED,
 )
 from polis.events.types import Event
+from polis.society.beliefs import proposition_spec
 from polis.store.projections.base import ProjectionContext, register_projection
 
 
@@ -480,23 +481,39 @@ class BeliefsProjection:
                 )
         else:
             for row in payload["updates"]:
+                proposition = str(row["proposition"])
+                spec = proposition_spec(proposition)
+                if spec is None:
+                    raise ValueError(f"unknown proposition in belief drift: {proposition}")
+                d_value = float(row["d_value"])
+                d_confidence = float(row["d_confidence"])
                 await ctx.conn.execute(
                     """
-                    UPDATE beliefs SET
-                        value=GREATEST(-1,LEAST(1,value+%s)),
-                        confidence=GREATEST(0,LEAST(1,confidence+%s)),
-                        updated_tick=%s,source=%s,source_seq=%s
-                    WHERE run_id=%s AND agent_id=%s AND proposition=%s
+                    INSERT INTO beliefs(
+                        run_id,agent_id,proposition,value,confidence,updated_tick,
+                        source,source_ref,source_seq
+                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,NULL,%s)
+                    ON CONFLICT(run_id,agent_id,proposition) DO UPDATE SET
+                        value=GREATEST(%s,LEAST(%s,beliefs.value+%s)),
+                        confidence=GREATEST(0,LEAST(1,beliefs.confidence+%s)),
+                        updated_tick=EXCLUDED.updated_tick,
+                        source=EXCLUDED.source,
+                        source_ref=EXCLUDED.source_ref,
+                        source_seq=EXCLUDED.source_seq
                     """,
                     (
-                        row["d_value"],
-                        row["d_confidence"],
+                        ctx.run_id,
+                        payload["agent_id"],
+                        proposition,
+                        max(spec.lo, min(spec.hi, spec.default_value + d_value)),
+                        max(0.0, min(1.0, spec.default_confidence + d_confidence)),
                         event.tick,
                         payload["channel"],
                         event.seq,
-                        ctx.run_id,
-                        payload["agent_id"],
-                        row["proposition"],
+                        spec.lo,
+                        spec.hi,
+                        d_value,
+                        d_confidence,
                     ),
                 )
 

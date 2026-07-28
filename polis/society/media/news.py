@@ -545,19 +545,32 @@ class Newsworthiness:
         tick: int,
         n: int,
     ) -> tuple[Event, ...]:
+        return self.rank(
+            outlet,
+            tuple(event for event in self.events(since_seq, tick) if event.seq > since_seq),
+            tick,
+            n,
+        )
+
+    def rank(
+        self,
+        outlet: Outlet,
+        candidates: Sequence[Event],
+        tick: int,
+        n: int,
+    ) -> tuple[Event, ...]:
         _, reporters = self.outlets.newsroom(outlet.outlet_id)
-        candidates = [
+        eligible = [
             event
-            for event in self.events(since_seq, tick)
-            if event.seq > since_seq
-            and event.tick <= tick
+            for event in candidates
+            if event.tick <= tick
             and any(
                 self.availability.available_to(reporter_id, event, tick)
                 for reporter_id in reporters
             )
         ]
         return tuple(
-            sorted(candidates, key=lambda event: (-self.score(event, outlet, tick), event.seq))[
+            sorted(eligible, key=lambda event: (-self.score(event, outlet, tick), event.seq))[
                 : max(0, n)
             ]
         )
@@ -919,7 +932,9 @@ class NewsCycle:
         self.articles = ArticleStore(outlets.repo)
         self.editor = EditorGate()
         self._since_seq: dict[str, int] = defaultdict(int)
+        self._story_backlog: dict[str, dict[int, Event]] = defaultdict(dict)
         self._checked: set[str] = set()
+        self._trust_updated: set[tuple[str, str, int]] = set()
 
     def _emit(
         self,
@@ -1002,12 +1017,26 @@ class NewsCycle:
         work: list[tuple[Outlet, str, Event, CallRequest]] = []
         for outlet in self.outlets.live():
             _, reporters = self.outlets.newsroom(outlet.outlet_id)
-            stories = self.newsworthiness.story_list(
+            discovered = tuple(
+                event
+                for event in self.newsworthiness.events(
+                    self._since_seq[outlet.outlet_id],
+                    tick,
+                )
+                if event.seq > self._since_seq[outlet.outlet_id] and event.tick <= tick
+            )
+            backlog = self._story_backlog[outlet.outlet_id]
+            backlog.update((event.seq, event) for event in discovered)
+            if discovered:
+                self._since_seq[outlet.outlet_id] = max(event.seq for event in discovered)
+            stories = self.newsworthiness.rank(
                 outlet,
-                self._since_seq[outlet.outlet_id],
+                tuple(backlog.values()),
                 tick,
                 len(reporters) * self.cfg.stories_per_reporter_per_cycle,
             )
+            for story in stories:
+                backlog.pop(story.seq, None)
             for reporter_id, story in zip(
                 (
                     reporter
@@ -1020,8 +1049,6 @@ class NewsCycle:
                 work.append(
                     (outlet, reporter_id, story, self._request(outlet, reporter_id, story, tick))
                 )
-            if stories:
-                self._since_seq[outlet.outlet_id] = max(story.seq for story in stories)
         if not work:
             return ()
         results = await self.router.gather([item[3] for item in work])
@@ -1173,15 +1200,23 @@ class NewsCycle:
         tick: int,
     ) -> tuple[Mapping[str, tuple[ArticleBrief, ...]], Sequence[Event]]:
         by_agent: dict[str, list[tuple[float, Article]]] = defaultdict(list)
+        outlets_by_article = {
+            article.article_id: self.outlets.get(article.outlet_id) for article in articles
+        }
+        subscribers_by_outlet = {
+            outlet.outlet_id: frozenset(self.outlets.repo.subscribers(outlet.outlet_id))
+            for outlet in outlets_by_article.values()
+            if outlet is not None
+        }
         for agent_id in self.outlets.repo.audience_ids():
             for article in articles:
-                outlet = self.outlets.get(article.outlet_id)
+                outlet = outlets_by_article[article.article_id]
                 if outlet is None:
                     continue
                 trust = self.beliefs.value(agent_id, f"trust.outlet.{outlet.outlet_id}")
                 topic_fit = 1.0
                 proximity = 0.5
-                subscribed = float(agent_id in self.outlets.repo.subscribers(outlet.outlet_id))
+                subscribed = float(agent_id in subscribers_by_outlet[outlet.outlet_id])
                 reach = min(1.0, outlet.reach / self.cfg.reach_norm)
                 weights = self.cfg.distribution_weights
                 score = (
@@ -1211,16 +1246,21 @@ class NewsCycle:
                 for article in selected
             )
             for article in selected:
-                if self.outlets.repo.note_exposure(agent_id, article.article_id, tick):
+                new_exposure = self.outlets.repo.note_exposure(
+                    agent_id,
+                    article.article_id,
+                    tick,
+                )
+                if new_exposure:
                     reached[article.article_id].append(agent_id)
-                if article.stance_proposition is not None and article.stance_value is not None:
-                    self.beliefs.apply_media(
-                        agent_id,
-                        article.stance_proposition,
-                        article.stance_value,
-                        article.outlet_id,
-                        tick,
-                    )
+                    if article.stance_proposition is not None and article.stance_value is not None:
+                        self.beliefs.apply_media(
+                            agent_id,
+                            article.stance_proposition,
+                            article.stance_value,
+                            article.outlet_id,
+                            tick,
+                        )
         events = []
         for article in sorted(articles, key=lambda row: row.article_id):
             audience = sorted(reached.get(article.article_id, ()))
@@ -1239,7 +1279,11 @@ class NewsCycle:
                             0.0
                             if not audience
                             else sum(
-                                agent_id in self.outlets.repo.subscribers(article.outlet_id)
+                                agent_id
+                                in subscribers_by_outlet.get(
+                                    article.outlet_id,
+                                    frozenset(),
+                                )
                                 for agent_id in audience
                             )
                             / len(audience)
@@ -1296,7 +1340,10 @@ class NewsCycle:
 
     def update_outlet_trust(self, tick: int) -> Sequence[Event]:
         events: list[Event] = []
-        for agent_id, article_id, _ in self.outlets.repo.exposures():
+        for exposure in self.outlets.repo.exposures():
+            if exposure in self._trust_updated:
+                continue
+            agent_id, article_id, _ = exposure
             article = self.articles.get(article_id)
             if article is None or article.accuracy is None:
                 continue
@@ -1312,11 +1359,12 @@ class NewsCycle:
                         proposition,
                         target,
                         self.beliefs.confidence(agent_id, proposition),
-                        f"accuracy:{article.article_id}",
+                        f"article:{article.outlet_id}:{article.article_id}",
                     ),
                 ),
                 None,
             )
+            self._trust_updated.add(exposure)
             events.extend(self.log.staged()[before:])
         return tuple(events)
 

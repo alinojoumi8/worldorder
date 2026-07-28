@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -36,7 +37,8 @@ class Router:
         self.fail = fail
 
     async def gather(self, requests: object) -> list[SimpleNamespace]:
-        del requests
+        if not isinstance(requests, Sequence):
+            raise TypeError("requests must be a sequence")
         parsed = {
             "headline": "Firm remains solvent",
             "body": "The public record says the firm remains solvent.",
@@ -54,16 +56,17 @@ class Router:
             "stance_proposition": "policy.tax.progressivity",
             "stance_value": 0.0,
         }
-        return [
+        result = [
             SimpleNamespace(
                 parsed_ok=not self.fail,
                 parsed=None if self.fail else parsed,
                 call_id=UUID(int=25),
             )
         ]
+        return result * len(requests)
 
 
-def cycle(*, fail: bool = False) -> tuple[NewsCycle, EventLog]:
+def cycle(*, fail: bool = False, source_count: int = 1) -> tuple[NewsCycle, EventLog]:
     clock = Clock(PROFILES["microscope"])
     log = EventLog(UUID(int=25), MemoryEventSink())
     cfg = SocietySettings()
@@ -75,27 +78,30 @@ def cycle(*, fail: bool = False) -> tuple[NewsCycle, EventLog]:
         repo=MemoryGraphRepository(),
         cfg=cfg,
     )
-    source = log.stage(
-        NewEvent(
-            SPEECH_UTTERED,
-            {
-                "speaker_id": "ag_source",
-                "place_id": "pl_square",
-                "text": "The firm is solvent.",
-                "addressed_to": [],
-                "heard_by": [],
-                "topic": "business",
-                "stance_proposition": None,
-                "stance_value": None,
-                "conversation_id": "cv_one",
-                "turn_index": 0,
-                "closing": False,
-                "claims": [],
-                "public": True,
-            },
-        ),
-        tick=1,
-        sim_time=clock.sim_time_at(1),
+    sources = tuple(
+        log.stage(
+            NewEvent(
+                SPEECH_UTTERED,
+                {
+                    "speaker_id": "ag_source",
+                    "place_id": "pl_square",
+                    "text": "The firm is solvent.",
+                    "addressed_to": [],
+                    "heard_by": [],
+                    "topic": "business",
+                    "stance_proposition": None,
+                    "stance_value": None,
+                    "conversation_id": f"cv_{index}",
+                    "turn_index": 0,
+                    "closing": False,
+                    "claims": [],
+                    "public": True,
+                },
+            ),
+            tick=1,
+            sim_time=clock.sim_time_at(1),
+        )
+        for index in range(source_count)
     )
     repo = MemoryNewsRepository(("ag_reader",))
     repo.put_outlet(Outlet("ol_one", "One", None, 0.0, 0.8, 0, None))
@@ -116,7 +122,7 @@ def cycle(*, fail: bool = False) -> tuple[NewsCycle, EventLog]:
         public_kinds=frozenset({SPEECH_UTTERED}),
     )
     newsworthiness = Newsworthiness(
-        events=lambda _since, _tick: (source,),
+        events=lambda _since, _tick: sources,
         outlets=outlets,
         availability=availability,
         cfg=cfg,
@@ -182,3 +188,34 @@ async def test_news_write_failure_spikes_without_fallback_article() -> None:
     events = await news.run_cycle(1)
     assert [event.kind for event in events] == [ARTICLE_SPIKED]
     assert news.articles.all() == ()
+
+
+@pytest.mark.asyncio
+async def test_unselected_story_remains_available_for_next_cycle() -> None:
+    news, _ = cycle(source_count=2)
+    news.newsworthiness.score = (  # type: ignore[method-assign]
+        lambda event, _outlet, _tick: float(event.seq)
+    )
+    await news.run_cycle(1)
+    await news.run_cycle(2)
+    assert len(news.articles.all()) == 2
+
+
+@pytest.mark.asyncio
+async def test_duplicate_distribution_and_trust_update_are_idempotent() -> None:
+    news, _ = cycle()
+    await news.run_cycle(1)
+    article = news.articles.all()[0]
+    value_after_first_exposure = news.beliefs.value(
+        "ag_reader",
+        "policy.tax.progressivity",
+    )
+    _, repeated_events = news.distribute((article,), 1)
+    assert repeated_events[0].payload["reach"] == 0
+    assert news.beliefs.value("ag_reader", "policy.tax.progressivity") == value_after_first_exposure
+
+    news.articles.set_accuracy(article.article_id, 1.0, 0.0)
+    first = news.update_outlet_trust(7)
+    second = news.update_outlet_trust(14)
+    assert first
+    assert second == ()

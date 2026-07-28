@@ -1,8 +1,9 @@
+from pathlib import Path
 from uuid import UUID
 
 import pytest
 
-from polis.config.settings import BeliefSettings, SocietySettings
+from polis.config.settings import BeliefSettings, SocietySettings, load_settings
 from polis.events.kinds import BELIEF_DRIFT_APPLIED
 from polis.events.log import EventLog, MemoryEventSink
 from polis.kernel.clock import PROFILES, Clock
@@ -10,6 +11,7 @@ from polis.kernel.rng import RngRegistry
 from polis.society.beliefs import (
     Belief,
     BeliefEngine,
+    BeliefUpdate,
     MemoryBeliefRepository,
     update_kernel,
 )
@@ -86,3 +88,36 @@ def test_social_ablation_and_experience_policy_guard() -> None:
             {"proposition": "policy.tax.progressivity", "target": 1.0},
             1,
         )
+
+
+def test_top_level_belief_ablations_are_wired_into_belief_settings() -> None:
+    settings = load_settings(
+        Path("configs/smoke.yaml"),
+        overrides={
+            "ablations": {
+                "social_influence_off": True,
+                "backfire_off": True,
+            }
+        },
+    )
+    assert settings.beliefs.social_influence_off
+    assert settings.beliefs.backfire_off
+
+
+def test_self_serving_outlet_trust_update_is_dampened() -> None:
+    beliefs, _, _ = engine()
+    applied = beliefs.apply_llm_belief_updates(
+        "ag_a",
+        1,
+        (
+            BeliefUpdate(
+                "trust.outlet.ol_one",
+                1.0,
+                0.8,
+                "article:ol_one:ar_one",
+            ),
+        ),
+        None,
+    )
+    assert applied == 1
+    assert beliefs.value("ag_a", "trust.outlet.ol_one") == pytest.approx(0.675)

@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+import pytest
+
 from polis.economy.invariants import check_ledger
-from polis.economy.ledger import Ledger, Leg
+from polis.economy.ledger import Ledger, LedgerError, Leg
 from polis.events.log import EventLog, MemoryEventSink
 from polis.events.types import Event
 from polis.kernel.clock import PROFILES, Clock
@@ -89,3 +91,83 @@ def test_zero_advertiser_budget_books_zero_ad_revenue() -> None:
     )
     assert booking.ad_revenue_cents == 0
     assert booking.txn_ids == ()
+
+
+def test_revenue_reserves_shared_payer_balance_across_income_types() -> None:
+    run_id = UUID(int=26)
+    ledger = Ledger(run_id)
+    payer = ledger.open_account("cash", "fm_multi", "firm", tick=0)
+    outlet_account = ledger.open_account("cash", "fm_outlet", "firm", tick=0)
+    issuance = ledger.open_account("iss", "bk_cb", "central_bank", tick=0)
+    ledger.issue_base_money(
+        (
+            Leg(payer, 1, 50, "issuance"),
+            Leg(issuance, -1, 50, "issuance"),
+        ),
+        tick=0,
+        cause=cause(run_id),
+    )
+    adapter = EconomyNewsLedgerAdapter(
+        ledger,
+        EventLog(run_id, MemoryEventSink()),
+        Clock(PROFILES["microscope"]),
+        {"fm_multi": 40},
+        {"ol_one": {"fm_multi": 30}},
+        subscription_price_cents=20,
+    )
+    booking = adapter.book_outlet_revenue(
+        outlet=Outlet("ol_one", "One", "fm_outlet", 0.0, 0.8, 0, None),
+        period_start_tick=1,
+        tick=7,
+        impressions=1_000,
+        cpm_cents=40,
+        subscribers=("fm_multi",),
+    )
+    assert booking.ad_revenue_cents == 40
+    assert booking.subscription_cents == 10
+    assert booking.campaign_cents == 0
+    assert ledger.balance(payer) == 0
+    assert ledger.balance(outlet_account) == 50
+
+
+def test_rejected_revenue_post_rolls_back_staged_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = UUID(int=27)
+    ledger = Ledger(run_id)
+    payer = ledger.open_account("cash", "fm_ad", "firm", tick=0)
+    ledger.open_account("cash", "fm_outlet", "firm", tick=0)
+    issuance = ledger.open_account("iss", "bk_cb", "central_bank", tick=0)
+    ledger.issue_base_money(
+        (
+            Leg(payer, 1, 50, "issuance"),
+            Leg(issuance, -1, 50, "issuance"),
+        ),
+        tick=0,
+        cause=cause(run_id),
+    )
+    log = EventLog(run_id, MemoryEventSink())
+    adapter = EconomyNewsLedgerAdapter(
+        ledger,
+        log,
+        Clock(PROFILES["microscope"]),
+        {"fm_ad": 50},
+        {},
+    )
+
+    def reject(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise LedgerError("rejected")
+
+    monkeypatch.setattr(ledger, "post_transaction", reject)
+    with pytest.raises(LedgerError, match="rejected"):
+        adapter.book_outlet_revenue(
+            outlet=Outlet("ol_one", "One", "fm_outlet", 0.0, 0.8, 0, None),
+            period_start_tick=1,
+            tick=7,
+            impressions=1_000,
+            cpm_cents=40,
+            subscribers=(),
+        )
+    assert log.staged() == ()
+    assert adapter.advertiser_budgets["fm_ad"] == 50

@@ -695,6 +695,18 @@ class Settings(FrozenModel):
             raise ValueError(
                 "run.scale must equal population.initial_agents in the single-process v1"
             )
+        object.__setattr__(
+            self,
+            "beliefs",
+            self.beliefs.model_copy(
+                update={
+                    "social_influence_off": (
+                        self.beliefs.social_influence_off or self.ablations.social_influence_off
+                    ),
+                    "backfire_off": self.beliefs.backfire_off or self.ablations.backfire_off,
+                }
+            ),
+        )
         return self
 
 

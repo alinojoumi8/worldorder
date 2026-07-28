@@ -126,12 +126,21 @@ class EconomyNewsLedgerAdapter:
     def _bridge(self) -> EconomyLedgerAdapter:
         return EconomyLedgerAdapter(self.ledger)
 
-    def _affordable(self, payer_id: str, payee_id: str, requested: int) -> int:
+    def _affordable(
+        self,
+        payer_id: str,
+        payee_id: str,
+        requested: int,
+        committed_cents: int = 0,
+    ) -> int:
         if requested <= 0:
             return 0
         return min(
             requested,
-            self._bridge()._compatible_balance(payer_id, payee_id),
+            max(
+                0,
+                self._bridge()._compatible_balance(payer_id, payee_id) - committed_cents,
+            ),
         )
 
     def _aggregate(self, transfers: Sequence[tuple[str, str, int]]) -> tuple[Leg, ...]:
@@ -160,17 +169,25 @@ class EconomyNewsLedgerAdapter:
         if payee_id is None:
             return RevenueBooking()
         transfers: list[tuple[str, str, int]] = []
+        committed: dict[str, int] = defaultdict(int)
+
+        def reserve(payer_id: str, requested: int) -> int:
+            cents = self._affordable(
+                payer_id,
+                payee_id,
+                requested,
+                committed[payer_id],
+            )
+            committed[payer_id] += cents
+            return cents
+
         advertiser_rows: list[tuple[str, int]] = []
         ad_remaining = max(0, impressions * cpm_cents // 1_000)
         for advertiser_id in sorted(self.advertiser_budgets):
             if ad_remaining <= 0:
                 break
             budget = max(0, self.advertiser_budgets[advertiser_id])
-            cents = self._affordable(
-                advertiser_id,
-                payee_id,
-                min(ad_remaining, budget),
-            )
+            cents = reserve(advertiser_id, min(ad_remaining, budget))
             if cents <= 0:
                 continue
             advertiser_rows.append((advertiser_id, cents))
@@ -178,17 +195,13 @@ class EconomyNewsLedgerAdapter:
             ad_remaining -= cents
         subscription_rows: list[tuple[str, int]] = []
         for subscriber_id in sorted(set(subscribers)):
-            cents = self._affordable(
-                subscriber_id,
-                payee_id,
-                self.subscription_price_cents,
-            )
+            cents = reserve(subscriber_id, self.subscription_price_cents)
             if cents > 0:
                 subscription_rows.append((subscriber_id, cents))
                 transfers.append((subscriber_id, payee_id, cents))
         campaign_rows: list[tuple[str, int]] = []
         for buyer_id, requested in sorted(self.campaign_buys.get(outlet.outlet_id, {}).items()):
-            cents = self._affordable(buyer_id, payee_id, max(0, requested))
+            cents = reserve(buyer_id, max(0, requested))
             if cents > 0:
                 campaign_rows.append((buyer_id, cents))
                 transfers.append((buyer_id, payee_id, cents))
@@ -218,13 +231,17 @@ class EconomyNewsLedgerAdapter:
             tick=tick,
             sim_time=self.clock.sim_time_at(tick),
         )
-        actual = str(
-            self.ledger.post_transaction(
-                self._aggregate(transfers),
-                tick=tick,
-                cause=event,
+        try:
+            actual = str(
+                self.ledger.post_transaction(
+                    self._aggregate(transfers),
+                    tick=tick,
+                    cause=event,
+                )
             )
-        )
+        except Exception:
+            self.log.rollback()
+            raise
         if actual != predicted:
             raise RuntimeError("media revenue ledger transaction ordinal diverged")
         for advertiser_id, cents in advertiser_rows:
