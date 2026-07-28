@@ -15,11 +15,6 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         """
-        ALTER TABLE beliefs
-            ADD COLUMN confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
-            ADD COLUMN source TEXT NOT NULL DEFAULT 'inherited',
-            ADD COLUMN source_ref TEXT;
-
         ALTER TABLE posts ADD COLUMN truthfulness_n INTEGER NOT NULL DEFAULT 0;
 
         CREATE TABLE outlets (
@@ -66,9 +61,5 @@ def downgrade() -> None:
         """
         DROP TABLE IF EXISTS articles, outlets CASCADE;
         ALTER TABLE posts DROP COLUMN IF EXISTS truthfulness_n;
-        ALTER TABLE beliefs
-            DROP COLUMN IF EXISTS source_ref,
-            DROP COLUMN IF EXISTS source,
-            DROP COLUMN IF EXISTS confidence;
         """
     )
