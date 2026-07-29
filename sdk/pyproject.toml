@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "polis-agent-sdk"
+version = "0.1.0"
+description = "Standalone client SDK and CLI for the POLIS external-agent protocol"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "cryptography>=44",
+  "httpx>=0.28",
+  "rfc8785>=0.1.4",
+  "typer>=0.15",
+]
+
+[project.scripts]
+polis-agent-cli = "polis.gateway.sdk.cli:app"
+
+[tool.hatch.build.targets.wheel.force-include]
+"../polis/__init__.py" = "polis/__init__.py"
+"../polis/gateway/__init__.py" = "polis/gateway/__init__.py"
+"../polis/gateway/sdk" = "polis/gateway/sdk"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["*"]

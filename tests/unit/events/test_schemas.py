@@ -5,16 +5,34 @@ import pytest
 from polis.events.kinds import POST_ENGAGED, POST_PUBLISHED, RUN_STARTED, range_for
 from polis.events.schemas import PayloadSchemaError, validate_payload
 
+RUN_STARTED_PAYLOAD = {
+    "config_hash": "abc",
+    "prompt_manifest": {},
+    "model_manifest": {},
+    "code_git_sha": "a" * 40,
+    "master_seed": 1,
+    "completion_cache_manifest_hash": "b" * 64,
+    "mechanism_manifest": {},
+    "metric_manifest": {},
+    "kind_registry_hash": "c" * 64,
+    "clock_profile": "test",
+    "scale": 1,
+}
 
-def test_required_payload_field_is_enforced() -> None:
-    with pytest.raises(PayloadSchemaError, match="seed"):
-        validate_payload(RUN_STARTED, {"config_hash": "abc"})
+
+@pytest.mark.parametrize("field", sorted(RUN_STARTED_PAYLOAD))
+def test_required_payload_field_is_enforced(field: str) -> None:
+    payload = dict(RUN_STARTED_PAYLOAD)
+    payload.pop(field)
+    with pytest.raises(PayloadSchemaError, match=field):
+        validate_payload(RUN_STARTED, payload)
 
 
 @pytest.mark.parametrize("value", [Decimal("1"), b"x", {1}, float("nan")])
 def test_non_json_payload_is_rejected(value: object) -> None:
+    payload = {**RUN_STARTED_PAYLOAD, "config_hash": value}
     with pytest.raises(PayloadSchemaError):
-        validate_payload(RUN_STARTED, {"config_hash": value, "seed": 1})
+        validate_payload(RUN_STARTED, payload)
 
 
 @pytest.mark.parametrize("kind", [POST_PUBLISHED, POST_ENGAGED])

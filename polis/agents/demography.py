@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -2127,7 +2128,7 @@ class Migration:
             return ()
         events: list[Event] = []
         cohort_id = det_id("coh", "demography.migration", tick)
-        means = (
+        cohort_trait_means = (
             population_mean_traits(self.agents)
             if self.agents.alive()
             else Traits(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)
@@ -2136,99 +2137,148 @@ class Migration:
             agent_id = _numeric_agent_id("demography.migrant", tick, index)
             if agent_id in self.agents.agents:
                 continue
-            stream = self.rng.numpy("demog.migrant", agent_id)
-            traits = type(means)(
-                **{
-                    name: max(
-                        0.0,
-                        min(1.0, getattr(means, name) + float(stream.normal(0.0, 0.08))),
-                    )
-                    for name in means.__dataclass_fields__
-                }
-            )
-            skill_premium = self.cfg.migration.origin_profile.skill_premium
-            skills = {
-                skill: round(
-                    max(0.0, min(1.0, 0.35 + skill_premium + float(stream.normal(0, 0.08)))),
-                    6,
-                )
-                for skill in SKILLS
-            }
-            wealth = max(
-                0,
-                self.cfg.migration.origin_profile.wealth_offset_cents,
-            )
-            home = self.housing.find_affordable_home(wealth, tick)
-            if home is None:
-                home = self.households.state_household(tick).home_place_id
-            agent = AgentState(
-                agent_id=agent_id,
+            _agent, embodied = self._embody_migrant(
+                agent_id,
                 display_name=f"Newcomer {agent_id[-6:]}",
-                age_years=float(stream.integers(18, 56)),
-                traits=traits,
-                needs=Needs(),
-                skills=skills,
-                home_place_id=home,
-                education_level="secondary",
-                employment_status="unemployed",
-                reflex_profile=derive_reflex_profile(traits),
-                wealth_cents=wealth,
-                born_tick=tick,
-            )
-            self.agents.add(agent)
-            if self.households.ledger is not None:
-                self.households.ledger.ensure_agent_account(agent_id, tick)
-            household, household_events = self.households.form(
-                (agent_id,),
-                tick,
-                reason="migration",
-            )
-            priors = self.beliefs.priors_for_migrant(
-                agent_id,
-                self.cfg.migration.origin_profile.belief_offsets,
-            )
-            self.beliefs.apply_priors(
-                agent_id,
-                priors,
                 tick=tick,
-                source_ref=f"migration:{cohort_id}",
+                cohort_id=cohort_id,
+                trait_means=cohort_trait_means,
             )
-            place = self.world.place(household.home_place_id)
-            self.world.locations[agent_id] = Location(
-                place.place_id,
-                place.district_id,
-                place.x,
-                place.y,
-            )
-            self.world.freeze_occupancy()
-            events.extend(household_events)
-            events.append(
-                _stage(
-                    self.log,
-                    self.clock,
-                    tick,
-                    MIGRATION_IN,
-                    {
-                        "agent_id": agent_id,
-                        "cohort_id": cohort_id,
-                        "origin_profile": self.cfg.migration.origin_profile.model_dump(),
-                        "arrival_wealth_cents": wealth,
-                        "skills": skills,
-                        "belief_priors": [
-                            {
-                                "proposition": proposition,
-                                "value": value,
-                                "confidence": confidence,
-                            }
-                            for proposition, value, confidence in priors
-                        ],
-                        "home_place_id": household.home_place_id,
-                    },
-                    actor_id=agent_id,
-                    subjects=(agent_id,),
-                )
-            )
+            events.extend(embodied)
         return tuple(events)
+
+    def admit_external(
+        self,
+        *,
+        agent_id: str,
+        pubkey: str,
+        display_name: str,
+        tick: int,
+    ) -> tuple[AgentState, tuple[Event, ...]]:
+        """Embodies an external identity through the native immigrant draw."""
+
+        if re.fullmatch(r"[0-9a-f]{64}", pubkey) is None or agent_id != f"ag_{pubkey}":
+            raise ValueError("external agent identity must be derived from its public key")
+        if agent_id in self.agents.agents:
+            raise ValueError(f"agent already exists: {agent_id}")
+        return self._embody_migrant(
+            agent_id,
+            display_name=display_name,
+            tick=tick,
+            cohort_id=det_id("coh", "gateway.external", tick, agent_id),
+            kind="external",
+            pubkey=pubkey,
+        )
+
+    def _embody_migrant(
+        self,
+        agent_id: str,
+        *,
+        display_name: str,
+        tick: int,
+        cohort_id: str,
+        kind: Literal["native", "external"] = "native",
+        pubkey: str | None = None,
+        trait_means: Traits | None = None,
+    ) -> tuple[AgentState, tuple[Event, ...]]:
+        means = trait_means or (
+            population_mean_traits(self.agents)
+            if self.agents.alive()
+            else Traits(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)
+        )
+        stream = self.rng.numpy("demog.migrant", agent_id)
+        traits = type(means)(
+            **{
+                name: max(
+                    0.0,
+                    min(1.0, getattr(means, name) + float(stream.normal(0.0, 0.08))),
+                )
+                for name in means.__dataclass_fields__
+            }
+        )
+        skill_premium = self.cfg.migration.origin_profile.skill_premium
+        skills = {
+            skill: round(
+                max(0.0, min(1.0, 0.35 + skill_premium + float(stream.normal(0, 0.08)))),
+                6,
+            )
+            for skill in SKILLS
+        }
+        wealth = max(0, self.cfg.migration.origin_profile.wealth_offset_cents)
+        home = self.housing.find_affordable_home(wealth, tick)
+        if home is None:
+            home = self.households.state_household(tick).home_place_id
+        agent = AgentState(
+            agent_id=agent_id,
+            display_name=display_name,
+            age_years=float(stream.integers(18, 56)),
+            traits=traits,
+            needs=Needs(),
+            skills=skills,
+            home_place_id=home,
+            education_level="secondary",
+            employment_status="unemployed",
+            reflex_profile=derive_reflex_profile(traits),
+            wealth_cents=wealth,
+            born_tick=tick,
+            kind=kind,
+            pubkey=pubkey,
+        )
+        self.agents.add(agent)
+        if self.households.ledger is not None:
+            self.households.ledger.ensure_agent_account(agent_id, tick)
+        household, household_events = self.households.form(
+            (agent_id,),
+            tick,
+            reason="migration",
+        )
+        priors = self.beliefs.priors_for_migrant(
+            agent_id,
+            self.cfg.migration.origin_profile.belief_offsets,
+        )
+        self.beliefs.apply_priors(
+            agent_id,
+            priors,
+            tick=tick,
+            source_ref=f"migration:{cohort_id}",
+        )
+        place = self.world.place(household.home_place_id)
+        self.world.locations[agent_id] = Location(
+            place.place_id,
+            place.district_id,
+            place.x,
+            place.y,
+        )
+        self.world.freeze_occupancy()
+        events = [
+            *household_events,
+            _stage(
+                self.log,
+                self.clock,
+                tick,
+                MIGRATION_IN,
+                {
+                    "agent_id": agent_id,
+                    "cohort_id": cohort_id,
+                    "origin_profile": self.cfg.migration.origin_profile.model_dump(),
+                    "arrival_wealth_cents": wealth,
+                    "skills": skills,
+                    "belief_priors": [
+                        {
+                            "proposition": proposition,
+                            "value": value,
+                            "confidence": confidence,
+                        }
+                        for proposition, value, confidence in priors
+                    ],
+                    "home_place_id": household.home_place_id,
+                    **({"kind": kind} if kind == "external" else {}),
+                },
+                actor_id=agent_id,
+                subjects=(agent_id,),
+            ),
+        ]
+        return agent, tuple(events)
 
     @mechanism(
         "emigration_hazard",

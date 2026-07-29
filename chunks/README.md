@@ -214,3 +214,78 @@ A chunk is done when all of the following are true. Report them explicitly.
   no strategy patterns with a single strategy. See `02 §1.8`.
 - **The LLM call is the bottleneck.** Do not micro-optimise Python. Optimise prompt length,
   cache hit rate, and batching.
+
+---
+
+## 7. Ratified cross-chunk rulings
+
+The chunk briefs were written in parallel and surfaced real conflicts at their boundaries.
+These are the rulings. **They are binding and override any contrary text in an individual
+brief.** Where a brief already resolved a conflict correctly, the ruling confirms it so no
+implementer has to re-litigate.
+
+### 7.1 Spec amendments (folded into `02` and `03`)
+
+| # | Amendment | Where it landed |
+|---|---|---|
+| A1 | New `ActionType`s: `RENT_HOME` (world), `DECLARE_DIVIDEND` (ventures), `FOUND_PARTY` (polity) | `02 §6.2` |
+| A2 | New `places.type`: `prison`, `shelter`. New `households.tenure`: `shelter` | `03 §3.1`, `§2.5` |
+| A3 | Kinds 4100–4199 → `polis.llm` (not cognition-sampled). Kinds 4000–4099 and 4200–4999 remain `polis.agents` | `02 §3.2` |
+| A4 | Kinds 10060–10069 → `polis.society.beliefs` | `02 §3.2` |
+| A5 | C24 owns 99050/99060/99070/99090/99091; C25 owns the remainder of 99000–99999 | `11 §3` |
+| A6 | New module `polis/config/runtime.py` — the tick-keyed parameter overlay | `02 §7.2` |
+| A7 | `ledger_accounts.account_type` += `issuance`; `ledger_entries.reason` += `write_off`, `escrow`, `tuition`, `legal_fee`, `campaign`, `ad_revenue`, `welfare`, `damages` | `03 §4` |
+| A8 | New LLM purpose `CREDIT_EVAL` | `02 §8`, `11 §5.5` |
+| A9 | Validity gate **V8** — external agent liveness | `01 §7.2` |
+| A10 | `runs` += `metric_manifest`, `mechanism_manifest`, `ablations`, `scale`. `llm_calls` += `lane`, `cache_mode`. `scenario_injections` += `step_id`, `event_seq`, `scenario_hash`. `sweeps` += `preregistration`, `analysis_plan_hash`, `cost_estimate_usd` | `03 §1`, `§10` |
+| A11 | `tokens_per_tick` corrected to `300_000` so `calls_per_tick: 90` actually binds | `02 §8` |
+| A12 | Cost target is profile-explicit: ~$12/sim-year `chronicle`, ~$250–400/sim-year `microscope` | `01 §7.1` |
+
+### 7.2 Interface rulings
+
+| # | Conflict | Ruling |
+|---|---|---|
+| R1 | `canonical_json` placed in `polis/kernel/det.py`, but `02 §7.1` forbids `events → kernel` | Lives in **`polis/config/canon.py`** (C01). `kernel` re-exports for convenience. `events` imports from `config`. |
+| R2 | `polis.llm` owns kinds 4100–4199 but may not import `polis.events` | C05 registers `KindSpec`s **as data** and emits through an injected `EventEmitter` protocol. The composition root wires it. |
+| R3 | Kernel phase-timing telemetry would put wall-clock into the hash chain | C04 ships `telemetry.deterministic` mode which omits timing from hashed payloads. Default **on** for research runs, off for profiling. |
+| R4 | Runtime overlay had three incompatible shapes across `07`, C01, and C11 | **C11's typed unit-explicit accessors** (`.bp` `.cents` `.flag` `.brackets`) **plus C01's `.enact()`**. No `.get()` returning `Any`. `02 §7.2` is now the single definition. |
+| R5 | `07 §7.2` writes tax rates as floats; `02 §4.6` bans floats for money-adjacent values | **Basis points, integer.** Every rate key is renamed to suffix `_bp`. C18 owns the rename in `POLICY_REGISTRY`. |
+| R6 | `reflex_decide` arity: C07 needs world state, C09 lists a 3-arg form | **4-arg**: `reflex_decide(obs, profile, world, rng)`. C07 owns the signature; C09 calls it. |
+| R7 | `LLMRouter.call` has no `template` parameter, but REFLECT needs two templates | C05 adds `template: str` to `call()`. Prompt selection is the caller's, prompt *hashing* is the router's. |
+| R8 | `SelfView.last_action_rejected` is a 2-tuple in C07 but C10 produces an `ActionOutcome` | Widen to **`ActionOutcome`**. A narrower native view than external view would violate T12. |
+| R9 | C06 duplicates `RentHomeParams` | C10 owns every action params model. C06 imports it. No duplicated pydantic models anywhere. |
+| R10 | C09 hand-rolls `asyncio.gather` | Use **`LLMRouter.gather`** so budget is charged in request order and degradation is deterministic. |
+| R11 | V8 threshold configured in two places | One key: **`research.gates.external_miss_rate_max`**. The gateway reads it. Config load asserts there is no second definition. |
+| R12 | PHASE 5 slot 2 (communication) has three claimants: C16, C17, C20 | **C16 ships the `CommunicationResolver` facade** with `compose()`. C17's news actions and C20's relational actions are composed into it, never registered separately. One resolver per slot. |
+| R13 | C20 lives in `polis/agents`, which may not import `polis.economy` or `polis.society` | All ledger / exchange / graph / belief calls go through Protocols in **`polis/agents/ports.py`**, injected at the composition root. Same pattern as C08's `BeliefWriter`. |
+| R14 | C20's assigned kind range 2003–2059 collides with C07 and C21 | C20 registers only in **2005–2009 and 2051**. C07 and C21 keep what they already hold. |
+| R15 | Death settlement ownership between C15 (bankruptcy) and C20 (demography) | C20 **orchestrates** the eight steps and **delegates** the insolvency path to C15's `bankruptcy.settle_death`. C20 does not reimplement the waterfall. |
+| R16 | `polis_remember` / `polis_recall` cannot synchronously return engine-assigned ids because the gateway cannot write | Respond `{pending: true}`; event 20060 is authoritative and a later observation may expose the final id. Protocol v1 has no dedicated receipt frame. |
+| R17 | Observatory needs prompt reconstruction but may not import `polis.agents` or `polis.llm` | Injected `PromptReconstructor` protocol implemented in C24. `prompt.source` gains a third value, `unavailable`. |
+| R18 | Who owns the external JSON projection of `Observation` | **C07** owns `to_external_json()`. C22 owns the published schema and the byte-identity test between them. |
+| R19 | C06 cannot import agent or society state to rank co-located agents | C06 accepts an injected `ColocationContext` and `DistrictInputs`. The import fence holds. |
+| R20 | `schools.quality` has two possible writers | **C21 is the sole writer.** C06 emits kind 3063 with the district inputs; C21 consumes it. |
+| R21 | Tuition crosses the `agents → economy` fence | C21 emits `TUITION_DUE` (14040); the economy drains it. Same pattern for any agent-side money event. |
+
+### 7.3 Frozen interfaces
+
+Three interfaces are frozen at handback and may not change without a written amendment,
+because every downstream chunk compiles against them:
+
+1. **`InstitutionResolver`** (C10 §5) — implemented by C06, C11–C19.
+2. **`Observation`** and its sub-views (C07 §5) — consumed by C09, C10, C22.
+3. **`Ledger.post_transaction(legs, *, tick, cause)`** (C11 §5) — called by every module that
+   moves money. `reason` lives on each `Leg`, not on the transaction.
+
+### 7.4 Merge gates
+
+These tests block a merge regardless of which chunk is being merged:
+
+| Test | Asserts |
+|---|---|
+| `tests/invariants/test_money_closes.py` | `INV-MONEY` holds to the cent over a 5,000-tick stub run |
+| `tests/invariants/test_crime_is_possible.py` | No code path rejects an action for illegality; `RejectReason` has no `legality` member |
+| `tests/invariants/test_death_settlement.py` | `INV-MONEY` holds across a death with open exchange orders, an outstanding loan, and no heirs |
+| `tests/determinism/test_same_seed.py` | Two runs of the same tuple produce identical hash chains |
+| `tests/determinism/test_projection_rebuild.py` | Live state and rebuilt-from-log state are identical after 500 ticks |
+| `tests/unit/test_kind_ranges.py` | No kind is declared outside its owner's range; no two chunks claim the same number |

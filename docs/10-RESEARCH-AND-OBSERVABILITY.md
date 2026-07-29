@@ -1084,7 +1084,8 @@ target firm's symbol.
 ### 5.1 The reproducibility tuple
 
 ```
-(config_hash, prompt_manifest, model_manifest, code_git_sha, master_seed, completion_cache)
+(config_hash, prompt_manifest, model_manifest, code_git_sha, master_seed,
+ completion_cache_manifest_hash)
 ```
 
 Stored on `runs` (`03-DATA-MODEL.md` §1.1). Two results are comparable only if the tuple
@@ -1099,7 +1100,7 @@ the tuple diff first and refuse on an undeclared difference** (§12 R2).
 | `model_manifest` | Any pooling (T5). Mixed model versions within a cell are refused outright. |
 | `code_git_sha` | Any comparison, unless a diff of the engine shows no behavioural path changed — and demonstrating that is harder than re-running |
 | `master_seed` | Nothing; it *is* the replication unit (§10.1) |
-| `completion_cache` | Nothing, if it is a superset. A missing key turns replay into a live call, which turns reproduction into new data |
+| `completion_cache_manifest_hash` | Exact reproduction and pooling. This immutable hash identifies the per-run map from every used cache key to the canonical persisted-completion-record hash; a missing or changed completion produces a different snapshot identifier. |
 
 ### 5.2 The three commands
 

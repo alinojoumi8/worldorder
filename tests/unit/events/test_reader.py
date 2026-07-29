@@ -8,6 +8,20 @@ from polis.events.log import EventLog, MemoryEventSink
 from polis.events.reader import EventQuery, MemoryEventReader
 from polis.events.types import NewEvent
 
+RUN_STARTED_PAYLOAD = {
+    "config_hash": "x",
+    "prompt_manifest": {},
+    "model_manifest": {},
+    "code_git_sha": "a" * 40,
+    "master_seed": 1,
+    "completion_cache_manifest_hash": "b" * 64,
+    "mechanism_manifest": {},
+    "metric_manifest": {},
+    "kind_registry_hash": "c" * 64,
+    "clock_profile": "test",
+    "scale": 1,
+}
+
 
 @pytest.mark.asyncio
 async def test_memory_reader_filters_and_follows_causes() -> None:
@@ -15,7 +29,7 @@ async def test_memory_reader_filters_and_follows_causes() -> None:
     sink = MemoryEventSink()
     log = EventLog(run_id, sink)
     root = log.stage(
-        NewEvent(RUN_STARTED, {"config_hash": "x", "seed": 1}),
+        NewEvent(RUN_STARTED, RUN_STARTED_PAYLOAD),
         tick=0,
         sim_time=datetime(2026, 1, 1),
     )

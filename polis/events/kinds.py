@@ -44,7 +44,11 @@ KIND_RANGES: Final = (
     KindRange(2005, 2005, "agent_sample", "polis.agents", Persistence.SAMPLED),
     KindRange(2006, 2999, "agents", "polis.agents", Persistence.PERSISTED),
     KindRange(3000, 3999, "world", "polis.world", Persistence.PERSISTED),
-    KindRange(4000, 4099, "cognition", "polis.agents", Persistence.SAMPLED),
+    KindRange(4000, 4009, "cognition_sample", "polis.agents", Persistence.SAMPLED),
+    KindRange(4010, 4010, "memory", "polis.agents", Persistence.PERSISTED),
+    KindRange(4011, 4019, "cognition_sample", "polis.agents", Persistence.SAMPLED),
+    KindRange(4020, 4020, "reflection", "polis.agents", Persistence.PERSISTED),
+    KindRange(4021, 4099, "cognition_sample", "polis.agents", Persistence.SAMPLED),
     KindRange(4100, 4199, "llm", "polis.llm", Persistence.PERSISTED),
     KindRange(4200, 4999, "agent_aux", "polis.agents", Persistence.PERSISTED),
     KindRange(5000, 5999, "labour", "polis.economy", Persistence.PERSISTED),
@@ -60,6 +64,7 @@ KIND_RANGES: Final = (
     KindRange(13000, 13999, "law", "polis.society", Persistence.PERSISTED),
     KindRange(14000, 14999, "education", "polis.agents", Persistence.PERSISTED),
     KindRange(15000, 15999, "demography", "polis.agents", Persistence.PERSISTED),
+    KindRange(20000, 20999, "external_gateway", "polis.gateway", Persistence.PERSISTED),
     KindRange(90000, 90999, "ephemeral", "*", Persistence.EPHEMERAL),
     KindRange(99000, 99999, "research", "polis.research", Persistence.PERSISTED),
 )
@@ -143,7 +148,19 @@ RUN_STARTED = register_kind(
     "RUN_STARTED",
     owner="polis.kernel",
     persistence=Persistence.PERSISTED,
-    schema=_schema("config_hash", "seed"),
+    schema=_schema(
+        "config_hash",
+        "prompt_manifest",
+        "model_manifest",
+        "code_git_sha",
+        "master_seed",
+        "completion_cache_manifest_hash",
+        "mechanism_manifest",
+        "metric_manifest",
+        "kind_registry_hash",
+        "clock_profile",
+        "scale",
+    ),
 )
 TICK_STARTED = register_kind(
     1002,
@@ -804,14 +821,14 @@ MEMORY_WRITTEN = register_kind(
     4010,
     "MEMORY_WRITTEN",
     owner="polis.agents",
-    persistence=Persistence.SAMPLED,
+    persistence=Persistence.PERSISTED,
     schema=_schema("memory_id", "agent_id", "type", "importance"),
 )
 REFLECTION_PRODUCED = register_kind(
     4020,
     "REFLECTION_PRODUCED",
     owner="polis.agents",
-    persistence=Persistence.SAMPLED,
+    persistence=Persistence.PERSISTED,
     schema=_schema("memory_id", "agent_id", "parent_memory_ids"),
 )
 LANE_HEALTH_CHECKED = register_kind(
@@ -3179,6 +3196,233 @@ SKILL_ACCRUED = register_kind(
     persistence=Persistence.PERSISTED,
     schema=_schema("agent_id", "skill", "delta"),
 )
+
+# C22: external-agent gateway identity, control, liveness, and audit events.
+EXTERNAL_REGISTRATION_REQUESTED = register_kind(
+    20000,
+    "EXTERNAL_REGISTRATION_REQUESTED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "pubkey",
+        "display_name",
+        "operator",
+        "contact",
+        "declared_model",
+        "declared_model_version",
+        "declared_scaffold",
+        "scaffold_notes",
+        "memory",
+        "sdk_version",
+        "protocol_version",
+        "requested_embodiment",
+        "conformance_token",
+    ),
+)
+EXTERNAL_AGENT_REGISTERED = register_kind(
+    20001,
+    "EXTERNAL_AGENT_REGISTERED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "pubkey",
+        "operator",
+        "declared_model",
+        "declared_scaffold",
+        "embodiment",
+        "twin_agent_id",
+        "conformance_token",
+        "admitted_tick",
+    ),
+)
+EXTERNAL_REGISTRATION_REJECTED = register_kind(
+    20002,
+    "EXTERNAL_REGISTRATION_REJECTED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("pubkey", "reason"),
+)
+EXTERNAL_KEY_REVOKED = register_kind(
+    20003,
+    "EXTERNAL_KEY_REVOKED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "revoked_by", "reason", "strikes"),
+)
+EXTERNAL_AGENT_NATURALISED = register_kind(
+    20004,
+    "EXTERNAL_AGENT_NATURALISED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "reason",
+        "consecutive_misses",
+        "ticks_driven",
+        "driver_after",
+    ),
+)
+EXTERNAL_CONTROL_RESUMED = register_kind(
+    20005,
+    "EXTERNAL_CONTROL_RESUMED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "gap_ticks", "session_id"),
+)
+EXTERNAL_SESSION_OPENED = register_kind(
+    20010,
+    "EXTERNAL_SESSION_OPENED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "session_id",
+        "custody",
+        "delegate_pubkey",
+        "ttl_s",
+        "transport",
+        "sdk_version",
+        "protocol_version",
+    ),
+)
+EXTERNAL_SESSION_CLOSED = register_kind(
+    20011,
+    "EXTERNAL_SESSION_CLOSED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "session_id", "reason"),
+)
+EXTERNAL_ACTION_SUBMITTED = register_kind(
+    20020,
+    "EXTERNAL_ACTION_SUBMITTED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "action_id",
+        "tick",
+        "type",
+        "nonce",
+        "params_hash",
+        "reasoning_hash",
+        "sig",
+    ),
+)
+EXTERNAL_ACTION_REJECTED = register_kind(
+    20021,
+    "EXTERNAL_ACTION_REJECTED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "action_id", "tick", "stage", "reason"),
+)
+EXTERNAL_DEADLINE_MISSED = register_kind(
+    20030,
+    "EXTERNAL_DEADLINE_MISSED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "tick",
+        "window_ms",
+        "consecutive_misses",
+        "fell_back_to",
+        "arrived_late_ms",
+    ),
+)
+EXTERNAL_OBSERVATION_PUSHED = register_kind(
+    20031,
+    "EXTERNAL_OBSERVATION_PUSHED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "tick", "digest_hash", "bytes", "channel"),
+)
+EXTERNAL_RATE_LIMITED = register_kind(
+    20040,
+    "EXTERNAL_RATE_LIMITED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "tick", "limit", "observed", "window"),
+)
+EXTERNAL_AGENT_THROTTLED = register_kind(
+    20041,
+    "EXTERNAL_AGENT_THROTTLED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "from_tick",
+        "until_tick",
+        "factor",
+        "trigger",
+        "strikes",
+    ),
+)
+EXTERNAL_AGENT_SUSPENDED = register_kind(
+    20042,
+    "EXTERNAL_AGENT_SUSPENDED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "from_tick", "until_tick", "strikes", "trigger"),
+)
+EXTERNAL_INJECTION_FLAGGED = register_kind(
+    20050,
+    "EXTERNAL_INJECTION_FLAGGED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "direction",
+        "channel",
+        "source_ref",
+        "pattern_id",
+        "sample_hash",
+        "action_taken",
+    ),
+)
+EXTERNAL_SIM_AWARE_FLAGGED = register_kind(
+    20051,
+    "EXTERNAL_SIM_AWARE_FLAGGED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("agent_id", "tick", "surface", "confidence", "sample_hash"),
+)
+EXTERNAL_MEMORY_WRITTEN = register_kind(
+    20060,
+    "EXTERNAL_MEMORY_WRITTEN",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema(
+        "agent_id",
+        "memory_id",
+        "type",
+        "importance_requested",
+        "importance_assigned",
+        "evicted_memory_id",
+        "citations_dropped",
+    ),
+)
+EXTERNAL_SCORECARD_SNAPSHOT = register_kind(
+    20070,
+    "EXTERNAL_SCORECARD_SNAPSHOT",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("tick", "agents"),
+)
+EXTERNAL_ARENA_INVALIDATED = register_kind(
+    20090,
+    "EXTERNAL_ARENA_INVALIDATED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("reason", "offending_agent_ids", "threshold", "observed"),
+)
+EXTERNAL_GATEWAY_DEGRADED = register_kind(
+    20900,
+    "EXTERNAL_GATEWAY_DEGRADED",
+    owner="polis.gateway",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("reason", "affected_agent_ids", "tick"),
+)
 METRIC_RECORDED = register_kind(
     99071,
     "METRIC_RECORDED",
@@ -3199,4 +3443,17 @@ LIVE_AGENTS = register_kind(
     owner="polis.observatory",
     persistence=Persistence.EPHEMERAL,
     schema=_schema("tick", "agents"),
+)
+EXTERNAL_AGENT_STATUS = register_kind(
+    90020,
+    "EXTERNAL_AGENT_STATUS",
+    owner="polis.gateway",
+    persistence=Persistence.EPHEMERAL,
+    schema=_schema(
+        "agent_id",
+        "driver",
+        "connected",
+        "last_decision_ms",
+        "slots_remaining",
+    ),
 )

@@ -137,15 +137,16 @@ def _synthesise(schema: Mapping[str, Any], digest: bytes, prompt: str, path: str
     if kind == "boolean":
         return bool(digest[len(path) % len(digest)] % 2)
     pattern = str(schema.get("pattern", ""))
-    prefix_match = re.fullmatch(r"\^([a-z]{2})_\[a-z0-9_\]\{1,32\}\$", pattern)
+    prefix_match = re.fullmatch(r"\^([a-z]{2})_\[a-z0-9_\]\{1,(\d+)\}\$", pattern)
     if prefix_match is not None:
         prefix = prefix_match.group(1)
+        max_suffix_length = int(prefix_match.group(2))
         prompted = ids_from_prompt(prompt).get(prefix, [])
-        candidate_pattern = re.compile(f"^{prefix}_[a-z0-9_]{{1,32}}$")
+        candidate_pattern = re.compile(f"^{prefix}_[a-z0-9_]{{1,{max_suffix_length}}}$")
         for candidate in prompted:
             if candidate_pattern.fullmatch(candidate):
                 return candidate
-        suffix = hashlib.sha256(digest + path.encode()).hexdigest()[:12]
+        suffix = hashlib.sha256(digest + path.encode()).hexdigest()[: min(max_suffix_length, 12)]
         return f"{prefix}_{suffix}"
     minimum_length = int(schema.get("minLength", 1))
     text = f"stub-{hashlib.sha256(digest + path.encode()).hexdigest()[:16]}"

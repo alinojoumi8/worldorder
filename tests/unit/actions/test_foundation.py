@@ -211,6 +211,18 @@ def test_strict_action_params_accept_json_arrays_in_json_mode() -> None:
     )
 
 
+def test_agent_params_accept_full_gateway_identity_and_reject_longer_ids() -> None:
+    agent_id = f"ag_{'ab' * 32}"
+
+    say = SayParams(text="hello", addressed_to=(agent_id,))
+    follow = FollowParams(followee_id=agent_id)
+
+    assert say.addressed_to == (agent_id,)
+    assert follow.followee_id == agent_id
+    with pytest.raises(ValidationError):
+        SayParams(text="hello", to_id=f"ag_{'a' * 65}")
+
+
 @pytest.mark.parametrize("stance", [-1.01, 1.01])
 def test_post_stance_rejects_values_outside_the_unit_interval(stance: float) -> None:
     with pytest.raises(ValidationError):

@@ -104,7 +104,11 @@ def seal(draft: NewEvent, *, seq: int, run_id: UUID, tick: int,
 def recompute(ev: Event) -> str: ...
 def verify_event(ev: Event) -> bool: ...                      # recompute(ev) == ev.hash
 def verify_signature(ev: Event, pubkey_hex: str | None = None) -> bool:
-    """ed25519 over canonical_event_bytes with sig=None. pubkey defaults to actor_id[3:]."""
+    """ed25519 over canonical_event_bytes with sig=None.
+
+    pubkey defaults to actor_id[3:] only for a full ag_<64-lowercase-hex> id.
+    Callers must supply pubkey_hex for legacy or truncated agent ids.
+    """
 ```
 
 ```python
@@ -337,7 +341,7 @@ framing events, because the writer emits and the verifier depends on them.
 
 | Kind | Name | Persistence | Payload (required keys) |
 |---|---|---|---|
-| 1001 | `RUN_STARTED` | persisted | `config_hash`, `master_seed`, `code_git_sha`, `prompt_manifest`, `model_manifest`, `mechanism_manifest`, `metric_manifest`, `kind_registry_hash`, `clock_profile`, `scale` |
+| 1001 | `RUN_STARTED` | persisted | `config_hash`, `master_seed`, `code_git_sha`, `prompt_manifest`, `model_manifest`, `completion_cache_manifest_hash`, `mechanism_manifest`, `metric_manifest`, `kind_registry_hash`, `clock_profile`, `scale` |
 | 1002 | `TICK_STARTED` | persisted | `tick`, `sim_time`, `due_cadences` (sorted array of str) |
 | 1003 | `TICK_COMPLETED` | persisted | `tick`, `event_count`, `llm_calls`, `cost_usd_micros` (int), `chain_hash` |
 | 1004 | `RUN_COMPLETED` | persisted | `last_tick`, `last_seq`, `chain_hash`, `total_events` |
@@ -418,9 +422,10 @@ break on new kinds.
 **9.9 Signatures.** `sig` is mandatory iff the event originated from an external agent
 (20000–20999 and any event whose `actor_id` names a registered external agent) or is a
 99xxx injection (`02 §3.4`). Verification is ed25519 over
-`canonical_event_bytes(..., sig=None)`. `agent_id` **is** the pubkey: `ag_<pubkey_hex[:16]>`
-truncates, so the full pubkey must be supplied by the caller — `verify_signature` takes an
-explicit `pubkey_hex` and only falls back to `actor_id[3:]` for full-length ids. C22 owns
+`canonical_event_bytes(..., sig=None)`. `agent_id` **is** the full public-key form
+`ag_<pubkey_hex>`; the prior `ag_<pubkey_hex[:16]>` form truncated, so the full pubkey must
+be supplied by the caller — `verify_signature` takes an explicit `pubkey_hex` and only
+falls back to `actor_id[3:]` for full-length ids. C22 owns
 the key registry; C02 owns the algorithm.
 
 **9.10 `polis verify`.** `polis verify --run <id> [--from-seq N] [--no-signatures] [--json]`.

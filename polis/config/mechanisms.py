@@ -20,6 +20,25 @@ class MechanismSpec:
 
 
 MECHANISM_REGISTRY: Final[dict[str, MechanismSpec]] = {}
+_MECHANISM_MODULES: Final = (
+    "polis.agents.demography",
+    "polis.economy.central",
+    "polis.economy.credit",
+    "polis.economy.firms",
+    "polis.economy.fiscal",
+    "polis.economy.goods",
+    "polis.economy.labour",
+    "polis.economy.policy",
+    "polis.economy.production",
+    "polis.economy.ventures",
+    "polis.external",
+    "polis.society.beliefs",
+    "polis.society.comms",
+    "polis.society.graph",
+    "polis.society.law",
+    "polis.society.policy",
+    "polis.society.polity",
+)
 F = TypeVar("F", bound=Callable[..., Any])
 
 
@@ -47,20 +66,18 @@ def mechanism(
 
 
 def active_mechanisms(settings: Settings) -> dict[str, MechanismSpec]:
-    if settings.economy.enabled:
-        for module in (
-            "polis.economy.firms",
-            "polis.economy.labour",
-            "polis.economy.policy",
-            "polis.economy.ventures",
-        ):
-            importlib.import_module(module)
+    # Decorators populate the registry at import time. Load every owner before
+    # reading it so the manifest cannot depend on unrelated import/test order.
+    for module in _MECHANISM_MODULES:
+        importlib.import_module(module)
     disabled = {"off", "false", "disabled", "none"}
     result: dict[str, MechanismSpec] = {}
     for mechanism_id, spec in sorted(MECHANISM_REGISTRY.items()):
         if spec.module.startswith("polis.economy") and not settings.economy.enabled:
             continue
         if spec.module == "polis.economy.ventures" and not settings.ventures.enabled:
+            continue
+        if spec.module == "polis.external" and not settings.gateway.enabled:
             continue
         candidates: tuple[str, ...] = (mechanism_id, mechanism_id.replace(".", "_"))
         configured: str | None = None

@@ -66,3 +66,15 @@ ignore_imports =
     polis.economy.policy -> polis.agents.state
     polis.economy.state -> polis.agents.state
     polis.economy.ventures -> polis.agents.state
+
+[importlinter:contract:gateway_readmodel_only]
+name = Gateway is isolated from engine and agent internals
+type = forbidden
+source_modules =
+    polis.gateway
+forbidden_modules =
+    polis.kernel
+    polis.agents
+    polis.store
+ignore_imports =
+    polis.gateway.tools -> polis.store.readmodels.external

@@ -1,0 +1,79 @@
+run:
+  name: external-agent-sandbox
+  seed: 20260728
+  ticks: 2400
+  checkpoint_interval: 100
+  retention: full
+  scale: 16
+clock:
+  profile: chronicle
+  ticks_per_sim_day: 1
+  days_per_sim_year: 360
+  demographic_acceleration: 1.0
+population:
+  initial_agents: 16
+world:
+  width: 32
+  height: 32
+  districts: 4
+  places_per_district: 8
+llm:
+  est_tokens_per_call: 3300
+  request_timeout_ms: 3000
+  providers:
+    stub:
+      kind: stub
+      max_concurrency: 16
+      timeout_s: 3.0
+      billing: free
+  budget:
+    lines:
+      cognition: {calls_per_tick: 4, tokens_per_tick: 13200}
+      ancillary: {calls_per_tick: 2, tokens_per_tick: 6600}
+      external: {calls_per_tick: 16, tokens_per_tick: 52800}
+      free: {calls_per_tick: 32, tokens_per_tick: 105600}
+    usd_per_run: 0
+    usd_halt_multiple: 1.2
+    on_exhaustion: degrade_to_reflex
+  routing:
+    DELIBERATE: {lane: stub, model: stub-v1, template: deliberate/user.v1.jinja}
+    REFLECT: {lane: stub, model: stub-v1, template: reflect/questions.v1.jinja}
+    IMPORTANCE: {lane: stub, model: stub-v1, template: importance/user.v1.jinja}
+    EMBED: {lane: stub, model: stub-v1, template: embedding/user.v1.jinja}
+  cache:
+    mode: live
+    path: file://./.cache/completions
+salience:
+  policy: weighted
+  deliberate_share: 0.07
+  cognition_sample_rate: 0.02
+memory: {}
+mechanisms: {}
+society: {}
+ablations: {}
+store:
+  # Passwords belong in POLIS_STORE__DSN / POLIS_STORE__READER_DSN or .pgpass.
+  dsn: postgresql://polis_engine@127.0.0.1:5432/polis
+  reader_dsn: postgresql://polis_reader@127.0.0.1:5432/polis
+  redis_url: redis://127.0.0.1:6379/0
+  blob_url: file://./.blobs
+telemetry: {}
+observatory:
+  enabled: true
+  bind: 127.0.0.1:8080
+gateway:
+  enabled: true
+  bind: 127.0.0.1:8081
+  registration:
+    open_until_tick: -1
+    pending_ttl_ticks: 240
+    require_conformance_token: true
+  deadline:
+    decision_deadline_ms: 3000
+    seal_margin_ms: 50
+    drain_timeout_ms: 100
+  arena:
+    live_scorecard: true
+research:
+  gates:
+    external_miss_rate_max: 0.05

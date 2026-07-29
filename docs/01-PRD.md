@@ -103,9 +103,20 @@ not behaviours. There is no rule that says "when unemployment rises, agents beco
 If that happens, it happens because agents reasoned their way there. Anything hard-coded is
 declared as such in the spec and tagged `MECHANISM` in the config so it can be ablated.
 
-**G2 — Reproducibility.** A run is defined by `(config, seed, model_versions,
-completion_cache)`. Re-running that tuple must produce an identical event log. This is
+**G2 — Reproducibility.** A completed run is defined by `(config_hash, prompt_manifest,
+model_manifest, code_git_sha, master_seed, completion_cache_manifest_hash)`. Re-running that tuple must
+produce an identical event log. This is
 non-negotiable and shapes the whole architecture (see `02-ARCHITECTURE.md §4`).
+At launch, `RUN_STARTED` and the initial database record persist the same launch
+`RunIdentity`. The runtime cache is opened before either record is written: its launch hash
+identifies the exact initial cache snapshot, and the database also stores that launch
+manifest. The manifest is empty only when the selected cache mode explicitly enforces a
+cold start (`live`); `hybrid` and `replay` include every compatible persistent entry already
+available in the run namespace. After execution, the database record replaces only the
+cache fields with the finalized manifest and hash, covering the launch snapshot plus
+completions used or produced during execution. Those final cache fields plus the unchanged
+launch fields form the authoritative completed-run tuple used for replay; the launch event
+remains the audit record of what existed before execution.
 
 **G3 — Auditability.** Every event carries an actor, a tick, a cause, and a hash-chained
 position in the log. A reviewer must be able to trace any macro statistic back to the
@@ -246,9 +257,9 @@ LLM cognition. **The budget is a hard cap, not a target.**
 
 | Metric | Target |
 |---|---|
-| Determinism | Two runs of the same `(config, seed, cache)` produce byte-identical event-log hash chains |
+| Determinism | Two runs of the same `(config_hash, prompt_manifest, model_manifest, code_git_sha, master_seed, completion_cache_manifest_hash)` produce byte-identical event-log hash chains |
 | Throughput | ≥ 1 tick/second wall clock at 1,000 agents, `microscope` profile, on a single 16-core machine |
-| LLM cost | ≤ $12 per simulated year at 1,000 agents under the default budget policy |
+| LLM cost | ≤ $12 per simulated year at 1,000 agents in the **`chronicle`** profile. **`microscope` costs ~$250–400 per simulated year** at the same budget policy — 24× the ticks. This is not a bug and not fixable by tuning; see `09-MODEL-ROUTING.md §7`. |
 | Tick latency p99 | ≤ 4s including LLM batch |
 | Replay fidelity | Replay from event log + completion cache reproduces all metric series exactly |
 | Log integrity | Hash chain verifies for every completed run |
@@ -268,6 +279,15 @@ vanity metrics — a failure means the model is broken, and that is a finding.
 | **V5 Sensitivity** | Outcomes change under seed variation but the *sign* of headline effects is stable across ≥ 20 seeds | Single-seed findings are anecdotes |
 | **V6 Prompt robustness** | Headline effects survive a paraphrase of the core agent prompt | If a finding dies under paraphrase it is a fact about the prompt, not the society |
 | **V7 Model robustness** | Headline effects replicate across at least two model families | Otherwise the finding is a property of one vendor's training data |
+| **V8 External liveness** | For each operator-driven agent separately, `miss_rate = deadlines_missed / ticks_driven` must be ≤ 5%; rates are never pooled. `ticks_driven` means exactly the number of scheduled operator-decision seals for that agent while its driver was `operator`, including both accepted actions and reflex fallbacks. One scheduled operator-driven decision is the minimum for V8 evaluation. A deadline is missed when the decision seal is reached without a valid accepted action and the engine uses reflex fallback. Consequently, any miss fails an agent with 1–19 scheduled decisions; uneven and longer runs are still evaluated per agent. An agent with zero scheduled decisions is `n/a` for V8 but remains ineligible for Track C because its `driven_fraction` is below 90%. | A foreign agent that stalls is being replaced by its reflex policy, so the run measures our fallback, not their scaffold. Runs failing V8 are tagged `invalid_for_cross_agent_comparison` and excluded from Track C. |
+
+**Cost consequence of V5 and V7.** Because `call_seed`, `provider`, and `model` are all in
+the completion-cache key, the cache contributes *nothing* to seed variation or to
+cross-family replication — every seed and every model family is a full-price run. Twenty
+seeds × two families is 40 runs. In `chronicle` that is affordable; in `microscope` it is
+not. **This is the concrete reason generational and multi-seed studies use `chronicle` and
+`microscope` is reserved for short, deep, single-condition studies.** Arithmetic in
+`09-MODEL-ROUTING.md §7`.
 
 ### 7.3 Research output metrics
 

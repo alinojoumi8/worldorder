@@ -156,13 +156,17 @@ class, and owning module. **Adding a kind anywhere else is a bug.**
 | 1000–1999 | Kernel & run lifecycle | `polis.kernel` | yes |
 | 2000–2999 | Agent lifecycle & vitals | `polis.agents` | yes |
 | 3000–3999 | World, movement, space | `polis.world` | yes |
-| 4000–4999 | Cognition, memory, salience | `polis.agents` | yes (sampled — see §3.3) |
+| 4000–4099 | Cognition, memory, salience | `polis.agents` | yes (sampled except 4010 and 4020 — see §3.3) |
+| 4100–4199 | LLM router, cache, budget | `polis.llm` | yes (**not** sampled) |
+| 4200–4999 | Cognition (reserved) | `polis.agents` | yes (**not** sampled) |
 | 5000–5999 | Labour market & employment | `polis.economy.labour` | yes |
 | 6000–6999 | Firms, production, goods market | `polis.economy.firms` | yes |
 | 7000–7999 | Exchange, securities, order book | `polis.economy.exchange` | yes |
 | 8000–8999 | Banking, credit, monetary policy | `polis.economy.banking` | yes |
 | 9000–9999 | Ventures, funding, M&A, bankruptcy | `polis.economy.ventures` | yes |
-| 10000–10999 | Communication & social graph | `polis.society.comms` | yes |
+| 10000–10059 | Communication & social graph | `polis.society.comms` | yes |
+| 10060–10069 | Belief updates | `polis.society.beliefs` | yes |
+| 10070–10999 | Communication & social graph (reserved) | `polis.society.comms` | yes |
 | 11000–11999 | Social media & news | `polis.society.media` | yes |
 | 12000–12999 | Government, elections, policy | `polis.society.polity` | yes |
 | 13000–13999 | Crime, police, courts | `polis.society.law` | yes |
@@ -180,7 +184,7 @@ Selected kinds (the full table is generated from `kinds.py` into `11-GLOSSARY.md
 
 | Kind | Name | Payload highlights |
 |---|---|---|
-| 1001 | `RUN_STARTED` | config hash, seed, model manifest, prompt manifest |
+| 1001 | `RUN_STARTED` | config hash, prompt manifest, model manifest, code Git SHA, master seed, completion-cache manifest hash, mechanism and metric manifests, kind-registry hash, clock profile, scale |
 | 1002 | `TICK_STARTED` | tick, sim_time |
 | 1003 | `TICK_COMPLETED` | tick, event count, llm calls, cost |
 | 1010 | `INVARIANT_VIOLATED` | invariant id, expected, actual, halting |
@@ -214,20 +218,26 @@ Selected kinds (the full table is generated from `kinds.py` into `11-GLOSSARY.md
 
 ### 3.3 Cognition-event sampling
 
-Kinds 4001–4099 (perception digests, salience scores) would produce ~1,000 rows/tick even
-when nothing interesting happens. They are written under a sampling policy:
+High-volume kinds 4001–4004 and the reserved sampled slots 4005–4009, 4011–4019, and
+4021–4099 (perception digests, salience scores, routing, and retrieval) would produce
+~1,000 rows/tick even when nothing interesting happens. They are written under a sampling
+policy:
 
 - Always written when the agent was routed to `deliberate` or `reflect`.
 - Written for a seeded random `cognition_sample_rate` (default 0.02) of reflex agents.
 - The **full** LLM prompt and completion are never in the event payload — the payload
   carries an `llm_call_id` foreign key into the `llm_calls` table.
 
+`MEMORY_WRITTEN` (4010) and `REFLECTION_PRODUCED` (4020) are never sampled. They are the
+durable provenance spine for the G6 agent inspector, so every memory and reflection remains
+visible even when the surrounding high-volume cognition telemetry is sampled.
+
 ### 3.4 Signatures
 
 | Origin | Signed? | Mechanism |
 |---|---|---|
 | Native agent action | No | Provenance is guaranteed by the engine; signing 20k events/tick would dominate CPU |
-| External agent action | **Yes, mandatory** | ed25519 over the canonical action serialisation; `agent_id` *is* the pubkey (hex) |
+| External agent action | **Yes, mandatory** | Ed25519 over the canonical action serialisation; canonical `agent_id` is `ag_<full_pubkey_hex>`, where `full_pubkey_hex` is exactly the 32-byte Ed25519 public key encoded as 64 lowercase hexadecimal characters without a `0x` prefix. The separately stored public-key field is verified first; registration/action input is rejected unless it matches the key encoded in `agent_id`. |
 | Scenario injection | Yes | Signed by the researcher key so shocks can't be confused with organic events |
 | System/world | No | `actor_id` is `null`, chain integrity covers it |
 
@@ -237,8 +247,18 @@ This is the deliberate divergence from Buzz noted in `01-PRD.md §9.1`.
 
 ## 4. Determinism
 
-Given `(config, seed, model_manifest, completion_cache)`, two runs must produce identical
-event-log hash chains. Five sources of nondeterminism, five controls.
+The pre-execution identity tuple is `(config_hash, prompt_manifest, model_manifest,
+code_git_sha, master_seed, completion_cache_manifest_hash, mechanism_manifest,
+metric_manifest, kind_registry_hash, clock_profile, scale)`. Given the same tuple, two runs
+must produce identical event-log hash chains. Five sources of nondeterminism, five controls.
+The composition root creates one `RunIdentity` snapshot; both `RUN_STARTED` and the initial
+`runs` row are serialized from it rather than recomputing individual fields in separate
+layers. The completion-cache hash in that snapshot identifies the launch cache; it is not
+the exact-records-used manifest, which is a derived output finalized on the run row at
+termination alongside the terminal event-chain hash. The event chain commits every recorded
+external-agent action. A detached replay bundle for an externally driven run must also
+publish the canonical hash of that recorded external-action trace so the trace supplied to
+replay can be verified before execution.
 
 ### 4.1 Randomness — `RngRegistry`
 
@@ -312,9 +332,11 @@ Consequences:
 
 ### 4.5 Time
 
-`datetime.now()` is banned in the engine. Simulated time comes from `Clock`; wall-clock
-time is recorded only in `llm_calls.latency_ms` and run metadata, never in event payloads
-or state.
+`datetime.now()` is banned in the engine. Simulated time comes from `Clock`.
+`llm_calls.latency_ms` is elapsed request duration, not a wall-clock timestamp. Wall-clock
+values are limited to run metadata and the operational gateway records defined in
+`03-DATA-MODEL.md §10`; request timestamps must never enter event payloads or simulated
+state.
 
 ### 4.6 Floating point
 
@@ -471,16 +493,16 @@ Grouped by owning institution; full parameter schemas live in each domain spec.
 
 | Group | Types |
 |---|---|
-| **world** | `MOVE_TO`, `IDLE`, `SLEEP`, `EAT` |
+| **world** | `MOVE_TO`, `IDLE`, `SLEEP`, `EAT`, `RENT_HOME` |
 | **speech** | `SAY`, `DIRECT_MESSAGE`, `BROADCAST` |
 | **labour** | `APPLY_FOR_JOB`, `ACCEPT_OFFER`, `DECLINE_OFFER`, `QUIT_JOB`, `NEGOTIATE_WAGE`, `POST_VACANCY`, `MAKE_OFFER`, `FIRE_EMPLOYEE`, `WORK` |
 | **education** | `ENROL`, `STUDY`, `DROP_OUT`, `TAKE_EXAM` |
 | **goods** | `BUY_GOOD`, `SET_PRICE`, `PRODUCE`, `RESTOCK` |
 | **exchange** | `SUBMIT_ORDER`, `CANCEL_ORDER`, `SHORT`, `IPO_LIST` |
 | **banking** | `OPEN_ACCOUNT`, `DEPOSIT`, `WITHDRAW`, `APPLY_FOR_LOAN`, `REPAY_LOAN`, `DEFAULT` |
-| **ventures** | `FOUND_COMPANY`, `PITCH`, `ISSUE_TERM_SHEET`, `INVEST`, `ACQUIRE`, `SELL_STAKE`, `FILE_BANKRUPTCY` |
+| **ventures** | `FOUND_COMPANY`, `PITCH`, `ISSUE_TERM_SHEET`, `INVEST`, `ACQUIRE`, `SELL_STAKE`, `FILE_BANKRUPTCY`, `DECLARE_DIVIDEND` |
 | **media** | `POST`, `REPOST`, `LIKE`, `COMMENT`, `FOLLOW`, `UNFOLLOW`, `PUBLISH_ARTICLE`, `RETRACT` |
-| **polity** | `JOIN_PARTY`, `ANNOUNCE_CANDIDACY`, `CAMPAIGN`, `VOTE`, `PROPOSE_POLICY`, `LOBBY` |
+| **polity** | `FOUND_PARTY`, `JOIN_PARTY`, `ANNOUNCE_CANDIDACY`, `CAMPAIGN`, `VOTE`, `PROPOSE_POLICY`, `LOBBY` |
 | **law** | `COMMIT_CRIME`, `REPORT_CRIME`, `FILE_SUIT`, `RETAIN_COUNSEL`, `TESTIFY`, `SETTLE`, `RULE` |
 | **social** | `BEFRIEND`, `COURT`, `PROPOSE_UNION`, `DISSOLVE_UNION`, `HAVE_CHILD_INTENT` |
 | **meta** | `NULL_ACTION` (the substitute for a rejected action) |
@@ -536,11 +558,13 @@ worldorder/
     │   ├── media/              # social platform, feed algorithms, news outlets
     │   ├── beliefs.py
     │   ├── polity.py
+    │   ├── policy.py
     │   └── law.py
     ├── gateway/                # mcp_server.py, rest.py, auth.py, queue.py, sdk/
     ├── observatory/            # api.py, metrics_api.py, live.py
     ├── research/               # metrics, experiments, replay, scenario, exports
-    ├── config/                 # settings.py (pydantic-settings), profiles/
+    ├── config/                 # settings.py (pydantic-settings), profiles/, canon.py,
+    │                           #   runtime.py — see §7.2
     └── cli/                    # typer app
 ```
 
@@ -555,7 +579,7 @@ world    → kernel, events, config
 agents   → kernel, events, world, llm, store, config
 economy  → kernel, events, world, store, config    (never: agents.cognition)
 society  → kernel, events, world, store, config    (never: agents.cognition)
-gateway  → events, config, store                   (never: kernel, agents)
+gateway  → events, config, store.readmodels.external only (never: kernel, agents, other store modules)
 observatory → store, events, config                (read-only; never kernel)
 research → everything (it is the composition root, along with cli)
 ```
@@ -563,6 +587,60 @@ research → everything (it is the composition root, along with cli)
 The critical rule: **institutions (`economy`, `society`) never import agent cognition.**
 They consume `Action` objects and produce `Event` objects. This is what makes the
 institutional layer independently testable and keeps LLM behaviour out of the market logic.
+
+### 7.2 `polis/config/runtime.py` — the runtime parameter overlay
+
+Enacted policy must actually change the world, or the political layer is theatre. The
+overlay is the single mechanism by which that happens.
+
+| Property | Rule |
+|---|---|
+| **Who writes** | The policy application service in `polis.society.policy` is the only writer. `polis.society.polity` (C18) and `polis.research.scenario` (C25) both submit changes through that service, so a researcher shock and an in-world election use the same persistence, event, and overlay path. |
+| **Who reads** | `polis.economy` and `polis.society`. Never read a policy-controllable parameter from static config. |
+| **Why it lives in `config`** | It is the only package both `economy` and `society` may import under §7.1 without creating a cycle. |
+| **Shape** | Tick-keyed. `overlay.bp("tax.income_bp", tick)` returns the value in force at that tick. History is retained so replay and the causal explorer see what the agent saw. |
+| **Accessors** | Typed and unit-explicit: `.bp(key, tick)` basis points, `.cents(key, tick)`, `.flag(key, tick)`, `.brackets(key, tick)`. **No `.get()` returning `Any`.** |
+| **Units** | All rates are **integer basis points**, never floats (§4.6). Every rate key is suffixed `_bp`. A 22% income tax is `2200`. |
+| **Mutation** | `RuntimeConfig.enact(...)` validates the key and temporal ordering, then updates tick-keyed in-memory history only. The `polis.society.policy` application service validates the proposal and stages the society-owned `POLICY_ENACTED` event. The event log is the durable authority; the `policies` row and runtime history are projections of that event. Direct assignment and direct callers outside that service are forbidden. |
+| **Registry** | `POLICY_REGISTRY` in `polis/society/policy.py` is the closed set of controllable keys with type, unit, bounds, and owning module. `polis/config/runtime.py` deliberately does not own persistence or events, preserving the dependency boundaries in §7.1. |
+
+#### Policy-application atomicity and recovery
+
+Policy enactment uses an event-as-outbox protocol; there is no attempt to make an in-memory
+object participate in a database transaction.
+
+1. The application service validates the proposal, assigns deterministic `policy_id`, and
+   stages `POLICY_ENACTED`. `EventLog.stage` assigns the next `event_seq` from the
+   hash-chain head; the service then uses the returned event's sequence for the provisional
+   policy repository and `RuntimeConfig` overlay. Any changes made to those in-process
+   projections before commit are provisional and cannot take effect during the enactment
+   tick because `effective_tick > enacted_tick`.
+2. The event-sink transaction commits `POLICY_ENACTED` first. A synchronous `policies`
+   projection must use that same transaction; an asynchronous projection treats the
+   committed event as its durable outbox and upserts by `(run_id, policy_id)`, retaining
+   the event-store-assigned `event_seq` as its ordering and idempotency witness.
+   A `policies` row must never commit ahead of its source event.
+3. If validation, staging, or event commit fails, the event batch is rolled back and the
+   run halts. Provisional runtime/repository state is discarded by restoring the last
+   checkpoint and replaying only committed events; the process must not continue from the
+   mutated objects.
+4. If the process crashes after the event commits but before the `policies` projection or
+   live overlay is updated, restart loads the last checkpoint and reconciles every committed
+   `POLICY_ENACTED` event through the current log head. `project_enactment` reconstructs
+   runtime history, while the policies projector inserts or repairs the row idempotently
+   from the same event. This policy reconciliation is not limited to events after the
+   checkpoint sequence.
+5. Exact repeats of `(policy_id, event_seq)` are no-ops. The same `policy_id` with a
+   different event sequence, parameter, value, or tick is corruption: reconciliation
+   halts the run rather than choosing one copy. A checkpoint may advance its event-sequence
+   watermark only after every policy event through that sequence has been applied to both
+   the durable projection and the checkpointed runtime overlay. On startup and
+   `polis rebuild`, derived policy rows are compared with the ordered `POLICY_ENACTED`
+   stream and missing/stale rows are repaired; the table never overrides the log.
+
+This ordering gives one authoritative commit point. At every recovery boundary the only
+permitted outcomes are “no committed enactment” or “all projections derived from the
+committed enactment”; partial live state is never resumed silently.
 
 ---
 
@@ -594,9 +672,9 @@ world:
 
 llm:
   budget:
-    tokens_per_tick: 120_000
-    calls_per_tick: 90
-    usd_per_run: 60.0
+    tokens_per_tick: 300_000        # must exceed calls_per_tick × avg tokens/call
+    calls_per_tick: 90              #   (90 × ~3,300 ≈ 297k) or calls_per_tick never binds
+    usd_per_run: 2000.0             # five microscope years at the PRD's ~$250–400/year
     on_exhaustion: degrade_to_reflex      # degrade_to_reflex | halt
   routing:
     DELIBERATE:     {provider: minimax,  model: MiniMax-M2.7,        temperature: 0.8}
@@ -605,6 +683,7 @@ llm:
     POST_WRITE:     {provider: ollama,   model: gemma4:cloud,        temperature: 1.0}
     NEWS_WRITE:     {provider: minimax,  model: MiniMax-M2,          temperature: 0.7}
     VC_EVAL:        {provider: minimax,  model: MiniMax-M2.7,        temperature: 0.4}
+    CREDIT_EVAL:    {provider: minimax,  model: MiniMax-M2,          temperature: 0.2}
     JUDGE:          {provider: minimax,  model: MiniMax-M2.7,        temperature: 0.2}
     EMBED:          {provider: ollama,   model: embeddinggemma:cloud}
   cache: {mode: hybrid, path: "s3://polis-cache/"}
@@ -729,7 +808,7 @@ nor deterministic.
 | `kind` integer as the only dispatch switch; new feature = new kind | §3.2 kind registry with reserved ranges |
 | Ephemeral kind range that is never stored | 90000–90999 |
 | Hash-chain tamper-evident audit | `Event.prev_hash`/`hash`, `polis verify` |
-| Agents are members with their own keypairs and audit trail, not bots | External agents: ed25519 identity, `agent_id == pubkey`, same action surface (`08-EXTERNAL-AGENT-PROTOCOL.md`) |
+| Agents are members with their own keypairs and audit trail, not bots | External agents: collision-resistant ed25519 identity, `agent_id == "ag_" + full_pubkey_hex`, full key also stored separately, same action surface (`08-EXTERNAL-AGENT-PROTOCOL.md`) |
 | Protocol-native boundaries — agent and engine don't import each other | Gateway speaks MCP; core never imports a vendor SDK |
 | JSON-in / JSON-out CLI designed for LLM tool calls | `polis-agent-cli` in `polis/gateway/sdk/` |
 | YAML workflows with triggers and actions | Scenario DSL (`polis/research/scenario.py`) — same trigger/step shape, used for shock injection |

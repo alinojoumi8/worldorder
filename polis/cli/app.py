@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import selectors
 import sys
+from collections.abc import Coroutine
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 import typer
@@ -15,6 +17,15 @@ from polis.config.paths import repo_git_sha
 from polis.config.settings import Settings, config_hash, load_settings
 
 app = typer.Typer(no_args_is_help=True, help="POLIS deterministic city simulation")
+
+
+def _run_async[T](operation: Coroutine[Any, Any, T]) -> T:
+    if sys.platform == "win32":
+        with asyncio.Runner(
+            loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector())
+        ) as runner:
+            return runner.run(operation)
+    return asyncio.run(operation)
 
 
 def _parse_overrides(values: list[str]) -> dict[str, object]:
@@ -63,13 +74,20 @@ def run(
         typer.echo(json.dumps(result, sort_keys=True) if json_output else yaml_like(result))
         return
     if memory_only:
+        if settings.gateway.enabled:
+            raise typer.BadParameter("--memory-only is not supported with gateway.enabled")
         from polis.living_city import run_living_city
 
-        simulation = asyncio.run(run_living_city(settings))
+        simulation = _run_async(run_living_city(settings))
     else:
-        from polis.store.living_city import run_persistent
+        if settings.gateway.enabled:
+            from polis.cli.wiring.external import run_with_gateway
 
-        simulation = asyncio.run(run_persistent(settings))
+            simulation = _run_async(run_with_gateway(settings))
+        else:
+            from polis.store.living_city import run_persistent
+
+            simulation = _run_async(run_persistent(settings))
     output = {**result, "report": asdict(simulation.report)}
     typer.echo(
         json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
@@ -103,8 +121,8 @@ def resume(
     from polis.store.operations import resume_stored_run
 
     base = load_settings(config)
-    settings = asyncio.run(_stored_settings(base, run_id))
-    report = asyncio.run(resume_stored_run(settings, run_id))
+    settings = _run_async(_stored_settings(base, run_id))
+    report = _run_async(resume_stored_run(settings, run_id))
     output = asdict(report)
     typer.echo(
         json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
@@ -121,8 +139,8 @@ def verify(
     from polis.store.operations import verify_stored_run
 
     base = load_settings(config)
-    settings = asyncio.run(_stored_settings(base, run_id))
-    report = asyncio.run(verify_stored_run(settings, run_id))
+    settings = _run_async(_stored_settings(base, run_id))
+    report = _run_async(verify_stored_run(settings, run_id))
     output = asdict(report)
     typer.echo(
         json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
@@ -141,8 +159,8 @@ def rebuild(
     from polis.store.operations import rebuild_stored_run
 
     base = load_settings(config)
-    settings = asyncio.run(_stored_settings(base, run_id))
-    report = asyncio.run(rebuild_stored_run(settings, run_id))
+    settings = _run_async(_stored_settings(base, run_id))
+    report = _run_async(rebuild_stored_run(settings, run_id))
     output = asdict(report)
     typer.echo(
         json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
@@ -159,8 +177,8 @@ def replay(
     from polis.store.operations import replay_stored_run
 
     base = load_settings(config)
-    settings = asyncio.run(_stored_settings(base, run_id))
-    report = asyncio.run(replay_stored_run(settings, run_id))
+    settings = _run_async(_stored_settings(base, run_id))
+    report = _run_async(replay_stored_run(settings, run_id))
     output = asdict(report)
     typer.echo(
         json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
@@ -180,8 +198,18 @@ def sweep() -> None:
 
 
 @app.command()
-def gateway() -> None:
-    _stub("C22")
+def gateway(
+    config: Annotated[Path, typer.Option(exists=True)] = Path("configs/baseline.yaml"),
+    run_id: Annotated[UUID | None, typer.Option()] = None,
+    set_: Annotated[list[str] | None, typer.Option("--set")] = None,
+) -> None:
+    """Serve the isolated external-citizen gateway."""
+    from polis.cli.wiring.external import serve_gateway
+
+    settings = load_settings(config, overrides=_parse_overrides(set_ or []))
+    if not settings.gateway.enabled:
+        raise typer.BadParameter("gateway.enabled is false")
+    _run_async(serve_gateway(settings, run_id=run_id))
 
 
 @app.command()

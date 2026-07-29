@@ -6,6 +6,7 @@ import httpx
 import pytest
 from psycopg.errors import ReadOnlySqlTransaction
 
+from polis.config.canon import canonical_bytes, sha256_hex
 from polis.config.settings import load_settings
 from polis.observatory.api import create_app
 from polis.simulation import run_id_for
@@ -36,6 +37,18 @@ async def test_observatory_is_read_only_fresh_and_marks_future_views_unavailable
         await run_persistent(settings)
         reader_db = await Database.open(settings.store, role="reader")
         try:
+            run_rows = await reader_db.fetch(
+                """
+                SELECT completion_cache_manifest,completion_cache_manifest_hash
+                FROM runs WHERE run_id=%s
+                """,
+                (run_id,),
+            )
+            assert len(run_rows) == 1
+            cache_manifest = run_rows[0]["completion_cache_manifest"]
+            assert run_rows[0]["completion_cache_manifest_hash"] == sha256_hex(
+                canonical_bytes(cache_manifest)
+            )
             with pytest.raises(ReadOnlySqlTransaction):
                 await reader_db.fetch(
                     "DELETE FROM runs WHERE run_id=%s RETURNING run_id",
@@ -69,7 +82,7 @@ async def test_observatory_is_read_only_fresh_and_marks_future_views_unavailable
 
         assert health.status_code == 200
         assert health.json()["database"]["role"] == "reader"
-        assert health.json()["database"]["alembic_head"] == "0018_demography"
+        assert health.json()["database"]["alembic_head"] == "0021_agent_control_view"
         assert runs.status_code == 200
         assert runs.json()["as_of_seq"] > 0
         assert "engine" in runs.json()

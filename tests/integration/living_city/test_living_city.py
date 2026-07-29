@@ -7,8 +7,9 @@ import pytest
 from polis.config.settings import load_settings
 from polis.events.verify import verify_batch
 from polis.living_city import run_living_city
+from polis.run_identity import build_run_identity
 
-GOLDEN_100_HASH = "2ff07edd69c08904ab097ffcd1b04b55c6bd554a61063bbbb03ded6b97640c2f"
+GOLDEN_100_HASH = "7aee6c8647dcf502eb437ff7975fb7acc3f862f84c7eb5dbd04420f3c95bbc1f"
 
 
 @pytest.mark.determinism
@@ -19,11 +20,14 @@ async def test_frozen_50_agent_100_tick_golden_run() -> None:
         overrides={"run": {"ticks": 100}},
     )
 
-    result = await run_living_city(settings)
+    result = await run_living_city(
+        settings,
+        run_identity=build_run_identity(settings, code_git_sha="0" * 40),
+    )
 
     assert result.report.chain_hash == GOLDEN_100_HASH
-    assert result.report.events == 10_378
-    assert len(result.events) == 10_431
+    assert result.report.events == 10_332
+    assert len(result.events) == 10_385
     assert len(result.memory) == 16
     assert verify_batch(result.events).ok
 

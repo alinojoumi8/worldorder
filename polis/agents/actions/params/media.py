@@ -80,7 +80,7 @@ class FollowParams(ActionParams):
                     "properties": {
                         "followee_id": {
                             "type": "string",
-                            "pattern": r"^ag_[a-z0-9_]{1,32}$",
+                            "pattern": r"^ag_[a-z0-9_]{1,64}$",
                         }
                     },
                 },
@@ -89,7 +89,7 @@ class FollowParams(ActionParams):
                     "properties": {
                         "target_id": {
                             "type": "string",
-                            "pattern": r"^ag_[a-z0-9_]{1,32}$",
+                            "pattern": r"^ag_[a-z0-9_]{1,64}$",
                         }
                     },
                 },
@@ -116,7 +116,7 @@ class UnfollowParams(ActionParams):
                     "properties": {
                         "followee_id": {
                             "type": "string",
-                            "pattern": r"^ag_[a-z0-9_]{1,32}$",
+                            "pattern": r"^ag_[a-z0-9_]{1,64}$",
                         }
                     },
                 },
@@ -125,7 +125,7 @@ class UnfollowParams(ActionParams):
                     "properties": {
                         "target_id": {
                             "type": "string",
-                            "pattern": r"^ag_[a-z0-9_]{1,32}$",
+                            "pattern": r"^ag_[a-z0-9_]{1,64}$",
                         }
                     },
                 },

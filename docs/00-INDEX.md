@@ -46,8 +46,21 @@ reading every other chunk, but assumes `02` and `03` have been read.
 
 ## Chunk map
 
-`../chunks/README.md` holds the dependency graph and milestone plan.
+`../chunks/README.md` holds the brief format, milestone plan, dependency graph, handback
+contract, and — in **§7** — the ratified cross-chunk rulings. §7 is binding and overrides
+any contrary text in an individual brief. Read it before starting any chunk.
+
 `../chunks/C01..C25` are the individual work packages.
+
+## Start here
+
+| If you are… | Start at |
+|---|---|
+| Deciding whether to build this | `01-PRD.md`, then stop |
+| Implementing the first chunk | `02-ARCHITECTURE.md` → `03-DATA-MODEL.md` → `../chunks/README.md §7` → `../chunks/C01-scaffold.md` |
+| Connecting an outside agent | `08-EXTERNAL-AGENT-PROTOCOL.md` |
+| Designing an experiment | `10-RESEARCH-AND-OBSERVABILITY.md` |
+| Looking up a term or an ID | `11-GLOSSARY.md` |
 
 ---
 

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal
+from uuid import UUID
 
 from polis.agents.actions.params import PARAMS_MODELS
 from polis.agents.actions.protocol import ResolutionContext, ValidationContext
 from polis.agents.actions.resolve import Resolution, resolve_actions
-from polis.agents.actions.types import Action, LegalityVerdict, ValidatedAction
+from polis.agents.actions.types import Action, ActionType, LegalityVerdict, ValidatedAction
 from polis.agents.actions.validate import ActionBudget, Validation, validate_action
 from polis.agents.cognition.deliberate import Deliberation, deliberate_decide
 from polis.agents.cognition.observation import Observation, build_observations
@@ -19,8 +21,9 @@ from polis.agents.education import apply_education
 from polis.agents.genesis import generate_agents
 from polis.agents.memory import MemoryStore
 from polis.agents.state import AgentPopulation
+from polis.config.canon import canonical_bytes, sha256_hex
 from polis.config.runtime import RuntimeConfig
-from polis.config.settings import Settings, config_hash
+from polis.config.settings import Settings
 from polis.demography_runtime import DemographyRuntime, build_demography_runtime
 from polis.economy.genesis import create_economy
 from polis.economy.labour import load_occupations
@@ -32,6 +35,22 @@ from polis.events.kinds import (
     AGENT_BORN,
     AGENT_MOVED,
     COGNITION_ROUTED,
+    EXTERNAL_ACTION_REJECTED,
+    EXTERNAL_ACTION_SUBMITTED,
+    EXTERNAL_AGENT_NATURALISED,
+    EXTERNAL_AGENT_REGISTERED,
+    EXTERNAL_ARENA_INVALIDATED,
+    EXTERNAL_CONTROL_RESUMED,
+    EXTERNAL_DEADLINE_MISSED,
+    EXTERNAL_GATEWAY_DEGRADED,
+    EXTERNAL_INJECTION_FLAGGED,
+    EXTERNAL_KEY_REVOKED,
+    EXTERNAL_OBSERVATION_PUSHED,
+    EXTERNAL_REGISTRATION_REJECTED,
+    EXTERNAL_REGISTRATION_REQUESTED,
+    EXTERNAL_SESSION_CLOSED,
+    EXTERNAL_SESSION_OPENED,
+    EXTERNAL_SIM_AWARE_FLAGGED,
     JOURNEY_STARTED,
     LEGACY_ACTION_REJECTED,
     LIVE_AGENTS,
@@ -51,14 +70,16 @@ from polis.events.kinds import (
 from polis.events.log import EphemeralSink, EventLog, EventSink, MemoryEventSink
 from polis.events.sampling import CognitionSampler
 from polis.events.types import Event, NewEvent
+from polis.external import ExternalAction, ExternalDecisionPort
 from polis.kernel.clock import Clock, profile_from_settings
 from polis.kernel.invariants import InvariantRunner
 from polis.kernel.rng import RngRegistry
 from polis.kernel.scheduler import Scheduler
 from polis.kernel.tick import Phase, PhaseHandler, RunReport, TickContext, TickLoop
-from polis.llm.cache import CompletionCache
+from polis.llm.cache import EMPTY_COMPLETION_CACHE_MANIFEST_HASH, CompletionCache
 from polis.llm.router import LLMRouter
 from polis.research.metrics import METRICS, MetricCollector
+from polis.run_identity import RunIdentity, build_run_identity, validate_run_identity
 from polis.simulation import run_id_for
 from polis.world.api import World
 from polis.world.generator import generate_world
@@ -98,6 +119,8 @@ class LivingCityResult:
     as_of_seq: int
     economy: EconomyState | None
     demography: DemographyRuntime | None
+    completion_cache_manifest: Mapping[str, str]
+    completion_cache_manifest_hash: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +170,8 @@ class LivingCityEngine:
         log: EventLog | None = None,
         clock: Clock | None = None,
         runtime: RuntimeConfig | None = None,
+        external_decisions: ExternalDecisionPort | None = None,
+        final_tick: int | None = None,
     ) -> None:
         self.settings = settings
         self.world = world
@@ -156,6 +181,14 @@ class LivingCityEngine:
         self.router = router
         self.rng = rng
         self.runtime = runtime
+        self.external_decisions = external_decisions
+        self._external_misses: dict[str, int] = {}
+        self._external_deadlines_missed: dict[str, int] = {}
+        self._external_ticks_driven: dict[str, int] = {}
+        self._final_tick = final_tick if final_tick is not None else settings.run.ticks
+        self._external_arena_checked = False
+        self._naturalised_external: set[str] = set()
+        self._naturalised_at: dict[str, int] = {}
         self.economy = economy
         self.economy_policy = (
             MechanicalPolicy(
@@ -214,6 +247,320 @@ class LivingCityEngine:
                 validation.action for _agent_id, validation in sorted(self.validations.items())
             )
             await self.economy_policy.step(ctx.tick, ctx.emit, actions)
+        await self._apply_external_lifecycle(ctx)
+
+    async def _apply_external_lifecycle(self, ctx: TickContext) -> None:
+        if self.external_decisions is None:
+            return
+        try:
+            requests = await asyncio.wait_for(
+                self.external_decisions.drain_lifecycle(
+                    ctx.tick,
+                    timeout_ms=self.settings.gateway.deadline.drain_timeout_ms,
+                ),
+                timeout=self.settings.gateway.deadline.drain_timeout_ms / 1_000 + 0.25,
+            )
+        except (TimeoutError, OSError):
+            ctx.emit(
+                NewEvent(
+                    EXTERNAL_GATEWAY_DEGRADED,
+                    {
+                        "reason": "drain_timeout",
+                        "affected_agent_ids": [],
+                        "tick": ctx.tick,
+                    },
+                )
+            )
+            return
+        if not isinstance(requests, Sequence):
+            ctx.emit(
+                NewEvent(
+                    EXTERNAL_GATEWAY_DEGRADED,
+                    {
+                        "reason": "malformed_lifecycle_batch",
+                        "affected_agent_ids": sorted(self._controlled_external_ids()),
+                        "tick": ctx.tick,
+                    },
+                )
+            )
+            return
+        for request in requests:
+            if request.request_type == "malformed":
+                self._emit_malformed_lifecycle(ctx, request.agent_id, "unknown")
+                continue
+            if request.request_type == "register":
+                declaration = request.declaration
+                try:
+                    if not isinstance(declaration, Mapping):
+                        raise TypeError("registration declaration must be a mapping")
+                    pubkey = _required_external_text(declaration, "pubkey")
+                    display_name = _required_external_text(declaration, "display_name")
+                except (KeyError, TypeError, ValueError):
+                    await self._reject_registration(
+                        ctx,
+                        request.agent_id,
+                        "bad_declaration",
+                    )
+                    continue
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_REGISTRATION_REQUESTED,
+                        {key: value for key, value in declaration.items() if key != "challenge"},
+                    )
+                )
+                if self.demography is None:
+                    await self._reject_registration(
+                        ctx,
+                        request.agent_id,
+                        "bad_declaration",
+                    )
+                    continue
+                try:
+                    agent, _events = self.demography.institution.migration.admit_external(
+                        agent_id=request.agent_id,
+                        pubkey=pubkey,
+                        display_name=display_name,
+                        tick=ctx.tick,
+                    )
+                except (KeyError, TypeError, ValueError):
+                    await self._reject_registration(
+                        ctx,
+                        request.agent_id,
+                        "bad_declaration",
+                    )
+                    continue
+                embodiment = self.settings.gateway.registration.embodiment
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_AGENT_REGISTERED,
+                        {
+                            "agent_id": agent.agent_id,
+                            "pubkey": agent.pubkey,
+                            "operator": declaration.get("operator"),
+                            "declared_model": declaration.get("declared_model"),
+                            "declared_scaffold": declaration.get("declared_scaffold"),
+                            "embodiment": embodiment,
+                            "twin_agent_id": None,
+                            "conformance_token": declaration.get("conformance_token"),
+                            "admitted_tick": ctx.tick,
+                            "declaration": {
+                                key: value
+                                for key, value in declaration.items()
+                                if key != "challenge"
+                            },
+                        },
+                        actor_id=agent.agent_id,
+                    )
+                )
+                await self._publish_external_admission(
+                    ctx,
+                    agent.agent_id,
+                    {
+                        "status": "admitted",
+                        "agent_id": agent.agent_id,
+                        "pubkey": agent.pubkey,
+                        "operator": declaration.get("operator"),
+                        "admitted_tick": ctx.tick,
+                        "twin_agent_id": None,
+                        "revoked_tick": None,
+                        "naturalised_tick": None,
+                        "resume_grace_until_tick": None,
+                    },
+                )
+                continue
+            if request.request_type == "session_open":
+                declaration = request.declaration
+                try:
+                    session_payload = _external_session_open_payload(declaration)
+                except (KeyError, TypeError, ValueError):
+                    self._emit_malformed_lifecycle(ctx, request.agent_id, "session_open")
+                    continue
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_SESSION_OPENED,
+                        {
+                            "agent_id": request.agent_id,
+                            **session_payload,
+                        },
+                        actor_id=request.agent_id,
+                    )
+                )
+                continue
+            if request.request_type == "session_close":
+                declaration = request.declaration
+                try:
+                    session_id = _required_external_text(declaration, "session_id")
+                    reason = _required_external_text(declaration, "reason")
+                except (KeyError, TypeError, ValueError):
+                    self._emit_malformed_lifecycle(ctx, request.agent_id, "session_close")
+                    continue
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_SESSION_CLOSED,
+                        {
+                            "agent_id": request.agent_id,
+                            "session_id": session_id,
+                            "reason": reason,
+                        },
+                        actor_id=request.agent_id,
+                    )
+                )
+                continue
+            if request.request_type == "audit":
+                declaration = request.declaration
+                injection = declaration.get("injection")
+                if isinstance(injection, Mapping):
+                    ctx.emit(
+                        NewEvent(
+                            EXTERNAL_INJECTION_FLAGGED,
+                            {
+                                "agent_id": request.agent_id,
+                                "direction": str(injection.get("direction", "unknown")),
+                                "channel": str(injection.get("channel", "unknown")),
+                                "source_ref": str(declaration.get("source_ref", "")),
+                                "pattern_id": str(injection.get("pattern_id", "unknown")),
+                                "sample_hash": str(declaration.get("sample_hash", "")),
+                                "action_taken": str(injection.get("action_taken", "none")),
+                            },
+                            actor_id=request.agent_id,
+                        )
+                    )
+                sim_aware = declaration.get("sim_aware")
+                if isinstance(sim_aware, Mapping):
+                    ctx.emit(
+                        NewEvent(
+                            EXTERNAL_SIM_AWARE_FLAGGED,
+                            {
+                                "agent_id": request.agent_id,
+                                "tick": ctx.tick,
+                                "surface": str(sim_aware.get("surface", "unknown")),
+                                "confidence": _external_float(
+                                    sim_aware.get("confidence"),
+                                ),
+                                "sample_hash": str(declaration.get("sample_hash", "")),
+                            },
+                            actor_id=request.agent_id,
+                        )
+                    )
+                continue
+            if request.agent_id not in self.population.agents:
+                continue
+            if request.request_type in {"revoke", "depart"}:
+                reason = "revoked" if request.request_type == "revoke" else "departed"
+                if request.request_type == "revoke":
+                    ctx.emit(
+                        NewEvent(
+                            EXTERNAL_KEY_REVOKED,
+                            {
+                                "agent_id": request.agent_id,
+                                "revoked_by": request.revoked_by or "operator",
+                                "reason": request.reason or "operator request",
+                                "strikes": 0,
+                            },
+                            actor_id=request.agent_id,
+                        )
+                    )
+                self._naturalise_external(ctx, request.agent_id, reason)
+                await self._publish_external_admission(
+                    ctx,
+                    request.agent_id,
+                    {
+                        "status": "revoked" if request.request_type == "revoke" else "naturalised",
+                        "agent_id": request.agent_id,
+                        "revoked_tick": (ctx.tick if request.request_type == "revoke" else None),
+                        "naturalised_tick": ctx.tick,
+                        "resume_grace_until_tick": (
+                            ctx.tick + self.settings.gateway.lifecycle.resume_grace_ticks
+                        ),
+                    },
+                )
+            elif request.request_type == "resume":
+                naturalised_tick = self._naturalised_at.get(request.agent_id)
+                grace = self.settings.gateway.lifecycle.resume_grace_ticks
+                if naturalised_tick is None or ctx.tick - naturalised_tick > grace:
+                    continue
+                self._naturalised_external.discard(request.agent_id)
+                self._naturalised_at.pop(request.agent_id, None)
+                self._external_misses[request.agent_id] = 0
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_CONTROL_RESUMED,
+                        {
+                            "agent_id": request.agent_id,
+                            "gap_ticks": ctx.tick - naturalised_tick,
+                            "session_id": "pending",
+                        },
+                        actor_id=request.agent_id,
+                    )
+                )
+                await self._publish_external_admission(
+                    ctx,
+                    request.agent_id,
+                    {
+                        "status": "admitted",
+                        "agent_id": request.agent_id,
+                        "admitted_tick": ctx.tick,
+                        "naturalised_tick": None,
+                        "resume_grace_until_tick": None,
+                    },
+                )
+
+    async def _reject_registration(
+        self,
+        ctx: TickContext,
+        agent_id: str,
+        reason: str,
+    ) -> None:
+        ctx.emit(
+            NewEvent(
+                EXTERNAL_REGISTRATION_REJECTED,
+                {"pubkey": None, "reason": reason},
+            )
+        )
+        await self._publish_external_admission(
+            ctx,
+            agent_id,
+            {"status": "rejected", "agent_id": agent_id, "reason": reason},
+        )
+
+    def _emit_malformed_lifecycle(
+        self,
+        ctx: TickContext,
+        agent_id: str,
+        request_type: str,
+    ) -> None:
+        ctx.emit(
+            NewEvent(
+                EXTERNAL_GATEWAY_DEGRADED,
+                {
+                    "reason": f"malformed_lifecycle:{request_type}",
+                    "affected_agent_ids": [agent_id],
+                    "tick": ctx.tick,
+                },
+            )
+        )
+
+    async def _publish_external_admission(
+        self,
+        ctx: TickContext,
+        agent_id: str,
+        status: Mapping[str, Any],
+    ) -> None:
+        if self.external_decisions is None:
+            return
+        try:
+            await self.external_decisions.publish_admission(agent_id, status)
+        except (OSError, TimeoutError):
+            ctx.emit(
+                NewEvent(
+                    EXTERNAL_GATEWAY_DEGRADED,
+                    {
+                        "reason": "admission_publish_failed",
+                        "affected_agent_ids": [agent_id],
+                        "tick": ctx.tick,
+                    },
+                )
+            )
 
     async def demography_vitals(self, ctx: TickContext) -> None:
         if self.demography is not None:
@@ -246,6 +593,86 @@ class LivingCityEngine:
                 self.population,
                 self.economy,
             )
+        if self.external_decisions is not None:
+            controlled = self._controlled_external_ids()
+            if ctx.tick == 1 and controlled and self.settings.gateway.deadline.pause_for_external:
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_ARENA_INVALIDATED,
+                        {
+                            "reason": "paused_for_external",
+                            "offending_agent_ids": sorted(controlled),
+                            "threshold": self.settings.gateway.deadline.pause_max_ms,
+                            "observed": True,
+                        },
+                    )
+                )
+            try:
+                await self.external_decisions.open_tick(
+                    ctx.tick,
+                    sim_time=ctx.sim_time.isoformat(),
+                    decision_deadline_ms=(self.settings.gateway.deadline.decision_deadline_ms),
+                    seal_margin_ms=self.settings.gateway.deadline.seal_margin_ms,
+                )
+            except (OSError, TimeoutError):
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_GATEWAY_DEGRADED,
+                        {
+                            "reason": "tick_open_failed",
+                            "affected_agent_ids": sorted(controlled),
+                            "tick": ctx.tick,
+                        },
+                    )
+                )
+            published = await asyncio.gather(
+                *(
+                    self.external_decisions.publish_observation(
+                        ctx.tick,
+                        agent_id,
+                        canonical_bytes(self.observations[agent_id].as_dict()),
+                    )
+                    for agent_id in sorted(controlled)
+                ),
+                return_exceptions=True,
+            )
+            failed = [
+                agent_id
+                for agent_id, outcome in zip(sorted(controlled), published, strict=True)
+                if isinstance(outcome, BaseException) or not outcome
+            ]
+            if failed:
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_GATEWAY_DEGRADED,
+                        {
+                            "reason": "obs_write_failed",
+                            "affected_agent_ids": failed,
+                            "tick": ctx.tick,
+                        },
+                    )
+                )
+            sample_rate = self.settings.gateway.security.external_obs_sample_rate
+            for agent_id in sorted(controlled - set(failed)):
+                sampled = (
+                    self.rng.seed_for("gateway.obs.sample", agent_id, ctx.tick) / (2**64 - 1)
+                    < sample_rate
+                )
+                if sampled:
+                    blob = canonical_bytes(self.observations[agent_id].as_dict())
+                    ctx.emit(
+                        NewEvent(
+                            EXTERNAL_OBSERVATION_PUSHED,
+                            {
+                                "agent_id": agent_id,
+                                "tick": ctx.tick,
+                                "digest_hash": self.observations[agent_id].digest_hash,
+                                "bytes": len(blob),
+                                "channel": "poll",
+                            },
+                            actor_id=agent_id,
+                        )
+                    )
 
     async def salience(self, ctx: TickContext) -> None:
         self.routing = route_cognition(
@@ -254,6 +681,7 @@ class LivingCityEngine:
             self.memory,
             settings=self.settings,
             rng=self.rng,
+            excluded_agent_ids=frozenset(self._controlled_external_ids()),
         )
         ctx.modes.update(self.routing.modes)
         for agent_id, score in sorted(self.routing.scores.items()):
@@ -318,6 +746,7 @@ class LivingCityEngine:
         deliberate_ids: list[str] = []
         reflect_tasks: list[Awaitable[Reflection]] = []
         reflect_ids: list[str] = []
+        external_task = asyncio.create_task(self._guard_external_decide(ctx))
         for agent_id, mode in sorted(self.routing.modes.items()):
             agent = self.population[agent_id]
             observation = self.observations[agent_id]
@@ -358,8 +787,11 @@ class LivingCityEngine:
                         salience=score.score,
                     )
                 )
-        deliberate_results = await asyncio.gather(*deliberate_tasks)
-        reflection_results = await asyncio.gather(*reflect_tasks)
+        deliberate_results, reflection_results, _ = await asyncio.gather(
+            asyncio.gather(*deliberate_tasks),
+            asyncio.gather(*reflect_tasks),
+            external_task,
+        )
         for agent_id, deliberate in zip(deliberate_ids, deliberate_results, strict=True):
             self.decisions[agent_id] = deliberate.action
             ctx.emit(
@@ -406,6 +838,270 @@ class LivingCityEngine:
                 trace.retrieval = [asdict(row) for row in reflection.retrieval]
                 trace.response = _call_payload(reflection.call) if reflection.call else None
         ctx.actions.extend(self.decisions.values())
+
+    def _controlled_external_ids(self) -> set[str]:
+        if self.external_decisions is None:
+            return set()
+        return {
+            agent_id
+            for agent_id in self.external_decisions.controlled_agent_ids()
+            if agent_id in self.population.agents
+            and self.population[agent_id].alive
+            and agent_id not in self._naturalised_external
+        }
+
+    async def _guard_external_decide(self, ctx: TickContext) -> None:
+        try:
+            await self._decide_external(ctx)
+        except Exception:
+            affected = sorted(self._controlled_external_ids())
+            ctx.emit(
+                NewEvent(
+                    EXTERNAL_GATEWAY_DEGRADED,
+                    {
+                        "reason": "external_decision_error",
+                        "affected_agent_ids": affected,
+                        "tick": ctx.tick,
+                    },
+                )
+            )
+            for agent_id in affected:
+                if agent_id not in self.decisions:
+                    self._fallback_external(ctx, agent_id)
+
+    async def _decide_external(self, ctx: TickContext) -> None:
+        if self.external_decisions is None:
+            return
+        if not self._controlled_external_ids():
+            return
+        timeout_ms = self.settings.gateway.deadline.drain_timeout_ms
+        total_timeout_ms = self.settings.gateway.deadline.decision_deadline_ms + timeout_ms
+        if self.settings.gateway.deadline.pause_for_external:
+            total_timeout_ms = self.settings.gateway.deadline.pause_max_ms + timeout_ms
+        try:
+            batch = await asyncio.wait_for(
+                self.external_decisions.drain_actions(ctx.tick, timeout_ms=timeout_ms),
+                timeout=total_timeout_ms / 1_000 + 0.25,
+            )
+        except (TimeoutError, OSError):
+            batch = None
+        if batch is None:
+            affected = sorted(self._controlled_external_ids())
+            ctx.emit(
+                NewEvent(
+                    EXTERNAL_GATEWAY_DEGRADED,
+                    {
+                        "reason": "drain_timeout",
+                        "affected_agent_ids": affected,
+                        "tick": ctx.tick,
+                    },
+                )
+            )
+            records: tuple[ExternalAction, ...] = ()
+        else:
+            records = batch.actions
+            for agent_id in batch.resumed_agent_ids:
+                if agent_id in self._naturalised_external:
+                    self._naturalised_external.remove(agent_id)
+                    self._naturalised_at.pop(agent_id, None)
+                    self._external_misses[agent_id] = 0
+                    ctx.emit(
+                        NewEvent(
+                            EXTERNAL_CONTROL_RESUMED,
+                            {
+                                "agent_id": agent_id,
+                                "gap_ticks": 0,
+                                "session_id": "gateway",
+                            },
+                            actor_id=agent_id,
+                        )
+                    )
+            if batch.degraded_reason is not None:
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_GATEWAY_DEGRADED,
+                        {
+                            "reason": batch.degraded_reason,
+                            "affected_agent_ids": sorted(self._controlled_external_ids()),
+                            "tick": ctx.tick,
+                        },
+                    )
+                )
+
+        by_agent: dict[str, ExternalAction] = {}
+        for record in sorted(records, key=lambda row: (row.agent_id, row.action_id, row.nonce)):
+            if record.agent_id not in self._controlled_external_ids():
+                self._reject_external(ctx, record, "session_invalid")
+                continue
+            if record.agent_id in by_agent:
+                self._reject_external(ctx, record, "no_slots")
+                continue
+            by_agent[record.agent_id] = record
+
+        for agent_id in sorted(self._controlled_external_ids()):
+            submitted = by_agent.get(agent_id)
+            if submitted is None:
+                self._fallback_external(ctx, agent_id)
+                continue
+            try:
+                action = self._external_action(submitted, ctx.tick)
+            except (KeyError, TypeError, ValueError):
+                self._reject_external(ctx, submitted, "schema")
+                self._fallback_external(ctx, agent_id)
+                continue
+            self.decisions[agent_id] = action
+            self._external_misses[agent_id] = 0
+            self._external_ticks_driven[agent_id] = self._external_ticks_driven.get(agent_id, 0) + 1
+            injection = submitted.audit.get("injection")
+            if isinstance(injection, Mapping):
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_INJECTION_FLAGGED,
+                        {
+                            "agent_id": agent_id,
+                            "direction": str(injection.get("direction", "unknown")),
+                            "channel": str(injection.get("channel", "unknown")),
+                            "source_ref": submitted.action_id,
+                            "pattern_id": str(injection.get("pattern_id", "unknown")),
+                            "sample_hash": str(injection.get("sample_hash", "")),
+                            "action_taken": str(injection.get("action_taken", "none")),
+                        },
+                        actor_id=agent_id,
+                    )
+                )
+            sim_aware = submitted.audit.get("sim_aware")
+            if isinstance(sim_aware, Mapping):
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_SIM_AWARE_FLAGGED,
+                        {
+                            "agent_id": agent_id,
+                            "tick": ctx.tick,
+                            "surface": str(sim_aware.get("surface", "unknown")),
+                            "confidence": _external_float(sim_aware.get("confidence")),
+                            "sample_hash": str(sim_aware.get("sample_hash", "")),
+                        },
+                        actor_id=agent_id,
+                    )
+                )
+            ctx.emit(
+                NewEvent(
+                    EXTERNAL_ACTION_SUBMITTED,
+                    {
+                        "agent_id": agent_id,
+                        "action_id": submitted.action_id,
+                        "tick": ctx.tick,
+                        "type": submitted.type,
+                        "nonce": submitted.nonce,
+                        "params_hash": sha256_hex(canonical_bytes(submitted.params)),
+                        "reasoning_hash": (
+                            sha256_hex(submitted.reasoning.encode())
+                            if submitted.reasoning
+                            else None
+                        ),
+                        "sig": submitted.sig,
+                    },
+                    actor_id=agent_id,
+                    sig=submitted.sig,
+                )
+            )
+
+    def _external_action(self, record: ExternalAction, tick: int) -> Action:
+        if record.tick != tick:
+            raise ValueError("external action tick mismatch")
+        if record.agent_id not in self.population.agents:
+            raise KeyError(record.agent_id)
+        return Action(
+            UUID(record.action_id),
+            record.agent_id,
+            tick,
+            ActionType(record.type),
+            dict(record.params),
+            "external",
+            0.0,
+            record.reasoning,
+            record.speech,
+            record.sig,
+        )
+
+    def _reject_external(
+        self,
+        ctx: TickContext,
+        record: ExternalAction,
+        reason: str,
+    ) -> None:
+        ctx.emit(
+            NewEvent(
+                EXTERNAL_ACTION_REJECTED,
+                {
+                    "agent_id": record.agent_id,
+                    "action_id": record.action_id,
+                    "tick": ctx.tick,
+                    "stage": "engine",
+                    "reason": reason,
+                },
+                actor_id=record.agent_id,
+            )
+        )
+
+    def _fallback_external(self, ctx: TickContext, agent_id: str) -> None:
+        misses = self._external_misses.get(agent_id, 0) + 1
+        self._external_misses[agent_id] = misses
+        self._external_deadlines_missed[agent_id] = (
+            self._external_deadlines_missed.get(agent_id, 0) + 1
+        )
+        self._external_ticks_driven[agent_id] = self._external_ticks_driven.get(agent_id, 0) + 1
+        self.decisions[agent_id] = reflex_decide(
+            self.population[agent_id],
+            self.observations[agent_id],
+            self.world,
+            rng=self.rng,
+            origin="fallback",
+        )
+        ctx.emit(
+            NewEvent(
+                EXTERNAL_DEADLINE_MISSED,
+                {
+                    "agent_id": agent_id,
+                    "tick": ctx.tick,
+                    "window_ms": self.settings.gateway.deadline.decision_deadline_ms,
+                    "consecutive_misses": misses,
+                    "fell_back_to": "reflex",
+                    "arrived_late_ms": None,
+                },
+                actor_id=agent_id,
+            )
+        )
+        threshold = self.settings.gateway.lifecycle.naturalise_after_consecutive_misses
+        if misses >= threshold:
+            self._naturalise_external(ctx, agent_id, "abandoned")
+
+    def _naturalise_external(
+        self,
+        ctx: TickContext,
+        agent_id: str,
+        reason: str,
+    ) -> None:
+        if agent_id in self._naturalised_external:
+            return
+        self._naturalised_external.add(agent_id)
+        self._naturalised_at[agent_id] = ctx.tick
+        ctx.emit(
+            NewEvent(
+                EXTERNAL_AGENT_NATURALISED,
+                {
+                    "agent_id": agent_id,
+                    "reason": reason,
+                    "consecutive_misses": self._external_misses.get(agent_id, 0),
+                    "ticks_driven": self._external_ticks_driven.get(agent_id, 0),
+                    "driver_after": "native",
+                    "resume_grace_until_tick": (
+                        ctx.tick + self.settings.gateway.lifecycle.resume_grace_ticks
+                    ),
+                },
+                actor_id=agent_id,
+            )
+        )
 
     async def validate(self, ctx: TickContext) -> None:
         budget = ActionBudget.for_profile(ctx.clock.profile, ctx.settings.actions)
@@ -569,7 +1265,7 @@ class LivingCityEngine:
                 )
             )
         for agent_id, validation in sorted(self.validations.items()):
-            score = self.routing.scores[agent_id] if self.routing is not None else None
+            score = self.routing.scores.get(agent_id) if self.routing is not None else None
             row = self.memory.maybe_write_observation(
                 self.population[agent_id],
                 tick=ctx.tick,
@@ -613,6 +1309,16 @@ class LivingCityEngine:
     async def measure(self, ctx: TickContext) -> None:
         if self.routing is None:
             raise RuntimeError("routing is missing")
+        if ctx.tick >= self._final_tick and not self._external_arena_checked:
+            self._external_arena_checked = True
+            invalidation = self._external_arena_invalidation()
+            if invalidation is not None:
+                ctx.emit(
+                    NewEvent(
+                        EXTERNAL_ARENA_INVALIDATED,
+                        invalidation,
+                    )
+                )
         points = self.metrics.collect(
             tick=ctx.tick,
             as_of_seq=ctx.log.last_seq,
@@ -676,6 +1382,78 @@ class LivingCityEngine:
             )
         )
 
+    def _external_arena_invalidation(self) -> Mapping[str, Any] | None:
+        threshold = self.settings.research.gates.external_miss_rate_max
+        miss_rates = {
+            agent_id: self._external_deadlines_missed.get(agent_id, 0) / ticks_driven
+            for agent_id, ticks_driven in self._external_ticks_driven.items()
+            if ticks_driven > 0
+        }
+        offending = sorted(
+            agent_id for agent_id, miss_rate in miss_rates.items() if miss_rate > threshold
+        )
+        if not offending:
+            return None
+        return {
+            "reason": "miss_rate",
+            "offending_agent_ids": offending,
+            "threshold": threshold,
+            "observed": max(miss_rates[agent_id] for agent_id in offending),
+        }
+
+
+def _required_external_text(value: Mapping[str, Any], field: str) -> str:
+    item = value.get(field)
+    if not isinstance(item, str) or not item:
+        raise ValueError(f"{field} must be a non-empty string")
+    return item
+
+
+def _required_external_int(value: Mapping[str, Any], field: str) -> int:
+    item = value.get(field)
+    if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+        raise ValueError(f"{field} must be a non-negative integer")
+    return item
+
+
+def _external_session_open_payload(declaration: Mapping[str, Any]) -> dict[str, Any]:
+    custody = _required_external_text(declaration, "custody")
+    transport = _required_external_text(declaration, "transport")
+    if custody not in {"operator", "delegated"}:
+        raise ValueError("invalid custody")
+    if transport not in {"mcp_stdio", "mcp_http", "rest", "ws"}:
+        raise ValueError("invalid transport")
+    client = declaration.get("client")
+    if not isinstance(client, Mapping):
+        raise ValueError("client must be an object")
+    delegate = declaration.get("delegate_pubkey")
+    if delegate is not None and not isinstance(delegate, str):
+        raise ValueError("delegate_pubkey must be a string or null")
+    protocol_version = _required_external_int(declaration, "protocol_version")
+    if protocol_version != 1:
+        raise ValueError("unsupported protocol version")
+    return {
+        "session_id": _required_external_text(declaration, "session_id"),
+        "custody": custody,
+        "delegate_pubkey": delegate,
+        "ttl_s": _required_external_int(declaration, "ttl_s"),
+        "transport": transport,
+        "sdk_version": _required_external_text(declaration, "sdk_version"),
+        "protocol_version": protocol_version,
+        "expires_unix_ms": _required_external_int(declaration, "expires_unix_ms"),
+        "client": dict(client),
+    }
+
+
+def _external_float(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return 0.0
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return result if math.isfinite(result) else 0.0
+
 
 def sha256_text(value: str) -> str:
     from polis.config.canon import sha256_hex
@@ -691,7 +1469,10 @@ async def run_living_city(
     ephemeral_sink: EphemeralSink | None = None,
     collect_events: bool = True,
     cache_mode: Literal["live", "replay", "hybrid"] | None = None,
+    completion_cache: CompletionCache | None = None,
     lane_concurrency_overrides: Mapping[str, int] | None = None,
+    external_decisions: ExternalDecisionPort | None = None,
+    run_identity: RunIdentity | None = None,
 ) -> LivingCityResult:
     run_id = run_id_for(settings)
     rng = RngRegistry(settings.run.seed)
@@ -718,7 +1499,7 @@ async def run_living_city(
     )
     clock = Clock(profile_from_settings(settings.clock))
     scheduler = Scheduler(clock)
-    runtime_cache = (
+    runtime_cache = completion_cache or (
         CompletionCache(
             mode=cache_mode,
             l0_entries=settings.llm.cache.l0_entries,
@@ -738,14 +1519,32 @@ async def run_living_city(
         cache=runtime_cache,
         concurrency_overrides=lane_concurrency_overrides,
     )
+    total_ticks = ticks if ticks is not None else settings.run.ticks
+    initial_cache_manifest_hash = (
+        runtime_cache.manifest_hash()
+        if runtime_cache is not None
+        else EMPTY_COMPLETION_CACHE_MANIFEST_HASH
+    )
+    if run_identity is None:
+        identity = build_run_identity(
+            settings,
+            completion_cache_manifest_hash=initial_cache_manifest_hash,
+        )
+    else:
+        validate_run_identity(
+            settings,
+            run_identity,
+            completion_cache_manifest_hash=(
+                run_identity.completion_cache_manifest_hash
+                if runtime_cache is not None and runtime_cache.mode == "replay"
+                else initial_cache_manifest_hash
+            ),
+        )
+        identity = run_identity
     log.stage(
         NewEvent(
             RUN_STARTED,
-            {
-                "config_hash": config_hash(settings),
-                "seed": settings.run.seed,
-                "scale": settings.population.initial_agents,
-            },
+            identity.event_payload(),
         ),
         tick=0,
         sim_time=clock.sim_time,
@@ -827,6 +1626,8 @@ async def run_living_city(
         log=log,
         clock=clock,
         runtime=runtime,
+        external_decisions=external_decisions,
+        final_tick=total_ticks,
     )
     loop = TickLoop(
         run_id=run_id,
@@ -853,9 +1654,24 @@ async def run_living_city(
         loop.register(handler)
     await router.start()
     try:
-        report = await loop.run(ticks if ticks is not None else settings.run.ticks)
+        report = await loop.run(total_ticks)
     finally:
         await router.close()
+    if not engine._external_arena_checked:
+        engine._external_arena_checked = True
+        invalidation = engine._external_arena_invalidation()
+        if invalidation is not None:
+            log.stage(
+                NewEvent(EXTERNAL_ARENA_INVALIDATED, invalidation),
+                tick=report.last_tick,
+                sim_time=clock.sim_time,
+            )
+            committed = await log.commit(report.last_tick)
+            report = replace(
+                report,
+                events=report.events + committed.persisted,
+                chain_hash=log.chain_hash,
+            )
     events = tuple(actual_sink.events) if isinstance(actual_sink, MemoryEventSink) else ()
     return LivingCityResult(
         report,
@@ -868,4 +1684,6 @@ async def run_living_city(
         log.last_seq,
         economy,
         engine.demography,
+        router.cache.manifest(),
+        router.cache.manifest_hash(),
     )

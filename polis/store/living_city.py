@@ -1,25 +1,37 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from polis.config.canon import canonical_json, sha256_hex
-from polis.config.mechanisms import mechanism_manifest
-from polis.config.paths import repo_git_sha
+from polis.config.canon import canonical_json
 from polis.config.runtime_time import utc_now_naive
-from polis.config.settings import Settings, config_hash, config_yaml
+from polis.config.settings import Settings, config_yaml
 from polis.events.kinds import (
+    EXTERNAL_ACTION_REJECTED,
+    EXTERNAL_ACTION_SUBMITTED,
+    EXTERNAL_AGENT_NATURALISED,
+    EXTERNAL_AGENT_REGISTERED,
+    EXTERNAL_DEADLINE_MISSED,
+    EXTERNAL_KEY_REVOKED,
+    EXTERNAL_SESSION_CLOSED,
+    EXTERNAL_SESSION_OPENED,
+    EXTERNAL_SIM_AWARE_FLAGGED,
     ORDER_CANCELLED,
     ORDER_EXPIRED,
     ORDER_FILLED,
     ORDER_SUBMITTED,
 )
+from polis.external import ExternalDecisionPort
 from polis.living_city import LivingCityResult, run_living_city
+from polis.llm.cache import (
+    EMPTY_COMPLETION_CACHE_MANIFEST_HASH,
+    CompletionCache,
+)
 from polis.observatory.live import RedisEphemeralPublisher
-from polis.research.metrics import catalogue_manifest
+from polis.run_identity import build_run_identity
 from polis.simulation import run_id_for
 from polis.store.engine import Database, StoreError
 from polis.store.repositories.events import EventRepository
@@ -38,37 +50,12 @@ _ACCOUNT_TYPES = {
 }
 
 
-def _prompt_manifest(settings: Settings) -> dict[str, str]:
-    prompt_root = Path(__file__).resolve().parents[2] / "prompts"
-    manifest: dict[str, str] = {}
-    for purpose, route in sorted(settings.llm.routing.items()):
-        path = prompt_root / route.template
-        material = path.read_bytes() if path.is_file() else route.template.encode()
-        manifest[purpose] = sha256_hex(material)
-    for path in sorted((prompt_root / "news_write").glob("*.jinja")):
-        manifest[f"NEWS_WRITE:{path.name}"] = sha256_hex(path.read_bytes())
-    news_route = settings.llm.routing.get("NEWS_WRITE")
-    if news_route is not None and news_route.schema_ is not None:
-        schema = prompt_root.parent / news_route.schema_
-        if schema.is_file():
-            manifest["NEWS_WRITE:schema"] = sha256_hex(schema.read_bytes())
-    return manifest
-
-
-def _model_manifest(settings: Settings) -> dict[str, dict[str, str | None]]:
-    return {
-        purpose: {
-            "lane": route.lane,
-            "model": route.model,
-            "provider_kind": settings.llm.providers[route.lane].kind,
-            "model_version_pin": settings.llm.providers[route.lane].model_version_pin,
-        }
-        for purpose, route in sorted(settings.llm.routing.items())
-    }
-
-
 async def _clear_projections(db: Database, run_id: Any) -> None:
     for table in (
+        "external_latency",
+        "external_nonces",
+        "external_sessions",
+        "external_agents",
         "bankruptcy_claims",
         "bankruptcies",
         "acquisitions",
@@ -118,6 +105,110 @@ async def _clear_projections(db: Database, run_id: Any) -> None:
         await db.execute(f"DELETE FROM {table} WHERE run_id=%s", (run_id,))
 
 
+def _coalesce(value: Any, default: Any) -> Any:
+    return default if value is None else value
+
+
+def _external_registration_row(
+    actor_id: str,
+    event: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    declaration = dict(_coalesce(payload.get("declaration"), {}))
+    return {
+        "agent_id": actor_id,
+        "pubkey": str(payload["pubkey"]),
+        "operator": str(payload.get("operator") or declaration.get("operator") or ""),
+        "contact": str(_coalesce(declaration.get("contact"), "")),
+        "display_name": str(_coalesce(declaration.get("display_name"), actor_id)),
+        "declared_model": str(payload.get("declared_model") or ""),
+        "declared_model_version": str(_coalesce(declaration.get("declared_model_version"), "")),
+        "declared_scaffold": str(payload.get("declared_scaffold") or ""),
+        "scaffold_notes": str(_coalesce(declaration.get("scaffold_notes"), "")),
+        "memory": str(_coalesce(declaration.get("memory"), "ours")),
+        "sdk_version": str(_coalesce(declaration.get("sdk_version"), "")),
+        "protocol_version": int(_coalesce(declaration.get("protocol_version"), 1)),
+        "requested_embodiment": declaration.get("requested_embodiment"),
+        "embodiment": str(payload["embodiment"]),
+        "conformance_token": payload.get("conformance_token"),
+        "twin_agent_id": payload.get("twin_agent_id"),
+        "registered_tick": int(event["tick"]),
+        "admitted_tick": int(payload["admitted_tick"]),
+        "revoked_tick": None,
+        "naturalised_tick": None,
+        "resume_grace_until_tick": None,
+        "consecutive_misses": 0,
+        "ticks_driven": 0,
+        "actions_submitted": 0,
+        "actions_rejected": 0,
+        "deadlines_missed": 0,
+        "sim_aware_count": 0,
+        "strikes": 0,
+        "suspensions": 0,
+    }
+
+
+def _external_session_row(
+    actor_id: str,
+    event: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    session_id = str(payload["session_id"])
+    return {
+        "session_id": session_id,
+        "agent_id": actor_id,
+        "custody": str(payload["custody"]),
+        "delegate_pubkey": payload.get("delegate_pubkey"),
+        "client": dict(_coalesce(payload.get("client"), {})),
+        "opened_tick": int(event["tick"]),
+        "expires_unix_ms": int(payload["expires_unix_ms"]),
+        "closed_tick": None,
+        "close_reason": None,
+    }
+
+
+def _registered_session_rows(
+    session_rows: Mapping[str, dict[str, Any]],
+    external_rows: Mapping[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    registered_agent_ids = set(external_rows)
+    return {
+        session_id: row
+        for session_id, row in session_rows.items()
+        if row["agent_id"] in registered_agent_ids
+    }
+
+
+async def _fetch_gateway_events(
+    db: Database,
+    run_id: Any,
+    as_of_seq: int,
+) -> list[dict[str, Any]]:
+    return await db.fetch(
+        """
+        SELECT kind,tick,actor_id,payload
+        FROM events
+        WHERE run_id=%s AND kind=ANY(%s::integer[]) AND seq<=%s
+        ORDER BY tick,seq
+        """,
+        (
+            run_id,
+            [
+                EXTERNAL_AGENT_REGISTERED,
+                EXTERNAL_KEY_REVOKED,
+                EXTERNAL_AGENT_NATURALISED,
+                EXTERNAL_ACTION_SUBMITTED,
+                EXTERNAL_ACTION_REJECTED,
+                EXTERNAL_DEADLINE_MISSED,
+                EXTERNAL_SIM_AWARE_FLAGGED,
+                EXTERNAL_SESSION_OPENED,
+                EXTERNAL_SESSION_CLOSED,
+            ],
+            as_of_seq,
+        ),
+    )
+
+
 async def write_living_city_projections(
     db: Database,
     result: LivingCityResult,
@@ -129,6 +220,57 @@ async def write_living_city_projections(
     if replace:
         await _clear_projections(db, run_id)
     as_of_seq = result.as_of_seq
+    gateway_events = await _fetch_gateway_events(db, run_id, as_of_seq)
+    external_rows: dict[str, dict[str, Any]] = {}
+    session_rows: dict[str, dict[str, Any]] = {}
+    nonce_rows: dict[str, dict[str, int | str]] = {}
+    for event in gateway_events:
+        kind = int(event["kind"])
+        actor_id = str(event["actor_id"] or "")
+        payload = dict(event["payload"])
+        if kind == EXTERNAL_AGENT_REGISTERED:
+            external_rows[actor_id] = _external_registration_row(actor_id, event, payload)
+            continue
+        if kind == EXTERNAL_SESSION_OPENED:
+            session_id = str(payload["session_id"])
+            session_rows[session_id] = _external_session_row(actor_id, event, payload)
+            continue
+        if kind == EXTERNAL_SESSION_CLOSED:
+            session_id = str(payload["session_id"])
+            session = session_rows.get(session_id)
+            if session is not None:
+                session["closed_tick"] = int(event["tick"])
+                session["close_reason"] = str(payload["reason"])
+            continue
+        row = external_rows.get(actor_id)
+        if row is None:
+            continue
+        if kind == EXTERNAL_KEY_REVOKED:
+            row["revoked_tick"] = int(event["tick"])
+            row["strikes"] = int(_coalesce(payload.get("strikes"), 0))
+        elif kind == EXTERNAL_AGENT_NATURALISED:
+            row["naturalised_tick"] = int(event["tick"])
+            row["resume_grace_until_tick"] = payload.get("resume_grace_until_tick")
+            row["consecutive_misses"] = int(_coalesce(payload.get("consecutive_misses"), 0))
+            row["ticks_driven"] = int(_coalesce(payload.get("ticks_driven"), 0))
+        elif kind == EXTERNAL_ACTION_SUBMITTED:
+            row["actions_submitted"] += 1
+            row["ticks_driven"] += 1
+            row["consecutive_misses"] = 0
+            nonce_rows[actor_id] = {
+                "agent_id": actor_id,
+                "last_nonce": int(payload["nonce"]),
+                "updated_tick": int(event["tick"]),
+            }
+        elif kind == EXTERNAL_ACTION_REJECTED:
+            row["actions_rejected"] += 1
+        elif kind == EXTERNAL_DEADLINE_MISSED:
+            row["deadlines_missed"] += 1
+            row["ticks_driven"] += 1
+            row["consecutive_misses"] = int(_coalesce(payload.get("consecutive_misses"), 0))
+        elif kind == EXTERNAL_SIM_AWARE_FLAGGED:
+            row["sim_aware_count"] += 1
+    session_rows = _registered_session_rows(session_rows, external_rows)
     place_at = {(place.x, place.y): place.place_id for place in result.world.places}
     submitted_seq = {
         str(event.payload["order_id"]): event.seq
@@ -226,14 +368,14 @@ async def write_living_city_projections(
             """
             INSERT INTO agents(
                 run_id,agent_id,born_tick,died_tick,age_years,district_id,place_id,
-                state,as_of_tick,as_of_seq,display_name,kind,traits,needs,health,
+                state,as_of_tick,as_of_seq,display_name,kind,pubkey,traits,needs,health,
                 home_place_id,current_place_id,pos_x,pos_y,dest_place_id,path_cursor,
                 education_level,employment_status,wealth_cents,reputation,
                 reflex_profile,goals,cognition_mode,household_id,mother_id,
                 father_id,generation,died_at_tick,death_cause
             ) VALUES(
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
             )
             """,
             [
@@ -255,7 +397,8 @@ async def write_living_city_projections(
                     result.report.last_tick,
                     as_of_seq,
                     agent.display_name,
-                    "native",
+                    agent.kind,
+                    agent.pubkey,
                     Jsonb(agent.traits.as_dict()),
                     Jsonb(agent.needs.as_dict()),
                     agent.health,
@@ -283,6 +426,100 @@ async def write_living_city_projections(
                 for location in (projected_location(agent.agent_id, agent.home_place_id),)
             ],
         )
+        if external_rows:
+            await cursor.executemany(
+                """
+                INSERT INTO external_agents(
+                    run_id,agent_id,pubkey,operator,contact,display_name,
+                    declared_model,declared_model_version,declared_scaffold,
+                    scaffold_notes,memory,sdk_version,protocol_version,
+                    requested_embodiment,embodiment,conformance_token,twin_agent_id,
+                    registered_tick,admitted_tick,revoked_tick,naturalised_tick,
+                    resume_grace_until_tick,consecutive_misses,ticks_driven,
+                    actions_submitted,actions_rejected,deadlines_missed,
+                    sim_aware_count,strikes,suspensions
+                ) VALUES(
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                [
+                    (
+                        run_id,
+                        row["agent_id"],
+                        row["pubkey"],
+                        row["operator"],
+                        row["contact"],
+                        row["display_name"],
+                        row["declared_model"],
+                        row["declared_model_version"],
+                        row["declared_scaffold"],
+                        row["scaffold_notes"],
+                        row["memory"],
+                        row["sdk_version"],
+                        row["protocol_version"],
+                        row["requested_embodiment"],
+                        row["embodiment"],
+                        row["conformance_token"],
+                        row["twin_agent_id"],
+                        row["registered_tick"],
+                        row["admitted_tick"],
+                        row["revoked_tick"],
+                        row["naturalised_tick"],
+                        row["resume_grace_until_tick"],
+                        row["consecutive_misses"],
+                        row["ticks_driven"],
+                        row["actions_submitted"],
+                        row["actions_rejected"],
+                        row["deadlines_missed"],
+                        row["sim_aware_count"],
+                        row["strikes"],
+                        row["suspensions"],
+                    )
+                    for row in external_rows.values()
+                ],
+            )
+        if session_rows:
+            await cursor.executemany(
+                """
+                INSERT INTO external_sessions(
+                    run_id,session_id,agent_id,custody,delegate_pubkey,client,
+                    opened_tick,expires_unix_ms,closed_tick,close_reason
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row["session_id"],
+                        row["agent_id"],
+                        row["custody"],
+                        row["delegate_pubkey"],
+                        Jsonb(row["client"]),
+                        row["opened_tick"],
+                        row["expires_unix_ms"],
+                        row["closed_tick"],
+                        row["close_reason"],
+                    )
+                    for row in session_rows.values()
+                ],
+            )
+        if nonce_rows:
+            await cursor.executemany(
+                """
+                INSERT INTO external_nonces(
+                    run_id,agent_id,last_nonce,updated_tick
+                ) VALUES(%s,%s,%s,%s)
+                """,
+                [
+                    (
+                        run_id,
+                        row["agent_id"],
+                        row["last_nonce"],
+                        row["updated_tick"],
+                    )
+                    for row in nonce_rows.values()
+                ],
+            )
         if result.demography is not None:
             await cursor.executemany(
                 """
@@ -1399,27 +1636,47 @@ async def write_living_city_projections(
     return as_of_seq
 
 
-async def run_persistent(settings: Settings) -> LivingCityResult:
+async def run_persistent(
+    settings: Settings,
+    *,
+    external_decisions: ExternalDecisionPort | None = None,
+) -> LivingCityResult:
     db = await Database.open(settings.store, role="engine")
     run_id = run_id_for(settings)
     runs = RunRepository(db)
+    completion_cache: CompletionCache | None = None
     try:
         if await runs.get(run_id) is not None:
             raise StoreError(f"run {run_id} already exists; change the config/seed or use replay")
+        completion_cache = CompletionCache(
+            mode=settings.llm.cache.mode,
+            l0_entries=settings.llm.cache.l0_entries,
+            verify_render=settings.llm.cache.verify_render,
+            path=settings.llm.cache.path,
+            namespace=str(run_id),
+            schema_version=settings.llm.cache.schema_version,
+            strict_version=settings.llm.cache.strict_version,
+        )
+        identity = build_run_identity(
+            settings,
+            completion_cache_manifest_hash=completion_cache.manifest_hash(),
+        )
         await runs.create(
             RunRecord(
                 run_id=run_id,
                 name=settings.run.name,
                 config_yaml=config_yaml(settings),
-                config_hash=config_hash(settings),
-                master_seed=settings.run.seed,
-                prompt_manifest=_prompt_manifest(settings),
-                model_manifest=_model_manifest(settings),
-                metric_manifest=catalogue_manifest(),
-                mechanism_manifest=mechanism_manifest(settings),
+                config_hash=identity.config_hash,
+                master_seed=identity.master_seed,
+                prompt_manifest=identity.prompt_manifest,
+                model_manifest=identity.model_manifest,
+                metric_manifest=identity.metric_manifest,
+                mechanism_manifest=identity.mechanism_manifest,
+                completion_cache_manifest=completion_cache.manifest(),
+                completion_cache_manifest_hash=identity.completion_cache_manifest_hash,
                 ablations=settings.ablations.model_dump(mode="json"),
-                scale=settings.population.initial_agents,
-                code_git_sha=repo_git_sha(),
+                scale=identity.scale,
+                code_git_sha=identity.code_git_sha,
                 started_at=utc_now_naive(),
                 status="running",
                 tags=settings.run.tags,
@@ -1437,6 +1694,9 @@ async def run_persistent(settings: Settings) -> LivingCityResult:
                 sink=EventRepository(db, run_id),
                 ephemeral_sink=publisher,
                 collect_events=False,
+                completion_cache=completion_cache,
+                external_decisions=external_decisions,
+                run_identity=identity,
             )
         finally:
             await publisher.close()
@@ -1445,16 +1705,88 @@ async def run_persistent(settings: Settings) -> LivingCityResult:
             result,
             cache_mode=settings.llm.cache.mode,
         )
+        if external_decisions is not None:
+            latency_rows = tuple(external_decisions.latency_rows())
+            if latency_rows:
+                async with db.txn() as connection, connection.cursor() as cursor:
+                    await cursor.executemany(
+                        """
+                        INSERT INTO external_latency(
+                            run_id,agent_id,tick,observation_pushed_ms,
+                            action_received_ms,decision_ms,missed
+                        ) VALUES(%s,%s,%s,%s,%s,%s,%s)
+                        """,
+                        [
+                            (
+                                run_id,
+                                row.agent_id,
+                                row.tick,
+                                row.observation_pushed_ms,
+                                row.action_received_ms,
+                                row.decision_ms,
+                                row.missed,
+                            )
+                            for row in latency_rows
+                        ],
+                    )
+                external_decisions.clear_latency_rows()
+            await db.execute(
+                """
+                UPDATE runs
+                SET tags=array_append(
+                    COALESCE(tags, '{}'::text[]),
+                    'invalid_for_cross_agent_comparison'
+                )
+                WHERE run_id=%s
+                  AND NOT (
+                      'invalid_for_cross_agent_comparison'
+                      =ANY(COALESCE(tags, '{}'::text[]))
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM external_agents
+                      WHERE run_id=%s
+                        AND ticks_driven > 0
+                        AND deadlines_missed::double precision / ticks_driven > %s
+                  )
+                """,
+                (
+                    run_id,
+                    run_id,
+                    settings.research.gates.external_miss_rate_max,
+                ),
+            )
+            await db.execute(
+                """
+                UPDATE runs
+                SET tags=array_append(
+                    COALESCE(tags, '{}'::text[]),
+                    'custody_delegated'
+                )
+                WHERE run_id=%s
+                  AND NOT (
+                      'custody_delegated'=ANY(COALESCE(tags, '{}'::text[]))
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM external_sessions
+                      WHERE run_id=%s AND custody='delegated'
+                  )
+                """,
+                (run_id, run_id),
+            )
         await db.execute(
             """
-            UPDATE runs SET status=%s,ended_at=%s,last_tick=%s,terminal_hash=%s
-            WHERE run_id=%s
+            UPDATE runs
+            SET status=%s,ended_at=%s,last_tick=%s,terminal_hash=%s,
+                completion_cache_manifest=%s,completion_cache_manifest_hash=%s
+            WHERE run_id=%s AND status='running'
             """,
             (
                 result.report.status,
                 utc_now_naive(),
                 result.report.last_tick,
                 result.report.chain_hash,
+                Jsonb(result.completion_cache_manifest),
+                result.completion_cache_manifest_hash,
                 run_id,
             ),
         )
@@ -1465,13 +1797,23 @@ async def run_persistent(settings: Settings) -> LivingCityResult:
         return result
     except Exception:
         if await runs.get(run_id) is not None:
+            manifest = completion_cache.manifest() if completion_cache is not None else {}
+            manifest_hash = (
+                completion_cache.manifest_hash()
+                if completion_cache is not None
+                else EMPTY_COMPLETION_CACHE_MANIFEST_HASH
+            )
             await db.execute(
                 """
-                UPDATE runs SET status='failed',ended_at=%s
+                UPDATE runs
+                SET status='failed',ended_at=%s,
+                    completion_cache_manifest=%s,completion_cache_manifest_hash=%s
                 WHERE run_id=%s AND status='running'
                 """,
-                (utc_now_naive(), run_id),
+                (utc_now_naive(), Jsonb(manifest), manifest_hash, run_id),
             )
         raise
     finally:
+        if completion_cache is not None:
+            await completion_cache.close()
         await db.close()
