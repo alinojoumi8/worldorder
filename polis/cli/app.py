@@ -13,10 +13,28 @@ from uuid import UUID
 import typer
 
 from polis.config.mechanisms import mechanism_manifest
+from polis.config.metric_catalogue import catalogue_markdown, catalogue_payload
 from polis.config.paths import repo_git_sha
 from polis.config.settings import Settings, config_hash, load_settings
 
 app = typer.Typer(no_args_is_help=True, help="POLIS deterministic city simulation")
+metrics_app = typer.Typer(no_args_is_help=True, help="Inspect the research metric registry")
+app.add_typer(metrics_app, name="metrics")
+
+
+@metrics_app.command("catalogue")
+def metrics_catalogue(
+    format_: Annotated[str, typer.Option("--format")] = "md",
+) -> None:
+    """Print the deterministic metric catalogue as Markdown or JSON."""
+
+    if format_ == "md":
+        typer.echo(catalogue_markdown())
+        return
+    if format_ == "json":
+        typer.echo(json.dumps(catalogue_payload(), sort_keys=True))
+        return
+    raise typer.BadParameter("format must be md or json", param_hint="--format")
 
 
 def _run_async[T](operation: Coroutine[Any, Any, T]) -> T:

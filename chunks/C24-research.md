@@ -80,7 +80,7 @@ from dataclasses import dataclass
 from typing import Callable, Final, Literal, Mapping, Protocol, Sequence
 
 Unit = Literal["cents","bp","index_bp","count","ratio_bp","dimensionless_float",
-               "usd","tokens","ticks","sim_days","sim_years"]
+               "usd","tokens","ticks","ms","sim_days","sim_years"]
 Cadence = Literal["tick","sim_day","sim_week","sim_month","sim_quarter",
                   "sim_year","on_event","end_of_run"]
 
