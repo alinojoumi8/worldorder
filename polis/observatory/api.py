@@ -20,6 +20,8 @@ from polis.config.metric_catalogue import (
     M3_METRICS,
     METRICS,
     UNAVAILABLE_M1_METRICS,
+    MetricError,
+    spec,
 )
 from polis.config.runtime_time import utc_now_naive
 from polis.config.settings import Settings, load_settings
@@ -243,11 +245,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "cadence": item.cadence,
                         "definition": item.definition,
                         "research_questions": item.research_questions,
+                        "analogue": item.analogue,
+                        "analogue_caveat": item.analogue_caveat,
+                        "governed_by": item.governed_by,
+                        "moved_by": item.moved_by,
+                        "movement_note": item.movement_note,
+                        "family": item.family,
+                        "implementation_status": item.implementation_status,
                         "definition_hash": item.definition_hash,
                         "available": (
-                            item.metric_id not in UNAVAILABLE_M1_METRICS
-                            or (economy_available and item.metric_id in M2_METRICS)
-                            or (capital_available and item.metric_id in M3_METRICS)
+                            item.implementation_status == "implemented"
+                            and (
+                                item.metric_id not in UNAVAILABLE_M1_METRICS
+                                or (economy_available and item.metric_id in M2_METRICS)
+                                or (capital_available and item.metric_id in M3_METRICS)
+                            )
                         ),
                     }
                     for item in METRICS.values()
@@ -269,19 +281,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         to_tick: int | None = None,
         points: int = Query(2_000, ge=2, le=10_000),
     ) -> dict[str, Any]:
-        if metric in FUTURE_METRICS:
+        try:
+            metric_definition = spec(metric)
+        except MetricError as error:
+            raise HTTPException(404, "metric not registered") from error
+        if metric_definition.implementation_status == "declared":
             raise HTTPException(501, f"{metric} is unavailable until its owning milestone")
-        if metric not in METRICS:
-            raise HTTPException(404, "metric not registered")
         database = db(request)
-        if metric in M2_METRICS or metric in M3_METRICS:
+        registered_metric = metric_definition.metric_id
+        if registered_metric in M2_METRICS or registered_metric in M3_METRICS:
             economy_available, capital_available = await milestone_availability(database, run_id)
-            if metric in M2_METRICS and not economy_available:
+            if registered_metric in M2_METRICS and not economy_available:
                 raise HTTPException(
                     501,
                     f"{metric} is unavailable until the economy milestone",
                 )
-            if metric in M3_METRICS and not capital_available:
+            if registered_metric in M3_METRICS and not capital_available:
                 raise HTTPException(
                     501,
                     f"{metric} is unavailable until the capital milestone",
@@ -301,9 +316,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return _with_freshness(
             {
                 "metric": metric,
-                "definition": METRICS[metric].definition,
-                "unit": METRICS[metric].unit,
-                "cadence": METRICS[metric].cadence,
+                "definition": metric_definition.definition,
+                "unit": metric_definition.unit,
+                "cadence": metric_definition.cadence,
                 "points": [_json_row(row) for row in rows],
             },
             await _freshness(database, run_id),

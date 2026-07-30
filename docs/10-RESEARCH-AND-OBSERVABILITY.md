@@ -146,7 +146,7 @@ def unemployment_rate(state: MetricState) -> float: ...
 | `definition` | Stated **purely in terms of simulation state** — tables, event kinds, and arithmetic. No sentence may reference a human institution. This is the discharge of **T11**. |
 | `analogue` | Named in a **separate field**, never in the definition, never in the id. |
 | `analogue_caveat` | One sentence naming the principal way the two differ. Required; empty string is rejected. |
-| `unit` | `cents · bp · index_bp · count · ratio_bp · dimensionless_float · usd · tokens · ticks · sim_days` |
+| `unit` | `cents · bp · index_bp · count · ratio_bp · dimensionless_float · usd · tokens · ticks · ms · sim_days` |
 | `cadence` | `tick · sim_day · sim_week · sim_month · sim_quarter · sim_year · on_event · end_of_run` |
 | `rq` | Non-empty list of `01-PRD.md` §3 question ids, or `["SYS"]` for system metrics. A metric that serves no research question and is not a system metric is deleted (`02-ARCHITECTURE.md` §1.8). |
 | `definition_hash` | `sha256(id ‖ definition ‖ unit ‖ cadence ‖ dedented source of the function body)`. Computed at import; written to `runs.metric_manifest` and emitted as kind 99070 at tick 0. |
@@ -256,7 +256,7 @@ because 07 does not define them.
 | `turnout.by_quintile`, `turnout.differential` | 07 §10.6 | bp | on_event | A2, B4 |
 | `politics.vote_share.<party_id>` | Votes for the party's candidacies / valid votes cast in the election | bp | on_event | B1, B4 |
 | `politics.enp` | Laakso–Taagepera effective number of parties, `1 / Σ s_i²` over vote shares | dimensionless_float | on_event | B1 |
-| `politics.policy_volatility` | Count of `12030 POLICY_ENACTED` per sim-year over the closed parameter set (`07-SOCIETY-SPEC.md` §7.2), plus mean `|Δ|` in each parameter's normalised range | count / dimensionless_float | sim_year | A4, B4 |
+| `politics.policy_volatility`, `politics.policy_delta_mean` | Count of `12030 POLICY_ENACTED` per sim-year over the closed parameter set (`07-SOCIETY-SPEC.md` §7.2), plus mean `|Δ|` in each parameter's normalised range | count / dimensionless_float | sim_year | A4, B4 |
 | `politics.policy_reversal_rate` | Share of enactments moving a parameter back toward its value two enactments prior | bp | sim_year | B1 |
 | `politics.incumbency_retention` | Elections won by the incumbent officeholder (or their party where the office is party-held), over elections with a running incumbent | bp | sim_year | B4 |
 | `politics.platform_responsiveness` | Correlation across policy propositions between Δ(median voter stance) and Δ(enacted position), over a 1-sim-year lag | dimensionless_float | sim_year | B1, B4 |
@@ -272,8 +272,8 @@ Governed by `07-SOCIETY-SPEC.md` §10.7–§10.9.
 
 | Id | Definition (source) | Unit | Cadence | RQ |
 |---|---|---|---|---|
-| `crime.committed_rate`, `.by_type.<t>` | `|13010 in window| / (living adults · window_sim_years)` | count | sim_month | **B5** |
-| `crime.reported_rate`, `crime.detected_rate` | `13012` / `13011` over the same denominator | count | sim_month | B5 |
+| `crime.committed_rate`, `.by_type.<t>` | `|13010 in window| / (living adults · window_sim_years)` | dimensionless_float | sim_month | **B5** |
+| `crime.reported_rate`, `crime.detected_rate` | `13012` / `13011` over the same denominator | dimensionless_float | sim_month | B5 |
 | `crime.dark_figure` | committed / reported | dimensionless_float | sim_month | B5 |
 | `crime.mean_p_detect` | Mean realised detection probability over crimes live in the window | bp | sim_month | **B5** |
 | `crime.victimisation` | Distinct victims / living adults | bp | sim_month | B5 |
@@ -294,12 +294,13 @@ Governed by `07-SOCIETY-SPEC.md` §9–§10.4 where defined there; the rate metr
 | Id | Definition | Unit | Cadence | RQ |
 |---|---|---|---|---|
 | `demog.population` | `|{agents : died_at_tick IS NULL}|` | count | sim_day | INV-POP |
-| `demog.birth_rate` | `|2001 AGENT_BORN in window| / (mean living population · window_sim_years) × 1000` | count | sim_year | A2, B6 |
-| `demog.death_rate` | `|2002 AGENT_DIED in window|`, same denominator | count | sim_year | A2 |
+| `demog.birth_rate` | `|2001 AGENT_BORN in window| / (mean living population · window_sim_years) × 1000` | dimensionless_float | sim_year | A2, B6 |
+| `demog.death_rate` | `|2002 AGENT_DIED in window|`, same denominator | dimensionless_float | sim_year | A2 |
 | `demog.tfr` | Σ over 5-year age bands of age-specific birth rates × band width, women-equivalent cohort | dimensionless_float | sim_year | — |
 | `demog.life_expectancy_e0` | Period life table constructed from the window's age-specific death rates: `e0 = Σ_x l_x / l_0`. **A synthetic-cohort statistic, not observed longevity** | sim_years | sim_year | A2 |
 | `demog.life_expectancy_gap_q1q5` | `e0` for the bottom vs top wealth quintile at age 30 | sim_years | sim_year | **A2** |
-| `demog.median_age`, `demog.dependency_ratio`, `demog.mean_household_size` | Over living agents / `households` | dimensionless_float | sim_month | — |
+| `demog.median_age` | Median simulation-year age over living agents | sim_years | sim_month | — |
+| `demog.dependency_ratio`, `demog.mean_household_size` | Over living agents / `households` | dimensionless_float | sim_month | — |
 | `demog.net_migration_rate` | (in − out) over mean living population, annualised | bp | sim_year | A2 (see `MECHANISM emigration_hazard`) |
 | `mobility.ige_wealth_age40` (`mobility.iges`) | 07 §10.4 — OLS slope of ln(child wealth at 40) on ln(parent wealth at 40) | dimensionless_float | end_of_run | **A2** |
 | `mobility.rank_rank` | Slope of child wealth percentile on parent wealth percentile. **Preferred over IGE** — robust to zero and negative wealth | dimensionless_float | end_of_run | **A2** |
@@ -322,7 +323,7 @@ of the budget, the parser, or the router.
 | `sys.llm.cache_hit_rate` | `|cache_hit| / |calls|` for the tick; also cumulative and per purpose | bp | tick | D7, §3.7 |
 | `sys.llm.parse_failure_rate` | `|parsed_ok = false| / |calls|`, **broken out by purpose and model** | bp | sim_day | **V7**, `04-AGENT-SPEC.md` §9.2 |
 | `sys.llm.repair_rate` | `|repair_attempts > 0| / |calls|` | bp | sim_day | Model quality |
-| `sys.llm.latency_p50_ms`, `.p99_ms` | Over non-cache-hit calls | ticks (ms) | sim_day | §11 performance |
+| `sys.llm.latency_p50_ms`, `.p99_ms` | Over non-cache-hit calls | ms | sim_day | §11 performance |
 | `sys.cognition.deliberate_share` | `|routed DELIBERATE| / |awake agents|` | bp | tick | **T8, T9** |
 | `sys.cognition.reflect_share`, `.reflex_share` | Same denominator | bp | tick | T9 |
 | `sys.cognition.salience_cutoff`, `.salience_p50`, `.salience_p90` | From kind 4002 | dimensionless_float | tick | **T8** |
@@ -334,7 +335,7 @@ of the budget, the parser, or the router.
 | `sys.text.distinct3` | Distinct trigrams / total trigrams over the sim-day's speech and posts | bp | sim_day | **V4** (mode collapse shows in text first) |
 | `sys.text.embed_cos_mean` | Mean pairwise cosine over a seeded sample of 500 post embeddings | dimensionless_float | sim_day | V4 |
 | `sys.action.reject_rate.<reason>` | `ACTION_REJECTED` by reason over submitted actions | bp | sim_day | `04-AGENT-SPEC.md` §11 |
-| `sys.engine.tick_wall_ms_p50/p99`, `sys.engine.phase_ms.<n>` | Wall-clock, from run metadata only — **never in an event payload** (`02-ARCHITECTURE.md` §4.5) | ticks (ms) | tick | `02` §11 |
+| `sys.engine.tick_wall_ms_p50/p99`, `sys.engine.phase_ms.<n>` | Wall-clock, from run metadata only — **never in an event payload** (`02-ARCHITECTURE.md` §4.5) | ms | tick | `02` §11 |
 | `sys.engine.events_per_tick`, `sys.store.commit_ms` | | count / ms | tick | `02` §11 |
 | `sys.external.deadline_miss_rate`, `sys.external.actions` | From `external_agents` counters | bp / count | sim_day | T12 |
 | `sys.ephemeral.dropped` | Ephemeral frames dropped under Redis backpressure | count | tick | §12 R3 |

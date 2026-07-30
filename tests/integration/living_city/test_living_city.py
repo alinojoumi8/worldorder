@@ -9,7 +9,7 @@ from polis.events.verify import verify_batch
 from polis.living_city import run_living_city
 from polis.run_identity import build_run_identity
 
-GOLDEN_100_HASH = "7aee6c8647dcf502eb437ff7975fb7acc3f862f84c7eb5dbd04420f3c95bbc1f"
+GOLDEN_100_HASH = "e5f6d4f825a58f45db17e2a0b94048b19fe3a01d99a837ebe4be98fc3257f3e4"
 
 
 @pytest.mark.determinism
