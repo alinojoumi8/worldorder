@@ -1652,9 +1652,22 @@ async def run_living_city(
     )
     for handler in engine.handlers():
         loop.register(handler)
-    await router.start()
     try:
-        report = await loop.run(total_ticks)
+        genesis = await loop.complete_genesis_tick()
+        if genesis.halted:
+            report = RunReport(
+                run_id=run_id,
+                first_tick=0,
+                last_tick=0,
+                ticks=1,
+                events=log.last_seq,
+                chain_hash=genesis.chain_hash,
+                status="halted",
+                halt_reason=genesis.halt_reason,
+            )
+        else:
+            await router.start()
+            report = await loop.run(total_ticks)
     finally:
         await router.close()
     if not engine._external_arena_checked:

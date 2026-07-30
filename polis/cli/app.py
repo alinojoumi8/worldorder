@@ -129,6 +129,29 @@ async def _stored_settings(base: Settings, run_id: UUID) -> Settings:
         await database.close()
 
 
+async def _gate_run_from_store(settings: Settings, run_id: UUID) -> dict[str, Any]:
+    from polis.research.gates import gate_run
+    from polis.store.engine import Database
+
+    database = await Database.open(settings.store, role="reader")
+    try:
+        return dict(await gate_run(database, run_id))
+    finally:
+        await database.close()
+
+
+async def _gate_arena_from_store(settings: Settings, run_id: UUID) -> dict[str, Any]:
+    from polis.research.gates import gate_arena
+    from polis.store.engine import Database
+
+    database = await Database.open(settings.store, role="reader")
+    try:
+        gate_arena_result = await gate_arena(database, run_id)
+        return gate_arena_result.as_dict()
+    finally:
+        await database.close()
+
+
 @app.command()
 def resume(
     run_id: UUID,
@@ -152,18 +175,59 @@ def verify(
     run_id: UUID,
     config: Annotated[Path, typer.Option(exists=True)] = Path("configs/baseline.yaml"),
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    arena: Annotated[bool, typer.Option("--arena")] = False,
 ) -> None:
-    """Verify every stored event hash, sequence, tick and payload schema."""
+    """Verify the event chain and, optionally, external-agent liveness."""
+    from polis.research.gates import GateError
+    from polis.store.engine import StoreError
     from polis.store.operations import verify_stored_run
 
     base = load_settings(config)
-    settings = _run_async(_stored_settings(base, run_id))
-    report = _run_async(verify_stored_run(settings, run_id))
-    output = asdict(report)
+    try:
+        settings = _run_async(_stored_settings(base, run_id))
+        report = _run_async(verify_stored_run(settings, run_id))
+        output = asdict(report)
+        arena_failed = False
+        if arena:
+            arena_result = _run_async(_gate_arena_from_store(settings, run_id))
+            output["arena"] = arena_result
+            arena_failed = arena_result["verdict"] == "fail"
+    except (GateError, StoreError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
     typer.echo(
         json.dumps(output, sort_keys=True, default=str) if json_output else yaml_like(output)
     )
-    if not report.ok:
+    if not report.ok or arena_failed:
+        raise typer.Exit(1)
+
+
+@app.command()
+def gate(
+    run_id: Annotated[UUID, typer.Option("--run")],
+    config: Annotated[Path, typer.Option(exists=True)] = Path("configs/baseline.yaml"),
+    out: Annotated[Path | None, typer.Option("--out")] = None,
+) -> None:
+    """Evaluate V1-V4 for a stored run and emit a deterministic gate report."""
+
+    from polis.research.gates import GateError, gate_report_bytes
+    from polis.store.engine import StoreError
+
+    base = load_settings(config)
+    try:
+        settings = _run_async(_stored_settings(base, run_id))
+        report = _run_async(_gate_run_from_store(settings, run_id))
+    except (GateError, StoreError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    payload = gate_report_bytes(report)
+    if out is None:
+        typer.echo(payload.decode("utf-8").rstrip())
+    else:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(payload)
+        typer.echo(str(out))
+    if report["verdict"] == "fail":
         raise typer.Exit(1)
 
 

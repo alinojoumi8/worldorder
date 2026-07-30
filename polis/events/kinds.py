@@ -3423,6 +3423,13 @@ EXTERNAL_GATEWAY_DEGRADED = register_kind(
     persistence=Persistence.PERSISTED,
     schema=_schema("reason", "affected_agent_ids", "tick"),
 )
+VALIDITY_GATE_EVALUATED = register_kind(
+    99060,
+    "VALIDITY_GATE_EVALUATED",
+    owner="polis.research",
+    persistence=Persistence.PERSISTED,
+    schema=_schema("gate_id", "verdict", "statistic", "threshold", "query"),
+)
 METRIC_RECORDED = register_kind(
     99071,
     "METRIC_RECORDED",

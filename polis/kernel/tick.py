@@ -19,7 +19,7 @@ from polis.events.kinds import (
 from polis.events.log import EventLog
 from polis.events.types import Event, NewEvent
 from polis.kernel.clock import Clock
-from polis.kernel.invariants import InvariantRunner, Violation, WorldStateView
+from polis.kernel.invariants import InvariantRunner, Severity, Violation, WorldStateView
 from polis.kernel.rng import RngRegistry
 from polis.kernel.scheduler import Scheduler
 
@@ -143,6 +143,84 @@ class TickLoop:
         self._handlers.append(handler)
         self._handlers.sort(key=lambda item: (item.phase, item.order, item.name))
 
+    def _stage_invariants(
+        self,
+        *,
+        tick: int,
+        sim_time: datetime,
+    ) -> tuple[tuple[Violation, ...], bool, str | None]:
+        results = self.invariants.run(tick, self.state)
+        violations = tuple(result for result in results if isinstance(result, Violation))
+        for violation in violations:
+            self.log.stage(
+                NewEvent(
+                    INVARIANT_VIOLATED,
+                    {
+                        "invariant_id": violation.invariant_id,
+                        "expected": violation.expected,
+                        "actual": violation.actual,
+                        "detail": violation.detail,
+                        "halting": violation.severity == Severity.HALT,
+                    },
+                ),
+                tick=tick,
+                sim_time=sim_time,
+            )
+        halted = self.invariants.should_halt(results)
+        halt_reason = (
+            next(
+                (
+                    violation.invariant_id
+                    for violation in violations
+                    if violation.severity == Severity.HALT
+                ),
+                None,
+            )
+            if halted
+            else None
+        )
+        return violations, halted, halt_reason
+
+    async def complete_genesis_tick(self) -> TickReport:
+        """Evaluate tick-zero invariants and seal genesis before tick one begins."""
+
+        tick = 0
+        violations, halted, halt_reason = self._stage_invariants(
+            tick=tick,
+            sim_time=self.clock.sim_time,
+        )
+        self.log.stage(
+            NewEvent(
+                TICK_COMPLETED,
+                {
+                    "tick": tick,
+                    "event_count": self.log.last_seq + 1,
+                    "actions": 0,
+                    "rejected": 0,
+                    "halted": halted,
+                },
+            ),
+            tick=tick,
+            sim_time=self.clock.sim_time,
+        )
+        committed = await self.log.commit(tick)
+        return TickReport(
+            tick=tick,
+            sim_time=self.clock.sim_time,
+            events=committed.persisted,
+            ephemerals=committed.ephemeral,
+            actions=0,
+            rejected=0,
+            llm_calls=0,
+            cost_usd=Decimal(0),
+            timings_ms={},
+            over_budget=(),
+            violations=violations,
+            chain_hash=committed.chain_hash,
+            halted=halted,
+            halt_reason=halt_reason,
+        )
+
     async def run_tick(self) -> TickReport:
         tick = self.clock.advance()
         if hasattr(self.state, "tick"):
@@ -180,22 +258,10 @@ class TickLoop:
                 first_commit_ephemerals = result.ephemeral
             ctx.timings[phase] = (asyncio.get_running_loop().time() - started) * 1000
 
-        results = self.invariants.run(tick, self.state)
-        violations = tuple(result for result in results if isinstance(result, Violation))
-        for violation in violations:
-            ctx.emit(
-                NewEvent(
-                    INVARIANT_VIOLATED,
-                    {
-                        "invariant_id": violation.invariant_id,
-                        "expected": violation.expected,
-                        "actual": violation.actual,
-                        "detail": violation.detail,
-                        "halting": violation.severity == "halt",
-                    },
-                )
-            )
-        halted = self.invariants.should_halt(results)
+        violations, halted, halt_reason = self._stage_invariants(
+            tick=tick,
+            sim_time=ctx.sim_time,
+        )
         ctx.emit(
             NewEvent(
                 TICK_COMPLETED,
@@ -226,7 +292,7 @@ class TickLoop:
             violations=violations,
             chain_hash=final.chain_hash,
             halted=halted,
-            halt_reason=violations[0].invariant_id if halted else None,
+            halt_reason=halt_reason,
         )
 
     async def run(
