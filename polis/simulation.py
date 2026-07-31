@@ -6,7 +6,7 @@ from uuid import UUID
 
 from polis.config.runtime import RuntimeConfig
 from polis.config.settings import Settings, config_hash
-from polis.events.kinds import RUN_STARTED
+from polis.events.kinds import RUN_STARTED, TICK_COMPLETED
 from polis.events.log import EventLog, MemoryEventSink
 from polis.events.types import Event, NewEvent
 from polis.kernel.clock import Clock, profile_from_settings
@@ -60,6 +60,11 @@ async def run_empty(
     runtime = RuntimeConfig(settings)
     state = NullWorldState()
     invariants = InvariantRunner(clock)
+    genesis_completion = next(
+        (event for event in resume_events if event.kind == TICK_COMPLETED and event.tick == 0),
+        None,
+    )
+    genesis_completed = genesis_completion is not None
     if last is None:
         if run_identity is None:
             identity = build_run_identity(settings)
@@ -90,5 +95,23 @@ async def run_empty(
         invariants=invariants,
         state=state,
     )
+    if genesis_completion is not None and genesis_completion.payload.get("halted") is True:
+        raise ValueError("cannot resume a run halted during genesis")
+    if not genesis_completed:
+        if last is not None and last.tick > 0:
+            raise ValueError("resume event stream is missing tick-zero completion")
+        genesis = await loop.complete_genesis_tick()
+        if genesis.halted:
+            report = RunReport(
+                run_id=run_id,
+                first_tick=0,
+                last_tick=0,
+                ticks=1,
+                events=log.last_seq,
+                chain_hash=genesis.chain_hash,
+                status="halted",
+                halt_reason=genesis.halt_reason,
+            )
+            return SimulationResult(report, tuple(sink.events))
     report = await loop.run(ticks if ticks is not None else settings.run.ticks)
     return SimulationResult(report, tuple(sink.events))
